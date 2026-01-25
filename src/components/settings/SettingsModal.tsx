@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Config } from '../../types/config';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { ProxyTab } from './ProxyTab';
@@ -7,7 +8,8 @@ import { GeneralTab } from './GeneralTab';
 export interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave?: (settings: any) => void;
+  config?: Config | null;
+  onSave?: (config: Config) => void;
 }
 
 type TabType = 'servers' | 'auth' | 'proxies' | 'general';
@@ -32,9 +34,15 @@ const XIcon: React.FC = () => (
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
+  config,
   onSave,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('servers');
+  const [localConfig, setLocalConfig] = useState<Config | null>(config || null);
+
+  React.useEffect(() => {
+    setLocalConfig(config || null);
+  }, [config]);
 
   const tabs: { id: TabType; label: string; icon: string }[] = [
     { id: 'servers', label: 'Servers', icon: '🖥️' },
@@ -44,14 +52,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   ];
 
   const handleSave = () => {
-    if (onSave) {
-      onSave({});
+    if (onSave && localConfig) {
+      onSave(localConfig);
     }
     onClose();
   };
 
   const handleCancel = () => {
     onClose();
+  };
+
+  const handleServersUpdate = (servers: any[]) => {
+    if (localConfig) {
+      setLocalConfig({ ...localConfig, servers });
+    }
+  };
+
+  const handleAuthUpdate = (authentications: any[]) => {
+    if (localConfig) {
+      setLocalConfig({ ...localConfig, authentications });
+    }
+  };
+
+  const handleProxiesUpdate = (proxies: any[]) => {
+    if (localConfig) {
+      setLocalConfig({ ...localConfig, proxies });
+    }
   };
 
   if (!isOpen) return null;
@@ -92,9 +118,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Tab Content */}
           <div className="flex-1 p-6 overflow-y-auto">
-            {activeTab === 'servers' && <ServerTab />}
-            {activeTab === 'auth' && <AuthTab />}
-            {activeTab === 'proxies' && <ProxyTab />}
+            {activeTab === 'servers' && localConfig && (
+              <ServerTab
+                servers={localConfig.servers}
+                authentications={localConfig.authentications}
+                proxies={localConfig.proxies}
+                onServersUpdate={handleServersUpdate}
+              />
+            )}
+            {activeTab === 'auth' && localConfig && (
+              <AuthTab
+                authentications={localConfig.authentications}
+                onAuthUpdate={handleAuthUpdate}
+              />
+            )}
+            {activeTab === 'proxies' && localConfig && (
+              <ProxyTab
+                proxies={localConfig.proxies}
+                onProxiesUpdate={handleProxiesUpdate}
+              />
+            )}
             {activeTab === 'general' && <GeneralTab />}
           </div>
         </div>
