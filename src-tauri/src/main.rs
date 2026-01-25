@@ -7,6 +7,7 @@ mod commands;
 mod config;
 mod ssh_manager;
 mod master_password;
+mod webdav;
 
 use commands::AppState;
 use config::ConfigManager;
@@ -17,7 +18,6 @@ use std::sync::Arc;
 async fn main() {
     let app_data_dir = tauri::api::path::app_data_dir(
         &tauri::Config::default(),
-        &Default::default(),
     )
     .expect("failed to resolve app data dir")
     .join("Resh");
