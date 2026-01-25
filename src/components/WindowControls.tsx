@@ -2,23 +2,36 @@ import React from 'react';
 import { appWindow } from '@tauri-apps/api/window';
 
 export const WindowControls: React.FC = () => {
-  const handleMinimize = () => {
-    appWindow.minimize();
+  const handleMinimize = async () => {
+    try {
+      await appWindow.minimize();
+    } catch (err) {
+      console.error('Failed to minimize window:', err);
+    }
   };
 
-  const handleMaximize = () => {
-    appWindow.toggleMaximize();
+  const handleMaximize = async () => {
+    try {
+      await appWindow.toggleMaximize();
+    } catch (err) {
+      console.error('Failed to maximize window:', err);
+    }
   };
 
-  const handleClose = () => {
-    appWindow.close();
+  const handleClose = async () => {
+    try {
+      await appWindow.close();
+    } catch (err) {
+      console.error('Failed to close window:', err);
+    }
   };
 
   return (
     <div className="window-controls">
       <button
         onClick={handleMinimize}
-        className="window-control-btn minimize-btn"
+        aria-label="Minimize window"
+        className="window-control-btn minimize-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         title="Minimize"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -27,7 +40,8 @@ export const WindowControls: React.FC = () => {
       </button>
       <button
         onClick={handleMaximize}
-        className="window-control-btn maximize-btn"
+        aria-label="Maximize window"
+        className="window-control-btn maximize-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         title="Maximize"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -36,7 +50,8 @@ export const WindowControls: React.FC = () => {
       </button>
       <button
         onClick={handleClose}
-        className="window-control-btn close-btn"
+        aria-label="Close window"
+        className="window-control-btn close-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         title="Close"
       >
         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
