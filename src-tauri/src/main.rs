@@ -4,6 +4,7 @@
 )]
 
 mod config;
+mod ssh_manager;
 
 fn main() {
     tauri::Builder::default()
