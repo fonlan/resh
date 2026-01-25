@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Config } from '../../types/config';
+import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { ProxyTab } from './ProxyTab';
@@ -8,8 +9,6 @@ import { GeneralTab } from './GeneralTab';
 export interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  config?: Config | null;
-  onSave?: (config: Config) => void;
 }
 
 type TabType = 'servers' | 'auth' | 'proxies' | 'general';
@@ -31,31 +30,52 @@ const XIcon: React.FC = () => (
   </svg>
 );
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({
-  isOpen,
-  onClose,
-  config,
-  onSave,
-}) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+  const { config, loading, error, saveConfig } = useConfig();
   const [activeTab, setActiveTab] = useState<TabType>('servers');
-  const [localConfig, setLocalConfig] = useState<Config | null>(config || null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  React.useEffect(() => {
-    setLocalConfig(config || null);
+  // Local state for config
+  const [localConfig, setLocalConfig] = useState<Config | null>(null);
+
+  useEffect(() => {
+    if (config) {
+      setLocalConfig(config);
+      setSaveError(null);
+    }
   }, [config]);
 
-  const tabs: { id: TabType; label: string; icon: string }[] = [
-    { id: 'servers', label: 'Servers', icon: '🖥️' },
-    { id: 'auth', label: 'Authentication', icon: '🔐' },
-    { id: 'proxies', label: 'Proxies', icon: '🔄' },
-    { id: 'general', label: 'General', icon: '⚙️' },
-  ];
+  if (!isOpen) {
+    return null;
+  }
 
-  const handleSave = () => {
-    if (onSave && localConfig) {
-      onSave(localConfig);
+  if (loading) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6">
+          <p className="text-gray-900">Loading configuration...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!localConfig) {
+    return null;
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      // Save to both sync and local parts
+      await saveConfig(localConfig, localConfig);
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Failed to save configuration');
+    } finally {
+      setIsSaving(false);
     }
-    onClose();
   };
 
   const handleCancel = () => {
@@ -63,24 +83,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleServersUpdate = (servers: any[]) => {
-    if (localConfig) {
-      setLocalConfig({ ...localConfig, servers });
-    }
+    setLocalConfig((prev) => (prev ? { ...prev, servers } : null));
   };
 
   const handleAuthUpdate = (authentications: any[]) => {
-    if (localConfig) {
-      setLocalConfig({ ...localConfig, authentications });
-    }
+    setLocalConfig((prev) => (prev ? { ...prev, authentications } : null));
   };
 
   const handleProxiesUpdate = (proxies: any[]) => {
-    if (localConfig) {
-      setLocalConfig({ ...localConfig, proxies });
-    }
+    setLocalConfig((prev) => (prev ? { ...prev, proxies } : null));
   };
 
-  if (!isOpen) return null;
+  const tabs: { id: TabType; label: string; icon: string }[] = [
+    { id: 'servers', label: 'Servers', icon: '🖥️' },
+    { id: 'auth', label: 'Authentication', icon: '🔐' },
+    { id: 'proxies', label: 'Proxies', icon: '🔄' },
+    { id: 'general', label: 'General', icon: '⚙️' },
+  ];
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -118,7 +137,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           {/* Tab Content */}
           <div className="flex-1 p-6 overflow-y-auto">
-            {activeTab === 'servers' && localConfig && (
+            {error && (
+              <div className="bg-red-100 border border-red-400 text-red-700 p-4 rounded-lg mb-4">
+                {error}
+              </div>
+            )}
+
+            {saveError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 p-4 rounded-lg mb-4">
+                {saveError}
+              </div>
+            )}
+
+            {activeTab === 'servers' && (
               <ServerTab
                 servers={localConfig.servers}
                 authentications={localConfig.authentications}
@@ -126,13 +157,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 onServersUpdate={handleServersUpdate}
               />
             )}
-            {activeTab === 'auth' && localConfig && (
+            {activeTab === 'auth' && (
               <AuthTab
                 authentications={localConfig.authentications}
                 onAuthUpdate={handleAuthUpdate}
               />
             )}
-            {activeTab === 'proxies' && localConfig && (
+            {activeTab === 'proxies' && (
               <ProxyTab
                 proxies={localConfig.proxies}
                 onProxiesUpdate={handleProxiesUpdate}
@@ -146,15 +177,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className="flex justify-end gap-3 p-6 border-t border-gray-200">
           <button
             onClick={handleCancel}
-            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium"
+            disabled={isSaving}
+            className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+            disabled={isSaving}
+            className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
-            Save
+            {isSaving && <span className="inline-block animate-spin">⟳</span>}
+            {isSaving ? 'Saving...' : 'Save'}
           </button>
         </div>
       </div>
