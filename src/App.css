@@ -28,6 +28,12 @@
   overflow-y: hidden;
 }
 
+/* Drag spacer - fills space between tabs and right side */
+.drag-spacer {
+  flex: 1;
+  min-width: 80px; /* Ensure sufficient drag area */
+}
+
 .tab {
   display: flex;
   align-items: center;

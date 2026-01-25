@@ -77,7 +77,7 @@ export const MainWindow: React.FC = () => {
   return (
     <div className="main-window">
       {/* Title Bar with drag region */}
-      <div className="title-bar" data-tauri-drag-region>
+      <div className="title-bar">
         {/* Tab Bar */}
         <div className="tab-bar" role="tablist">
           {tabs.map((tab, index) => (
@@ -97,7 +97,6 @@ export const MainWindow: React.FC = () => {
                 draggedTabIndex === index ? 'dragging' : ''
               } ${dropTargetIndex === index ? 'drop-target' : ''}`}
               onClick={() => setActiveTabId(tab.id)}
-              data-tauri-drag-region="false"
             >
               <span className="tab-label">{tab.label}</span>
               <button
@@ -114,6 +113,9 @@ export const MainWindow: React.FC = () => {
           ))}
         </div>
 
+        {/* Drag region spacer - empty area for dragging */}
+        <div className="drag-spacer" data-tauri-drag-region></div>
+
         {/* Right side: Settings button + Window controls */}
         <div className="title-bar-right">
           <button
@@ -121,7 +123,6 @@ export const MainWindow: React.FC = () => {
             onClick={() => setIsSettingsOpen(true)}
             aria-label="Open settings"
             title="Settings"
-            data-tauri-drag-region="false"
           >
             ⚙️
           </button>
