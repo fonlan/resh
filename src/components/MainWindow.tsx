@@ -24,19 +24,27 @@ export const MainWindow: React.FC = () => {
   ]);
 
   const handleTabDragStart = (index: number) => {
+    if (tabs.length <= 1) return;  // No dragging with single tab
     setDraggedTabIndex(index);
   };
 
   const handleTabDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
-    if (draggedTabIndex !== null && draggedTabIndex !== index) {
-      setDropTargetIndex(index);
+    if (draggedTabIndex !== null && draggedTabIndex !== index && dropTargetIndex !== index) {
+      setDropTargetIndex(index);  // Only update if value is different
     }
   };
 
   const handleTabDrop = (e: React.DragEvent, dropIndex: number) => {
     e.preventDefault();
-    if (draggedTabIndex !== null && draggedTabIndex !== dropIndex) {
+    if (
+      draggedTabIndex !== null &&
+      draggedTabIndex !== dropIndex &&
+      draggedTabIndex >= 0 &&
+      draggedTabIndex < tabs.length &&
+      dropIndex >= 0 &&
+      dropIndex < tabs.length
+    ) {
       const newTabs = [...tabs];
       const [draggedTab] = newTabs.splice(draggedTabIndex, 1);
       newTabs.splice(dropIndex, 0, draggedTab);
@@ -49,6 +57,23 @@ export const MainWindow: React.FC = () => {
   const handleTabDragEnd = () => {
     setDraggedTabIndex(null);
     setDropTargetIndex(null);
+  };
+
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+    // Ctrl+ArrowRight: Move tab right
+    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight' && index < tabs.length - 1) {
+      e.preventDefault();
+      const newTabs = [...tabs];
+      [newTabs[index], newTabs[index + 1]] = [newTabs[index + 1], newTabs[index]];
+      setTabs(newTabs);
+    }
+    // Ctrl+ArrowLeft: Move tab left
+    else if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft' && index > 0) {
+      e.preventDefault();
+      const newTabs = [...tabs];
+      [newTabs[index], newTabs[index - 1]] = [newTabs[index - 1], newTabs[index]];
+      setTabs(newTabs);
+    }
   };
 
   if (loading) {
@@ -83,7 +108,7 @@ export const MainWindow: React.FC = () => {
       </header>
 
       {/* Tab Navigation */}
-      <div className="tab-navigation">
+      <div className="tab-navigation" role="tablist">
         {tabs.map((tab, index) => (
           <button
             key={tab.id}
@@ -92,6 +117,11 @@ export const MainWindow: React.FC = () => {
             onDragOver={(e) => handleTabDragOver(e, index)}
             onDrop={(e) => handleTabDrop(e, index)}
             onDragEnd={handleTabDragEnd}
+            onKeyDown={(e) => handleTabKeyDown(e, index)}
+            role="tab"
+            tabIndex={currentTabId === tab.id ? 0 : -1}
+            aria-selected={currentTabId === tab.id}
+            aria-label={`${tab.label} (Tab ${index + 1} of ${tabs.length})`}
             className={`tab ${currentTabId === tab.id ? 'active' : ''} ${draggedTabIndex === index ? 'dragging' : ''} ${dropTargetIndex === index ? 'drop-target' : ''}`}
             onClick={() => setCurrentTabId(tab.id)}
           >
