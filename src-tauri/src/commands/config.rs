@@ -1,11 +1,13 @@
 // src-tauri/src/commands/config.rs
 
 use crate::config::{Config, ConfigManager};
+use crate::master_password::MasterPasswordManager;
 use std::sync::Arc;
 use tauri::State;
 
 pub struct AppState {
     pub config_manager: ConfigManager,
+    pub password_manager: MasterPasswordManager,
 }
 
 #[tauri::command]
