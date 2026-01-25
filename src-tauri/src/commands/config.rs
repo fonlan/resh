@@ -33,6 +33,33 @@ pub async fn save_config(
 }
 
 #[tauri::command]
+pub async fn get_merged_config_encrypted(
+    password: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Config, String> {
+    let sync_config = state.config_manager.load_encrypted_sync_config(&password)?;
+    let local_config = state.config_manager.load_encrypted_local_config(&password)?;
+    Ok(state.config_manager.merge_configs(sync_config, local_config))
+}
+
+#[tauri::command]
+pub async fn save_config_encrypted(
+    sync_part: Config,
+    local_part: Config,
+    password: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state
+        .config_manager
+        .save_encrypted_sync_config(&sync_part, &password)?;
+    state
+        .config_manager
+        .save_encrypted_local_config(&local_part, &password)?;
+
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_app_data_dir(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state
         .config_manager

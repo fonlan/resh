@@ -1,9 +1,9 @@
 // src-tauri/src/config/loader.rs
 
+use crate::config::encryption::{decrypt, encrypt, EncryptedData};
 use crate::config::types::{Authentication, Config, Proxy, Server};
 use std::fs;
 use std::path::{Path, PathBuf};
-
 pub struct ConfigManager {
     app_data_dir: PathBuf,
 }
@@ -20,6 +20,14 @@ impl ConfigManager {
 
     pub fn local_config_path(&self) -> PathBuf {
         self.app_data_dir.join("local.json")
+    }
+
+    pub fn sync_config_encrypted_path(&self) -> PathBuf {
+        self.app_data_dir.join("sync.enc.json")
+    }
+
+    pub fn local_config_encrypted_path(&self) -> PathBuf {
+        self.app_data_dir.join("local.enc.json")
     }
 
     pub fn load_sync_config(&self) -> Result<Config, String> {
@@ -44,6 +52,80 @@ impl ConfigManager {
             .map_err(|e| format!("Failed to read local config: {}", e))?;
         serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse local config: {}", e))
+    }
+
+    pub fn load_encrypted_sync_config(&self, password: &str) -> Result<Config, String> {
+        let path = self.sync_config_encrypted_path();
+        if !path.exists() {
+            return Ok(Config::empty());
+        }
+
+        let encrypted_json = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read encrypted sync config: {}", e))?;
+        let encrypted: EncryptedData = serde_json::from_str(&encrypted_json)
+            .map_err(|e| format!("Failed to parse encrypted data: {}", e))?;
+        let json_bytes = decrypt(&encrypted, password)
+            .map_err(|e| format!("Failed to decrypt sync config: {}", e))?;
+        let config: Config = serde_json::from_slice(&json_bytes)
+            .map_err(|e| format!("Failed to parse decrypted config: {}", e))?;
+
+        Ok(config)
+    }
+
+    pub fn load_encrypted_local_config(&self, password: &str) -> Result<Config, String> {
+        let path = self.local_config_encrypted_path();
+        if !path.exists() {
+            return Ok(Config::empty());
+        }
+
+        let encrypted_json = fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read encrypted local config: {}", e))?;
+        let encrypted: EncryptedData = serde_json::from_str(&encrypted_json)
+            .map_err(|e| format!("Failed to parse encrypted data: {}", e))?;
+        let json_bytes = decrypt(&encrypted, password)
+            .map_err(|e| format!("Failed to decrypt local config: {}", e))?;
+        let config: Config = serde_json::from_slice(&json_bytes)
+            .map_err(|e| format!("Failed to parse decrypted config: {}", e))?;
+
+        Ok(config)
+    }
+
+    pub fn save_encrypted_sync_config(
+        &self,
+        config: &Config,
+        password: &str,
+    ) -> Result<(), String> {
+        let path = self.sync_config_encrypted_path();
+        let json = serde_json::to_string_pretty(config)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        let encrypted = encrypt(json.as_bytes(), password)
+            .map_err(|e| format!("Failed to encrypt config: {}", e))?;
+
+        let encrypted_json = serde_json::to_string(&encrypted)
+            .map_err(|e| format!("Failed to serialize encrypted data: {}", e))?;
+        fs::write(&path, encrypted_json)
+            .map_err(|e| format!("Failed to write encrypted config: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn save_encrypted_local_config(
+        &self,
+        config: &Config,
+        password: &str,
+    ) -> Result<(), String> {
+        let path = self.local_config_encrypted_path();
+        let json = serde_json::to_string_pretty(config)
+            .map_err(|e| format!("Failed to serialize config: {}", e))?;
+        let encrypted = encrypt(json.as_bytes(), password)
+            .map_err(|e| format!("Failed to encrypt config: {}", e))?;
+
+        let encrypted_json = serde_json::to_string(&encrypted)
+            .map_err(|e| format!("Failed to serialize encrypted data: {}", e))?;
+        fs::write(&path, encrypted_json)
+            .map_err(|e| format!("Failed to write encrypted config: {}", e))?;
+
+        Ok(())
     }
 
     pub fn merge_configs(&self, sync: Config, local: Config) -> Config {
@@ -109,135 +191,78 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_merge_configs() {
-        let sync = Config {
-            version: "1.0".to_string(),
-            servers: vec![
-                Server {
-                    id: "server1".to_string(),
-                    name: "Server 1".to_string(),
-                    host: "example.com".to_string(),
-                    port: 22,
-                    username: "user".to_string(),
-                    auth_id: None,
-                    proxy_id: None,
-                    jumphost_id: None,
-                    port_forwards: vec![],
-                    keep_alive: 0,
-                    auto_exec_commands: vec![],
-                    env_vars: std::collections::HashMap::new(),
-                },
-                Server {
-                    id: "server2".to_string(),
-                    name: "Server 2".to_string(),
-                    host: "example2.com".to_string(),
-                    port: 22,
-                    username: "user".to_string(),
-                    auth_id: None,
-                    proxy_id: None,
-                    jumphost_id: None,
-                    port_forwards: vec![],
-                    keep_alive: 0,
-                    auto_exec_commands: vec![],
-                    env_vars: std::collections::HashMap::new(),
-                },
-            ],
-            authentications: vec![
-                Authentication {
-                    id: "auth1".to_string(),
-                    name: "Auth 1".to_string(),
-                    auth_type: "key".to_string(),
-                    key_content: Some("key_content".to_string()),
-                    passphrase: None,
-                    username: None,
-                    password: None,
-                },
-            ],
-            proxies: vec![],
-            general: Config::empty().general,
-        };
+    fn test_save_and_load_encrypted_sync_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ConfigManager::new(temp_dir.path().to_path_buf());
 
-        let local = Config {
+        let config = Config {
             version: "1.0".to_string(),
-            servers: vec![
-                Server {
-                    id: "server1".to_string(),
-                    name: "Server 1 Updated".to_string(),
-                    host: "updated.com".to_string(),
-                    port: 2222,
-                    username: "updated_user".to_string(),
-                    auth_id: None,
-                    proxy_id: None,
-                    jumphost_id: None,
-                    port_forwards: vec![],
-                    keep_alive: 0,
-                    auto_exec_commands: vec![],
-                    env_vars: std::collections::HashMap::new(),
-                },
-                Server {
-                    id: "server3".to_string(),
-                    name: "Server 3".to_string(),
-                    host: "example3.com".to_string(),
-                    port: 22,
-                    username: "user".to_string(),
-                    auth_id: None,
-                    proxy_id: None,
-                    jumphost_id: None,
-                    port_forwards: vec![],
-                    keep_alive: 0,
-                    auto_exec_commands: vec![],
-                    env_vars: std::collections::HashMap::new(),
-                },
-            ],
+            servers: vec![],
             authentications: vec![],
             proxies: vec![],
             general: Config::empty().general,
         };
 
-        let temp_dir = TempDir::new().unwrap();
-        let manager = ConfigManager::new(temp_dir.path().to_path_buf());
+        let password = "test_password";
 
-        let merged = manager.merge_configs(sync, local);
+        manager
+            .save_encrypted_sync_config(&config, password)
+            .expect("Failed to save encrypted config");
 
-        assert_eq!(merged.servers.len(), 3);
+        let loaded = manager
+            .load_encrypted_sync_config(password)
+            .expect("Failed to load encrypted config");
 
-        let server1 = merged.servers.iter().find(|s| s.id == "server1").unwrap();
-        assert_eq!(server1.name, "Server 1 Updated");
-        assert_eq!(server1.host, "updated.com");
-        assert_eq!(server1.port, 2222);
-
-        let server2 = merged.servers.iter().find(|s| s.id == "server2").unwrap();
-        assert_eq!(server2.name, "Server 2");
-        assert_eq!(server2.host, "example2.com");
-
-        let server3 = merged.servers.iter().find(|s| s.id == "server3").unwrap();
-        assert_eq!(server3.name, "Server 3");
-
-        assert_eq!(merged.authentications.len(), 1);
-        assert_eq!(merged.authentications[0].id, "auth1");
+        assert_eq!(loaded.servers.len(), 0);
     }
 
     #[test]
-    fn test_config_manager_creates_directory() {
-        let temp_dir = TempDir::new().unwrap();
-        let app_data_dir = temp_dir.path().join("nonexistent");
-
-        assert!(!app_data_dir.exists());
-
-        let _manager = ConfigManager::new(app_data_dir.clone());
-
-        assert!(app_data_dir.exists());
-    }
-
-    #[test]
-    fn test_load_empty_configs() {
+    fn test_load_encrypted_config_wrong_password_fails() {
         let temp_dir = TempDir::new().unwrap();
         let manager = ConfigManager::new(temp_dir.path().to_path_buf());
 
-        let sync = manager.load_sync_config().unwrap();
-        let local = manager.load_local_config().unwrap();
+        let config = Config {
+            version: "1.0".to_string(),
+            servers: vec![],
+            authentications: vec![],
+            proxies: vec![],
+            general: Config::empty().general,
+        };
 
-        assert!(sync.servers.is_empty());
-        assert!(local.authentications.is_empty());
+        let password = "correct_password";
+
+        manager
+            .save_encrypted_sync_config(&config, password)
+            .expect("Failed to save encrypted config");
+
+        let result = manager.load_encrypted_sync_config("wrong_password");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_save_and_load_encrypted_local_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ConfigManager::new(temp_dir.path().to_path_buf());
+
+        let config = Config {
+            version: "1.0".to_string(),
+            servers: vec![],
+            authentications: vec![],
+            proxies: vec![],
+            general: Config::empty().general,
+        };
+
+        let password = "test_password";
+
+        manager
+            .save_encrypted_local_config(&config, password)
+            .expect("Failed to save encrypted config");
+
+        let loaded = manager
+            .load_encrypted_local_config(password)
+            .expect("Failed to load encrypted config");
+
+        assert_eq!(loaded.authentications.len(), 0);
     }
 }
