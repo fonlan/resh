@@ -1,19 +1,12 @@
-import { useState } from 'react'
-import './App.css'
+import './App.css';
+import { MainWindow } from './components/MainWindow';
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <div className="container">
-      <h1>Resh SSH Client</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-      </div>
+    <div className="app-container">
+      <MainWindow />
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
