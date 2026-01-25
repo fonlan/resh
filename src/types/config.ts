@@ -1,0 +1,80 @@
+// src/types/config.ts
+
+export interface Server {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authId: string | null;
+  proxyId: string | null;
+  jumphostId: string | null;
+  portForwards: PortForward[];
+  keepAlive: number;
+  autoExecCommands: string[];
+  envVars: Record<string, string>;
+}
+
+export interface PortForward {
+  local: number;
+  remote: number;
+}
+
+export interface Authentication {
+  id: string;
+  name: string;
+  type: 'key' | 'password';
+  // For SSH key
+  keyContent?: string;
+  passphrase?: string;
+  // For password
+  username?: string;
+  password?: string;
+}
+
+export interface Proxy {
+  id: string;
+  name: string;
+  type: 'http' | 'socks5';
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+export interface TerminalSettings {
+  fontFamily: string;
+  fontSize: number;
+  cursorStyle: 'block' | 'underline' | 'bar';
+  scrollback: number;
+}
+
+export interface WebDAVSettings {
+  url: string;
+  username: string;
+  password: string;
+}
+
+export interface GeneralSettings {
+  theme: 'light' | 'dark' | 'system';
+  language: 'en' | 'zh-CN';
+  terminal: TerminalSettings;
+  webdav: WebDAVSettings;
+  confirmCloseTab: boolean;
+  confirmExitApp: boolean;
+}
+
+export interface Config {
+  version: string;
+  servers: Server[];
+  authentications: Authentication[];
+  proxies: Proxy[];
+  general: GeneralSettings;
+}
+
+export interface AppState {
+  syncConfig: Config;
+  localConfig: Config;
+  mergedConfig: Config;
+  masterPasswordSet: boolean;
+}
