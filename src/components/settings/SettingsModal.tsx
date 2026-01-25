@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Config } from '../../types/config';
+import { Config, Server, Authentication, Proxy, GeneralSettings } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
@@ -82,16 +82,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     onClose();
   };
 
-  const handleServersUpdate = (servers: any[]) => {
+  const handleServersUpdate = (servers: Server[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, servers } : null));
   };
 
-  const handleAuthUpdate = (authentications: any[]) => {
+  const handleAuthUpdate = (authentications: Authentication[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, authentications } : null));
   };
 
-  const handleProxiesUpdate = (proxies: any[]) => {
+  const handleProxiesUpdate = (proxies: Proxy[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, proxies } : null));
+  };
+
+  const handleGeneralUpdate = (general: GeneralSettings) => {
+    setLocalConfig((prev) => (prev ? { ...prev, general } : null));
   };
 
   const tabs: { id: TabType; label: string; icon: string }[] = [
@@ -169,7 +173,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                 onProxiesUpdate={handleProxiesUpdate}
               />
             )}
-            {activeTab === 'general' && <GeneralTab />}
+            {activeTab === 'general' && (
+              <GeneralTab
+                general={localConfig.general}
+                onGeneralUpdate={handleGeneralUpdate}
+              />
+            )}
           </div>
         </div>
 

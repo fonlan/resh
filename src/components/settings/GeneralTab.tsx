@@ -1,6 +1,12 @@
 import React from 'react';
+import { GeneralSettings } from '../../types/config';
 
-export const GeneralTab: React.FC = () => {
+export interface GeneralTabProps {
+  general: GeneralSettings;
+  onGeneralUpdate: (general: GeneralSettings) => void;
+}
+
+export const GeneralTab: React.FC<GeneralTabProps> = ({ general: _general, onGeneralUpdate: _onGeneralUpdate }) => {
   return (
     <div className="space-y-6">
       <div>
