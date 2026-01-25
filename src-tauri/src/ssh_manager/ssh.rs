@@ -1,67 +1,98 @@
-// src-tauri/src/ssh_manager/ssh.rs
-// SSH Client implementation with russh
+use crate::ssh_manager::handler::ClientHandler;
+use russh::client;
+use russh::ChannelId;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use std::collections::HashMap;
+use tokio::sync::Mutex;
+use lazy_static::lazy_static;
 
-use uuid::Uuid;
+lazy_static! {
+    static ref SESSIONS: Mutex<HashMap<String, (client::Handle<ClientHandler>, ChannelId)>> = Mutex::new(HashMap::new());
+}
 
-/// SSH Client for managing SSH connections
 pub struct SSHClient;
 
 impl SSHClient {
-    /// Connect to an SSH server (MVP stub - returns fake session_id)
-    /// 
-    /// # Arguments
-    /// * `host` - The hostname or IP address of the server
-    /// * `port` - The SSH port (typically 22)
-    /// * `username` - The username to authenticate with
-    /// * `_password` - The password for authentication
-    /// 
-    /// # Returns
-    /// A unique session ID if connection is successful
-    pub fn connect(host: &str, port: u16, username: &str, _password: &str) -> Result<String, String> {
-        // MVP stub: Generate a fake session_id with uuid
-        let session_id = Uuid::new_v4().to_string();
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        username: &str,
+        password: &str,
+        _tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel - unused for now
+    ) -> Result<String, String> {
+        let config = client::Config::default();
+        let config = Arc::new(config);
         
-        log::info!(
-            "SSH Connect stub: host={}, port={}, username={}, session_id={}",
-            host,
-            port,
-            username,
-            session_id
-        );
+        let session_id = uuid::Uuid::new_v4().to_string();
+        
+        let handler = ClientHandler;
+
+        // Connect
+        let mut session = client::connect(config, (host, port), handler)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Auth
+        let auth_res = session
+            .authenticate_password(username, password)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if !auth_res {
+            return Err("Authentication failed".to_string());
+        }
+
+        // Open channel
+        let channel = session
+            .channel_open_session()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Request PTY
+        channel
+            .request_pty(false, "xterm", 80, 24, 0, 0, &[])
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // Start shell
+        channel
+            .request_shell(true)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let channel_id = channel.id();
+
+        // Store session and channel ID
+        {
+            let mut sessions = SESSIONS.lock().await;
+            sessions.insert(session_id.clone(), (session, channel_id));
+        }
         
         Ok(session_id)
     }
 
-    /// Send a command to an SSH session
-    /// 
-    /// # Arguments
-    /// * `session_id` - The session ID obtained from connect()
-    /// * `command` - The command to execute
-    /// 
-    /// # Returns
-    /// The command output
-    pub fn send_command(session_id: &str, command: &str) -> Result<String, String> {
-        log::info!(
-            "SSH Send command: session_id={}, command={}",
-            session_id,
-            command
-        );
-        
-        // MVP stub: Return a dummy response
-        Ok(format!("Output for command: {}", command))
+    pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some((session, channel_id)) = sessions.get_mut(session_id) {
+            session.data(*channel_id, data.to_vec().into()).await.map_err(|_| "Failed to send data".to_string())?;
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
     }
 
-    /// Close an SSH session
-    /// 
-    /// # Arguments
-    /// * `session_id` - The session ID to close
-    /// 
-    /// # Returns
-    /// Result indicating success or failure
-    pub fn close_session(session_id: &str) -> Result<(), String> {
-        log::info!("SSH Close session: session_id={}", session_id);
-        
-        // MVP stub: Just log the closure
+    pub async fn resize(_session_id: &str, _cols: u32, _rows: u32) -> Result<(), String> {
+        // TODO: Implement window_change when handler is fixed
         Ok(())
+    }
+    
+    pub async fn disconnect(session_id: &str) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some((_session, _channel_id)) = sessions.remove(session_id) {
+             Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
     }
 }

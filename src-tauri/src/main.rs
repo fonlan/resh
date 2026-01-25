@@ -27,7 +27,7 @@ async fn main() {
 
     let state = Arc::new(AppState {
         config_manager,
-        master_password_manager,
+        password_manager: master_password_manager,
     });
 
     tauri::Builder::default()
@@ -38,6 +38,7 @@ async fn main() {
             commands::config::get_app_data_dir,
             commands::connection::connect_to_server,
             commands::connection::send_command,
+            commands::connection::resize_terminal,
             commands::connection::close_session,
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,

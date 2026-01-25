@@ -1,14 +1,11 @@
-// src-tauri/src/commands/connection.rs
-// Tauri commands for SSH connection management
-
 use crate::ssh_manager::ssh::SSHClient;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{State, Window};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use super::AppState;
 
-/// Parameters for connecting to an SSH server
 #[derive(Debug, Deserialize)]
 pub struct ConnectParams {
     pub host: String,
@@ -17,79 +14,94 @@ pub struct ConnectParams {
     pub password: String,
 }
 
-/// Response from a successful connection
 #[derive(Debug, Serialize)]
 pub struct ConnectResponse {
     pub session_id: String,
 }
 
-/// Parameters for sending a command
 #[derive(Debug, Deserialize)]
 pub struct CommandParams {
     pub session_id: String,
-    pub command: String,
+    pub command: String, // Kept 'command' name for compatibility, but it's raw input
 }
 
-/// Response from sending a command
 #[derive(Debug, Serialize)]
 pub struct CommandResponse {
     pub output: String,
 }
 
-/// Connect to an SSH server
-/// 
-/// # Arguments
-/// * `params` - Connection parameters (host, port, username, password)
-/// * `state` - Application state
-/// 
-/// # Returns
-/// A session ID for the established connection
+#[derive(Debug, Deserialize)]
+pub struct ResizeParams {
+    pub session_id: String,
+    pub cols: u32,
+    pub rows: u32,
+}
+
 #[tauri::command]
 pub async fn connect_to_server(
+    window: Window,
     params: ConnectParams,
     _state: State<'_, Arc<AppState>>,
 ) -> Result<ConnectResponse, String> {
+    // Create channel for receiving SSH data
+    let (tx, mut rx) = mpsc::channel::<(String, Vec<u8>)>(100);
+
+    // Spawn a task to forward SSH data to frontend events
+    let window_clone = window.clone();
+    tokio::spawn(async move {
+        while let Some((session_id, data)) = rx.recv().await {
+            // Convert bytes to string (lossy) for xterm.js
+            // Note: xterm.js handles UTF-8, so we send string.
+            // Ideally we'd send bytes, but Tauri event payload is JSON string usually.
+            // String::from_utf8_lossy is safe.
+            let text = String::from_utf8_lossy(&data).to_string();
+            
+            if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
+                log::error!("Failed to emit terminal event: {}", e);
+            }
+        }
+    });
+
     let session_id = SSHClient::connect(
         &params.host,
         params.port,
         &params.username,
         &params.password,
-    )?;
+        tx,
+    )
+    .await?;
 
     Ok(ConnectResponse { session_id })
 }
 
-/// Send a command to an SSH session
-/// 
-/// # Arguments
-/// * `params` - Command parameters (session_id, command)
-/// * `state` - Application state
-/// 
-/// # Returns
-/// The command output
 #[tauri::command]
 pub async fn send_command(
     params: CommandParams,
     _state: State<'_, Arc<AppState>>,
 ) -> Result<CommandResponse, String> {
-    let output = SSHClient::send_command(&params.session_id, &params.command)?;
+    // Convert string input to bytes
+    let data = params.command.as_bytes();
+    
+    SSHClient::send_input(&params.session_id, data).await?;
 
-    Ok(CommandResponse { output })
+    // No echo here - the SSH server will echo back if appropriate (default for PTY)
+    Ok(CommandResponse { output: String::new() })
 }
 
-/// Close an SSH session
-/// 
-/// # Arguments
-/// * `session_id` - The session ID to close
-/// * `state` - Application state
-/// 
-/// # Returns
-/// Result indicating success or failure
+#[tauri::command]
+pub async fn resize_terminal(
+    params: ResizeParams,
+    _state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    SSHClient::resize(&params.session_id, params.cols, params.rows).await?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn close_session(
     session_id: String,
     _state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    SSHClient::close_session(&session_id)?;
+    SSHClient::disconnect(&session_id).await?;
     Ok(())
 }
