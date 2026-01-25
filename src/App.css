@@ -92,9 +92,13 @@
   border: 1px solid #444;
   background: #1e1e1e;
   color: #cccccc;
-  cursor: pointer;
+  cursor: grab;
   border-radius: 4px;
-  transition: background-color 0.2s;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+
+.tab:active {
+  cursor: grabbing;
 }
 
 .tab:hover {
@@ -105,6 +109,16 @@
   background: #007acc;
   color: white;
   border-color: #007acc;
+}
+
+.tab.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.tab.drop-target {
+  border-left: 3px solid #007acc;
+  padding-left: calc(1rem - 2px);
 }
 
 .content-area {

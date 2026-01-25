@@ -3,9 +3,53 @@ import { useConfig } from '../hooks/useConfig';
 import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
 
+interface Tab {
+  id: string;
+  label: string;
+  type: 'general' | 'local' | 'sync' | 'terminal';
+  serverId?: string;
+}
+
 export const MainWindow: React.FC = () => {
   const { config, loading, error } = useConfig();
-  const [currentTab, setCurrentTab] = useState<'general' | 'local' | 'sync' | 'terminal'>('general');
+  const [currentTabId, setCurrentTabId] = useState<string>('general');
+  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
+  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+
+  const [tabs, setTabs] = useState<Tab[]>([
+    { id: 'general', label: 'General', type: 'general' },
+    { id: 'local', label: 'Local Config', type: 'local' },
+    { id: 'sync', label: 'Sync Config', type: 'sync' },
+    { id: 'terminal', label: 'Terminal Test', type: 'terminal', serverId: 'loopback-server' },
+  ]);
+
+  const handleTabDragStart = (index: number) => {
+    setDraggedTabIndex(index);
+  };
+
+  const handleTabDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedTabIndex !== null && draggedTabIndex !== index) {
+      setDropTargetIndex(index);
+    }
+  };
+
+  const handleTabDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedTabIndex !== null && draggedTabIndex !== dropIndex) {
+      const newTabs = [...tabs];
+      const [draggedTab] = newTabs.splice(draggedTabIndex, 1);
+      newTabs.splice(dropIndex, 0, draggedTab);
+      setTabs(newTabs);
+    }
+    setDraggedTabIndex(null);
+    setDropTargetIndex(null);
+  };
+
+  const handleTabDragEnd = () => {
+    setDraggedTabIndex(null);
+    setDropTargetIndex(null);
+  };
 
   if (loading) {
     return (
@@ -40,35 +84,25 @@ export const MainWindow: React.FC = () => {
 
       {/* Tab Navigation */}
       <div className="tab-navigation">
-        <button
-          className={`tab ${currentTab === 'general' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('general')}
-        >
-          General
-        </button>
-        <button
-          className={`tab ${currentTab === 'local' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('local')}
-        >
-          Local Config
-        </button>
-        <button
-          className={`tab ${currentTab === 'sync' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('sync')}
-        >
-          Sync Config
-        </button>
-        <button
-          className={`tab ${currentTab === 'terminal' ? 'active' : ''}`}
-          onClick={() => setCurrentTab('terminal')}
-        >
-          Terminal Test
-        </button>
+        {tabs.map((tab, index) => (
+          <button
+            key={tab.id}
+            draggable
+            onDragStart={() => handleTabDragStart(index)}
+            onDragOver={(e) => handleTabDragOver(e, index)}
+            onDrop={(e) => handleTabDrop(e, index)}
+            onDragEnd={handleTabDragEnd}
+            className={`tab ${currentTabId === tab.id ? 'active' : ''} ${draggedTabIndex === index ? 'dragging' : ''} ${dropTargetIndex === index ? 'drop-target' : ''}`}
+            onClick={() => setCurrentTabId(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Content Area */}
       <main className="content-area">
-        {currentTab === 'general' && (
+        {currentTabId === 'general' && (
           <div className="tab-content">
             <h2>General Settings</h2>
             <div className="config-preview">
@@ -78,25 +112,25 @@ export const MainWindow: React.FC = () => {
           </div>
         )}
 
-        {currentTab === 'local' && (
+        {currentTabId === 'local' && (
           <div className="tab-content">
             <h2>Local Configuration</h2>
             <p>Local settings (stored on this machine only)</p>
           </div>
         )}
 
-        {currentTab === 'sync' && (
+        {currentTabId === 'sync' && (
           <div className="tab-content">
             <h2>Sync Configuration</h2>
             <p>Synchronized settings (shared across devices)</p>
           </div>
         )}
-        
-        <div style={{ display: currentTab === 'terminal' ? 'block' : 'none', height: 'calc(100vh - 150px)' }}>
-            <TerminalTab 
-                tabId="test" 
-                serverId="loopback-server" 
-                isActive={currentTab === 'terminal'} 
+
+        <div style={{ display: currentTabId === 'terminal' ? 'block' : 'none', height: 'calc(100vh - 150px)' }}>
+            <TerminalTab
+                tabId="test"
+                serverId="loopback-server"
+                isActive={currentTabId === 'terminal'}
                 onClose={() => {}}
             />
         </div>
