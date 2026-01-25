@@ -1,0 +1,208 @@
+import React, { useState } from 'react';
+import { Authentication } from '../../types/config';
+import { validateRequired, validateUniqueName } from '../../utils/validation';
+
+interface AuthFormProps {
+  auth?: Authentication;
+  existingNames: string[];
+  onSave: (auth: Authentication) => void;
+}
+
+export const AuthForm: React.FC<AuthFormProps> = ({ auth, existingNames, onSave }) => {
+  const [formData, setFormData] = useState<Authentication>(
+    auth || {
+      id: '',
+      name: '',
+      type: 'password',
+      username: '',
+      password: '',
+    }
+  );
+
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+
+    const nameError = validateRequired(formData.name, 'Name');
+    if (nameError) newErrors.name = nameError;
+
+    const uniqueError = validateUniqueName(formData.name, existingNames, auth?.name);
+    if (uniqueError) newErrors.name = uniqueError;
+
+    if (formData.type === 'password') {
+      const usernameError = validateRequired(formData.username, 'Username');
+      if (usernameError) newErrors.username = usernameError;
+
+      const passwordError = validateRequired(formData.password, 'Password');
+      if (passwordError) newErrors.password = passwordError;
+    } else {
+      const keyContentError = validateRequired(formData.keyContent, 'SSH Key Content');
+      if (keyContentError) newErrors.keyContent = keyContentError;
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const handleSave = () => {
+    if (validateForm()) {
+      onSave(formData);
+    }
+  };
+
+  const handleChange = (field: keyof Authentication, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+    // Clear error for this field when user starts typing
+    if (errors[field]) {
+      setErrors((prev) => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
+  const handleTypeChange = (newType: 'password' | 'key') => {
+    handleChange('type', newType);
+    // Clear validation errors for the switched-out fields
+    setErrors((prev) => {
+      const newErrors = { ...prev };
+      if (newType === 'password') {
+        delete newErrors.keyContent;
+        delete newErrors.passphrase;
+      } else {
+        delete newErrors.username;
+        delete newErrors.password;
+      }
+      return newErrors;
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Name */}
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-1">
+          Authentication Name
+        </label>
+        <input
+          type="text"
+          value={formData.name}
+          onChange={(e) => handleChange('name', e.target.value)}
+          placeholder="e.g., My AWS Key, Work Password"
+          className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+            errors.name ? 'border-red-500' : 'border-gray-600'
+          } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+        />
+        {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+      </div>
+
+      {/* Type Toggle */}
+      <div>
+        <label className="block text-sm font-medium text-gray-300 mb-2">
+          Authentication Type
+        </label>
+        <div className="flex gap-4">
+          {(['password', 'key'] as const).map((type) => (
+            <label key={type} className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="authType"
+                value={type}
+                checked={formData.type === type}
+                onChange={() => handleTypeChange(type)}
+                className="w-4 h-4"
+              />
+              <span className="text-gray-300 capitalize">
+                {type === 'key' ? 'SSH Key' : 'Password'}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* Password Authentication Fields */}
+      {formData.type === 'password' && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Username
+            </label>
+            <input
+              type="text"
+              value={formData.username || ''}
+              onChange={(e) => handleChange('username', e.target.value)}
+              placeholder="e.g., ubuntu"
+              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                errors.username ? 'border-red-500' : 'border-gray-600'
+              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            />
+            {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Password
+            </label>
+            <input
+              type="password"
+              value={formData.password || ''}
+              onChange={(e) => handleChange('password', e.target.value)}
+              placeholder="Enter password"
+              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                errors.password ? 'border-red-500' : 'border-gray-600'
+              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+            />
+            {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+          </div>
+        </>
+      )}
+
+      {/* SSH Key Authentication Fields */}
+      {formData.type === 'key' && (
+        <>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              SSH Key Content
+            </label>
+            <textarea
+              value={formData.keyContent || ''}
+              onChange={(e) => handleChange('keyContent', e.target.value)}
+              placeholder="Paste your SSH private key here (-----BEGIN PRIVATE KEY-----...)"
+              rows={6}
+              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                errors.keyContent ? 'border-red-500' : 'border-gray-600'
+              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs`}
+            />
+            {errors.keyContent && <p className="text-red-400 text-xs mt-1">{errors.keyContent}</p>}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">
+              Key Passphrase (Optional)
+            </label>
+            <input
+              type="password"
+              value={formData.passphrase || ''}
+              onChange={(e) => handleChange('passphrase', e.target.value)}
+              placeholder="Enter passphrase if your key is encrypted"
+              className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </>
+      )}
+
+      {/* Save Button */}
+      <button
+        onClick={handleSave}
+        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors"
+      >
+        Save Authentication
+      </button>
+    </div>
+  );
+};
