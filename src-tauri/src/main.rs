@@ -23,11 +23,11 @@ async fn main() {
     .join("Resh");
 
     let config_manager = ConfigManager::new(app_data_dir.clone());
-    let password_manager = MasterPasswordManager::new(&app_data_dir);
-    
+    let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
+
     let state = Arc::new(AppState {
         config_manager,
-        password_manager,
+        master_password_manager,
     });
 
     tauri::Builder::default()
@@ -42,6 +42,7 @@ async fn main() {
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,
             commands::master_password::verify_master_password,
+            commands::sync::sync_webdav,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

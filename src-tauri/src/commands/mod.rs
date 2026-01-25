@@ -7,3 +7,5 @@ pub use connection::{connect_to_server, send_command, close_session};
 pub use master_password::{
     get_master_password_status, set_master_password, verify_master_password,
 };
+pub mod sync;
+pub use sync::sync_webdav;
