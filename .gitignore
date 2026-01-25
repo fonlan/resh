@@ -1,0 +1,39 @@
+# Node
+node_modules/
+dist/
+.pnp
+.pnp.js
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+.env
+.env.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Build
+dist/
+out/
+*.exe
+*.dmg
+*.AppImage
+
+# Sensitive files
+.env*.local
+*.pem
+*.key
