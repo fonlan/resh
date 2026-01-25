@@ -82,19 +82,29 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({ tabId, serverId, isAct
   useEffect(() => {
     if (!terminal || !sessionId) return;
 
-    const handleResize = () => {
-      const cols = terminal.cols || 80;
-      const rows = terminal.rows || 24;
+    let resizeTimeout: ReturnType<typeof setTimeout>;
 
-      invoke('resize_terminal', {
-        sessionId,
-        cols,
-        rows,
-      }).catch(err => console.error('Resize failed:', err));
+    const handleResize = () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => {
+        const cols = terminal.cols || 80;
+        const rows = terminal.rows || 24;
+
+        invoke('resize_terminal', {
+          params: {
+            session_id: sessionId,
+            cols,
+            rows,
+          }
+        }).catch(err => console.error('Terminal resize failed:', err));
+      }, 300);
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    return () => {
+      clearTimeout(resizeTimeout);
+      window.removeEventListener('resize', handleResize);
+    };
   }, [terminal, sessionId]);
 
   return (
