@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useConfig } from '../hooks/useConfig';
+import { TerminalTab } from './TerminalTab';
+import { WindowControls } from './WindowControls';
 
 export const MainWindow: React.FC = () => {
   const { config, loading, error } = useConfig();
-  const [currentTab, setCurrentTab] = useState<'general' | 'local' | 'sync'>('general');
+  const [currentTab, setCurrentTab] = useState<'general' | 'local' | 'sync' | 'terminal'>('general');
 
   if (loading) {
     return (
@@ -26,13 +28,14 @@ export const MainWindow: React.FC = () => {
 
   return (
     <div className="main-window">
-      {/* Header */}
-      <header className="app-header">
+      {/* Header with drag region and window controls */}
+      <header className="app-header" data-tauri-drag-region>
         <h1>Resh Configuration Manager</h1>
         <div className="header-actions">
           <button className="btn btn-secondary">Reload</button>
           <button className="btn btn-primary">Save</button>
         </div>
+        <WindowControls />
       </header>
 
       {/* Tab Navigation */}
@@ -54,6 +57,12 @@ export const MainWindow: React.FC = () => {
           onClick={() => setCurrentTab('sync')}
         >
           Sync Config
+        </button>
+        <button
+          className={`tab ${currentTab === 'terminal' ? 'active' : ''}`}
+          onClick={() => setCurrentTab('terminal')}
+        >
+          Terminal Test
         </button>
       </div>
 
@@ -82,6 +91,15 @@ export const MainWindow: React.FC = () => {
             <p>Synchronized settings (shared across devices)</p>
           </div>
         )}
+        
+        <div style={{ display: currentTab === 'terminal' ? 'block' : 'none', height: 'calc(100vh - 150px)' }}>
+            <TerminalTab 
+                tabId="test" 
+                serverId="loopback-server" 
+                isActive={currentTab === 'terminal'} 
+                onClose={() => {}}
+            />
+        </div>
       </main>
 
       {/* Footer */}

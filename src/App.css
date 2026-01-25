@@ -14,43 +14,128 @@
 .app-header,
 .app-footer {
   padding: 1rem;
-  background: #f5f5f5;
-  border-bottom: 1px solid #ddd;
+  background: #2d2d2d;
+  border-bottom: 1px solid #444;
+  color: #e0e0e0;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  position: relative;
+}
+
+.app-header h1 {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0;
+  user-select: none;
+}
+
+.app-header .header-actions {
+  margin-left: auto;
+  margin-right: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
 }
 
 .app-footer {
-  border-top: 1px solid #ddd;
+  border-top: 1px solid #444;
   border-bottom: none;
+  background: #1e1e1e;
+}
+
+/* Window Controls */
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-left: 0;
+}
+
+.window-control-btn {
+  width: 48px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #e0e0e0;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  padding: 0;
+  outline: none;
+}
+
+.window-control-btn:hover {
+  background: #404040;
+}
+
+.window-control-btn.close-btn:hover {
+  background: #e81123;
+  color: white;
+}
+
+.window-control-btn svg {
+  pointer-events: none;
 }
 
 .tab-navigation {
   display: flex;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  background: #fafafa;
+  background: #252526;
+  border-bottom: 1px solid #444;
 }
 
 .tab {
   padding: 0.5rem 1rem;
-  border: 1px solid #ddd;
-  background: white;
+  border: 1px solid #444;
+  background: #1e1e1e;
+  color: #cccccc;
   cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.tab:hover {
+  background: #2d2d2d;
 }
 
 .tab.active {
-  background: #007bff;
+  background: #007acc;
   color: white;
+  border-color: #007acc;
 }
 
 .content-area {
   flex: 1;
   padding: 1rem;
   overflow-y: auto;
+  background: #1e1e1e;
+  color: #cccccc;
+}
+
+.tab-content h2 {
+  color: #e0e0e0;
+  margin-bottom: 1rem;
+}
+
+.tab-content p {
+  color: #cccccc;
 }
 
 .config-preview pre {
-  background: #f5f5f5;
+  background: #252526;
+  color: #d4d4d4;
   padding: 1rem;
   border-radius: 4px;
   overflow-x: auto;
+  border: 1px solid #444;
+}
+
+.footer-info {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  color: #888;
 }
