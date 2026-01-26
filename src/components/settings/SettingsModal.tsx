@@ -5,6 +5,7 @@ import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { ProxyTab } from './ProxyTab';
 import { GeneralTab } from './GeneralTab';
+import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
 
 export interface SettingsModalProps {
@@ -35,15 +36,13 @@ const XIcon: React.FC = () => (
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer }) => {
   const { config, loading, error, saveConfig } = useConfig();
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabType>('servers');
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Local state for config
   const [localConfig, setLocalConfig] = useState<Config | null>(null);
-
-  // Ref to track if this is the initial load
-  const isInitialLoad = useRef(true);
 
   // Ref for debounce timer
   const saveTimeoutRef = useRef<number | null>(null);
@@ -54,36 +53,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   // Ref to store the last saved config to detect actual changes
   const lastSavedConfigRef = useRef<string | null>(null);
 
+  // Ref to store the original config for comparison
+  const originalConfigRef = useRef<Config | null>(null);
+
+  // Ref to track if a save is in progress to prevent race conditions
+  const isSavingRef = useRef(false);
+
   // Initialize local config when config loads
   useEffect(() => {
     if (config) {
+      // Only set original config if not already set
+      if (!originalConfigRef.current) {
+        originalConfigRef.current = config;
+      }
+
       setLocalConfig(config);
       setSaveError(null);
-      isInitialLoad.current = true;
       lastSavedConfigRef.current = JSON.stringify(config);
     }
   }, [config]);
 
   // Auto-save when localConfig changes
   useEffect(() => {
-    // Skip auto-save on initial load
-    if (isInitialLoad.current) {
-      isInitialLoad.current = false;
-      return;
-    }
-
     if (!localConfig) {
       return;
     }
 
     // Check if config actually changed
     const currentConfigStr = JSON.stringify(localConfig);
-    console.log('SettingsModal: Checking for changes...');
+    
     if (currentConfigStr === lastSavedConfigRef.current) {
-      console.log('SettingsModal: No changes detected.');
       return; // No actual changes, skip save
     }
-    console.log('SettingsModal: Changes detected, scheduling save.');
+
+    // Don't start a new save if one is already in progress
+    if (isSavingRef.current) {
+      return;
+    }
 
     // Clear existing timeouts
     if (saveTimeoutRef.current) {
@@ -99,9 +105,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
     // Debounce: wait 800ms after last change before saving
     saveTimeoutRef.current = window.setTimeout(async () => {
+      isSavingRef.current = true;
       try {
-        await saveConfig(localConfig, localConfig);
-        lastSavedConfigRef.current = JSON.stringify(localConfig);
+        // For general settings (theme, language), they should ONLY be saved to local config
+        // The sync part should NOT include updated general settings
+        // So we use the original general for sync (from when modal opened)
+        const syncPart = originalConfigRef.current
+          ? { ...localConfig, general: originalConfigRef.current.general }
+          : localConfig;
+        const localPart = localConfig;
+
+        await saveConfig(syncPart, localPart);
+
+        lastSavedConfigRef.current = JSON.stringify(localPart);
+
         setSaveStatus('saved');
 
         // Reset to idle after 1.5 seconds
@@ -111,6 +128,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       } catch (err) {
         setSaveStatus('error');
         setSaveError(err instanceof Error ? err.message : 'Failed to save configuration');
+      } finally {
+        isSavingRef.current = false;
       }
     }, 800);
 
@@ -161,10 +180,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   };
 
   const tabs: { id: TabType; label: string; icon: string }[] = [
-    { id: 'servers', label: 'Servers', icon: '🖥️' },
-    { id: 'auth', label: 'Authentication', icon: '🔐' },
-    { id: 'proxies', label: 'Proxies', icon: '🔄' },
-    { id: 'general', label: 'General', icon: '⚙️' },
+    { id: 'servers', label: t.servers, icon: '🖥️' },
+    { id: 'auth', label: t.auth, icon: '🔐' },
+    { id: 'proxies', label: t.proxies, icon: '🔄' },
+    { id: 'general', label: t.general, icon: '⚙️' },
   ];
 
   return (
@@ -173,18 +192,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
         {/* Header */}
         <div className="settings-header">
           <div className="settings-header-left">
-            <h2>Settings</h2>
+            <h2>{t.settings}</h2>
             {/* Save Status Indicator */}
             {saveStatus !== 'idle' && (
               <span className={`save-status save-status-${saveStatus}`}>
                 {saveStatus === 'saving' && (
                   <>
                     <span className="spinner">⟳</span>
-                    Saving...
+                    {t.saveStatus.saving}
                   </>
                 )}
-                {saveStatus === 'saved' && '✓ Saved'}
-                {saveStatus === 'error' && '⚠ Error saving'}
+                {saveStatus === 'saved' && `✓ ${t.saveStatus.saved}`}
+                {saveStatus === 'error' && `⚠ ${t.saveStatus.error}`}
               </span>
             )}
           </div>

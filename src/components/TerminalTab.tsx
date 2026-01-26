@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
-import { Server, Authentication, Proxy } from '../types/config';
+import { Server, Authentication, Proxy, TerminalSettings } from '../types/config';
 
 type UnlistenFn = () => void;
 
@@ -14,6 +14,8 @@ interface TerminalTabProps {
   server: Server;
   authentications: Authentication[];
   proxies: Proxy[];
+  terminalSettings?: TerminalSettings;
+  theme?: 'light' | 'dark' | 'system';
 }
 
 export const TerminalTab: React.FC<TerminalTabProps> = ({
@@ -23,9 +25,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   server,
   authentications,
   proxies: _proxies,
+  terminalSettings,
+  theme,
 }) => {
   const containerId = `terminal-${tabId}`;
-  const { terminal, write } = useTerminal(containerId);
+  const { terminal, write } = useTerminal(containerId, terminalSettings, theme);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const connectedRef = useRef(false);
   const authenticationsRef = useRef(authentications);

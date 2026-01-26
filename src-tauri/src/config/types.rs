@@ -83,6 +83,8 @@ pub struct GeneralSettings {
     pub webdav: WebDAVSettings,
     pub confirm_close_tab: bool,
     pub confirm_exit_app: bool,
+    #[serde(default)]
+    pub recent_server_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +120,7 @@ impl Config {
                 },
                 confirm_close_tab: true,
                 confirm_exit_app: true,
+                recent_server_ids: vec![],
             },
         }
     }

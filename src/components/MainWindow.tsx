@@ -196,6 +196,8 @@ export const MainWindow: React.FC = () => {
                   server={server}
                   authentications={config?.authentications || []}
                   proxies={config?.proxies || []}
+                  terminalSettings={config?.general.terminal}
+                  theme={config?.general.theme}
                 />
               </div>
             );

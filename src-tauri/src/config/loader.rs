@@ -166,13 +166,9 @@ impl ConfigManager {
         let mut proxies: Vec<Proxy> = proxies_map.into_values().collect();
         proxies.sort_by(|a, b| a.id.cmp(&b.id));
 
-        let general = if local.general.theme != "dark"
-            || local.general.language != "en"
-        {
-            local.general
-        } else {
-            sync.general
-        };
+        // General settings should always prefer local over sync
+        // as these are machine-specific preferences
+        let general = local.general;
 
         Config {
             version: sync.version,

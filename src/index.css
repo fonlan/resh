@@ -1,5 +1,5 @@
 :root {
-  /* Modern Color Palette */
+  /* Modern Color Palette - Dark Theme (Default) */
   --bg-primary: #0a0e27;
   --bg-secondary: #151932;
   --bg-tertiary: #1a1f3a;
@@ -38,6 +38,40 @@
   /* Transitions */
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-smooth: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Light Theme */
+:root.theme-light {
+  --bg-primary: #f5f7fa;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ecf1;
+  --bg-elevated: #ffffff;
+
+  --text-primary: #1a202c;
+  --text-secondary: #4a5568;
+  --text-muted: #718096;
+
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glow-cyan: 0 0 20px rgba(0, 245, 255, 0.2);
+  --glow-purple: 0 0 20px rgba(176, 38, 255, 0.2);
+}
+
+/* Dark Theme (explicit) */
+:root.theme-dark {
+  --bg-primary: #0a0e27;
+  --bg-secondary: #151932;
+  --bg-tertiary: #1a1f3a;
+  --bg-elevated: #1e2542;
+
+  --text-primary: #e8eaf0;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  --glass-bg: rgba(26, 31, 58, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glow-cyan: 0 0 20px rgba(0, 245, 255, 0.3);
+  --glow-purple: 0 0 20px rgba(176, 38, 255, 0.3);
 }
 
 * {
