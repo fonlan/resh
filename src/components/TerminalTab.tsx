@@ -32,6 +32,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const { terminal, write } = useTerminal(containerId, terminalSettings, theme);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const connectedRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
   const authenticationsRef = useRef(authentications);
 
   // Update ref when authentications changes (but don't trigger reconnection)
@@ -78,6 +79,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
         const response = await invoke<{ session_id: string }>('connect_to_server', { params });
         const sid = response.session_id;
+        sessionIdRef.current = sid;
         setSessionId(sid);
         write(`Connected! Session ID: ${sid}\r\n`);
 
@@ -100,9 +102,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     return () => {
       if (outputUnlistener) outputUnlistener();
       if (closedUnlistener) closedUnlistener();
-      connectedRef.current = false;
+      
+      const currentSid = sessionIdRef.current;
+      if (currentSid) {
+        invoke('close_session', { session_id: currentSid }).catch(err => 
+          console.error(`Failed to close session ${currentSid}:`, err)
+        );
+      }
     };
-  }, [server]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, write]);
 
   useEffect(() => {
     if (!terminal || !sessionId) return;
