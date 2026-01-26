@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Server {
     pub id: String,
     pub name: String,
@@ -13,19 +14,25 @@ pub struct Server {
     pub auth_id: Option<String>,
     pub proxy_id: Option<String>,
     pub jumphost_id: Option<String>,
+    #[serde(default)]
     pub port_forwards: Vec<PortForward>,
+    #[serde(default)]
     pub keep_alive: u32,
+    #[serde(default)]
     pub auto_exec_commands: Vec<String>,
+    #[serde(default)]
     pub env_vars: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PortForward {
     pub local: u16,
     pub remote: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Authentication {
     pub id: String,
     pub name: String,
@@ -38,6 +45,7 @@ pub struct Authentication {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Proxy {
     pub id: String,
     pub name: String,
@@ -50,6 +58,7 @@ pub struct Proxy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u32,
@@ -58,6 +67,7 @@ pub struct TerminalSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WebDAVSettings {
     pub url: String,
     pub username: String,
@@ -65,6 +75,7 @@ pub struct WebDAVSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
     pub theme: String,
     pub language: String,
@@ -75,6 +86,7 @@ pub struct GeneralSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Config {
     pub version: String,
     pub servers: Vec<Server>,

@@ -1,3 +1,45 @@
+:root {
+  /* Modern Color Palette */
+  --bg-primary: #0a0e27;
+  --bg-secondary: #151932;
+  --bg-tertiary: #1a1f3a;
+  --bg-elevated: #1e2542;
+
+  /* Accent Colors */
+  --accent-cyan: #00f5ff;
+  --accent-purple: #b026ff;
+  --accent-blue: #4d7cff;
+
+  /* Text Colors */
+  --text-primary: #e8eaf0;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+
+  /* Functional Colors */
+  --color-danger: #ff4757;
+  --color-success: #00d26a;
+  --color-warning: #ffc107;
+
+  /* Effects */
+  --glass-bg: rgba(26, 31, 58, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glow-cyan: 0 0 20px rgba(0, 245, 255, 0.3);
+  --glow-purple: 0 0 20px rgba(176, 38, 255, 0.3);
+
+  /* Typography */
+  --font-display: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Spacing */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -5,24 +47,48 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  background: #1e1e1e;
-  color: #cccccc;
+  background: var(--bg-primary);
+  background-image:
+    radial-gradient(ellipse at top, rgba(77, 124, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(176, 38, 255, 0.06) 0%, transparent 50%);
+  color: var(--text-primary);
+  overflow: hidden;
 }
 
-html {
-  height: 100%;
-}
-
-body {
-  margin: 0;
+html, body {
   height: 100%;
 }
 
 #root {
   height: 100%;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--accent-cyan), var(--accent-purple));
+  border-radius: 4px;
+  transition: opacity var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  opacity: 0.8;
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 245, 255, 0.2);
+  color: var(--text-primary);
 }

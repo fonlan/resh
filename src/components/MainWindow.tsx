@@ -2,6 +2,11 @@ import React, { useState } from 'react';
 import { SettingsModal } from './settings/SettingsModal';
 import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
+import { WelcomeScreen } from './WelcomeScreen';
+import { NewTabButton } from './NewTabButton';
+import { useConfig } from '../hooks/useConfig';
+import { generateId } from '../utils/idGenerator';
+import { addRecentServer, getRecentServers } from '../utils/recentServers';
 
 interface Tab {
   id: string;
@@ -10,6 +15,7 @@ interface Tab {
 }
 
 export const MainWindow: React.FC = () => {
+  const { config, saveConfig } = useConfig();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -74,6 +80,32 @@ export const MainWindow: React.FC = () => {
     }
   };
 
+  const handleAddTab = async (serverId: string) => {
+    const server = config?.servers.find(s => s.id === serverId);
+    if (!server) return;
+
+    const newTab: Tab = {
+      id: generateId(),
+      label: server.name,
+      serverId: server.id
+    };
+
+    setTabs(prev => [...prev, newTab]);
+    setActiveTabId(newTab.id);
+
+    if (config) {
+      const updatedGeneral = addRecentServer(config.general, serverId);
+      await saveConfig(config, { ...config, general: updatedGeneral });
+    }
+  };
+
+  const handleConnectServer = (serverId: string) => {
+    handleAddTab(serverId);
+    setIsSettingsOpen(false);
+  };
+
+  const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, 3) : [];
+
   return (
     <div className="main-window">
       {/* Title Bar with drag region */}
@@ -111,6 +143,11 @@ export const MainWindow: React.FC = () => {
               </button>
             </button>
           ))}
+          <NewTabButton
+            servers={config?.servers || []}
+            onServerSelect={handleAddTab}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
         </div>
 
         {/* Drag region spacer - empty area for dragging */}
@@ -133,35 +170,36 @@ export const MainWindow: React.FC = () => {
       {/* Content Area */}
       <div className="content-area">
         {tabs.length === 0 ? (
-          <div className="welcome-screen">
-            <div className="welcome-content">
-              <h1>Welcome to Resh</h1>
-              <p>SSH Terminal Client</p>
-              <button
-                className="btn-primary"
-                onClick={() => setIsSettingsOpen(true)}
-              >
-                Open Settings
-              </button>
-            </div>
-          </div>
+          <WelcomeScreen
+            servers={recentServers}
+            onServerClick={handleAddTab}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+          />
         ) : (
-          tabs.map((tab) => (
-            <div
-              key={tab.id}
-              style={{
-                display: activeTabId === tab.id ? 'block' : 'none',
-                height: '100%',
-              }}
-            >
-              <TerminalTab
-                tabId={tab.id}
-                serverId={tab.serverId}
-                isActive={activeTabId === tab.id}
-                onClose={() => handleCloseTab(tab.id)}
-              />
-            </div>
-          ))
+          tabs.map((tab) => {
+            const server = config?.servers.find(s => s.id === tab.serverId);
+            if (!server) return null;
+
+            return (
+              <div
+                key={tab.id}
+                style={{
+                  display: activeTabId === tab.id ? 'block' : 'none',
+                  height: '100%',
+                }}
+              >
+                <TerminalTab
+                  tabId={tab.id}
+                  serverId={tab.serverId}
+                  isActive={activeTabId === tab.id}
+                  onClose={() => handleCloseTab(tab.id)}
+                  server={server}
+                  authentications={config?.authentications || []}
+                  proxies={config?.proxies || []}
+                />
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -169,6 +207,7 @@ export const MainWindow: React.FC = () => {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onConnectServer={handleConnectServer}
       />
     </div>
   );

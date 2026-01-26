@@ -1,7 +1,6 @@
 // src-tauri/src/commands/master_password.rs
 // Tauri commands for master password management
 
-use crate::master_password::MasterPasswordManager;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use std::sync::Arc;

@@ -32,6 +32,7 @@ pub async fn save_config(
     Ok(())
 }
 
+#[allow(dead_code)]
 #[tauri::command]
 pub async fn get_merged_config_encrypted(
     password: String,
@@ -42,6 +43,7 @@ pub async fn get_merged_config_encrypted(
     Ok(state.config_manager.merge_configs(sync_config, local_config))
 }
 
+#[allow(dead_code)]
 #[tauri::command]
 pub async fn save_config_encrypted(
     sync_part: Config,

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Proxy } from '../../types/config';
 import { FormModal } from '../FormModal';
-import { ProxyForm } from './ProxyForm';
+import { ProxyForm, ProxyFormHandle } from './ProxyForm';
 import { generateId } from '../../utils/idGenerator';
 
 interface ProxyTabProps {
@@ -9,9 +9,44 @@ interface ProxyTabProps {
   onProxiesUpdate: (proxies: Proxy[]) => void;
 }
 
+// Edit icon component
+const EditIcon: React.FC = () => (
+  <svg
+    className="w-5 h-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+  </svg>
+);
+
+// Delete icon component
+const DeleteIcon: React.FC = () => (
+  <svg
+    className="w-5 h-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+    <line x1="10" y1="11" x2="10" y2="17"></line>
+    <line x1="14" y1="11" x2="14" y2="17"></line>
+  </svg>
+);
+
 export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<Proxy | null>(null);
+  const formRef = useRef<ProxyFormHandle>(null);
 
   const existingNames = proxies
     .filter((p) => p.id !== editingProxy?.id)
@@ -43,6 +78,13 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
     }
     setIsFormOpen(false);
     setEditingProxy(null);
+  };
+
+  const handleFormSubmit = () => {
+    // Trigger form validation and submission via ref
+    if (formRef.current) {
+      formRef.current.submit();
+    }
   };
 
   return (
@@ -77,15 +119,17 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
               <div className="flex gap-2">
                 <button
                   onClick={() => handleEditProxy(proxy)}
-                  className="px-3 py-1 text-sm bg-gray-700 text-white rounded hover:bg-gray-600"
+                  className="icon-btn icon-btn-edit"
+                  title="Edit proxy"
                 >
-                  Edit
+                  <EditIcon />
                 </button>
                 <button
                   onClick={() => handleDeleteProxy(proxy.id)}
-                  className="px-3 py-1 text-sm bg-red-700 text-white rounded hover:bg-red-600"
+                  className="icon-btn icon-btn-delete"
+                  title="Delete proxy"
                 >
-                  Delete
+                  <DeleteIcon />
                 </button>
               </div>
             </div>
@@ -100,10 +144,11 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
           setIsFormOpen(false);
           setEditingProxy(null);
         }}
-        onSubmit={() => {}}
+        onSubmit={handleFormSubmit}
         submitText="Save"
       >
         <ProxyForm
+          ref={formRef}
           proxy={editingProxy || undefined}
           existingNames={existingNames}
           onSave={handleSaveProxy}

@@ -10,6 +10,7 @@ src-tauri/Cargo.lock
 
 # IDE
 .vscode/
+.claude/
 .idea/
 *.swp
 *.swo

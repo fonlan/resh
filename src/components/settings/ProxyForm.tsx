@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Proxy } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 
@@ -8,7 +8,12 @@ interface ProxyFormProps {
   onSave: (proxy: Proxy) => void;
 }
 
-export const ProxyForm: React.FC<ProxyFormProps> = ({ proxy, existingNames, onSave }) => {
+export interface ProxyFormHandle {
+  submit: () => void;
+}
+
+export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
+  ({ proxy, existingNames, onSave }, ref) => {
   const [formData, setFormData] = useState<Proxy>(
     proxy || {
       id: '',
@@ -47,6 +52,11 @@ export const ProxyForm: React.FC<ProxyFormProps> = ({ proxy, existingNames, onSa
       onSave(formData);
     }
   };
+
+  // Expose submit method to parent via ref
+  useImperativeHandle(ref, () => ({
+    submit: handleSave,
+  }));
 
   const handleChange = (field: keyof Proxy, value: any) => {
     setFormData((prev) => ({
@@ -175,16 +185,6 @@ export const ProxyForm: React.FC<ProxyFormProps> = ({ proxy, existingNames, onSa
           </div>
         </div>
       </div>
-
-      {/* Save Button */}
-      <div className="flex justify-end pt-4">
-        <button
-          onClick={handleSave}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          Save Proxy
-        </button>
-      </div>
     </div>
   );
-};
+});

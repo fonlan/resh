@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Server, Authentication, Proxy, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 
@@ -11,16 +11,37 @@ interface ServerFormProps {
   onSave: (server: Server) => void;
 }
 
-export const ServerForm: React.FC<ServerFormProps> = ({
+export interface ServerFormHandle {
+  submit: () => void;
+}
+
+export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   server,
   existingNames,
   availableAuths,
   availableProxies,
   availableServers,
   onSave,
-}) => {
-  const [formData, setFormData] = useState<Server>(
-    server || {
+}, ref) => {
+  const [formData, setFormData] = useState<Server>(() => {
+    if (server) {
+      // Merge existing server data with default values to handle potential missing fields (dirty data)
+      return {
+        id: server.id || '',
+        name: server.name || '',
+        host: server.host || '',
+        port: server.port || 22,
+        username: server.username || '',
+        authId: server.authId || null,
+        proxyId: server.proxyId || null,
+        jumphostId: server.jumphostId || null,
+        portForwards: server.portForwards || [],
+        keepAlive: server.keepAlive || 0,
+        autoExecCommands: server.autoExecCommands || [],
+        envVars: server.envVars || {},
+      };
+    }
+    return {
       id: '',
       name: '',
       host: '',
@@ -33,8 +54,8 @@ export const ServerForm: React.FC<ServerFormProps> = ({
       keepAlive: 0,
       autoExecCommands: [],
       envVars: {},
-    }
-  );
+    };
+  });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -56,9 +77,16 @@ export const ServerForm: React.FC<ServerFormProps> = ({
     const portError = validatePort(formData.port, 'Port');
     if (portError) newErrors.port = portError;
 
-    const usernameError = validateRequired(formData.username, 'Username');
-    if (usernameError) newErrors.username = usernameError;
+    // Only validate username if no authentication is selected OR if authentication is key type
+    const selectedAuth = formData.authId ? availableAuths.find((a) => a.id === formData.authId) : null;
+    const shouldValidateUsername = !formData.authId || selectedAuth?.type === 'key';
 
+    if (shouldValidateUsername) {
+      const usernameError = validateRequired(formData.username, 'Username');
+      if (usernameError) newErrors.username = usernameError;
+    }
+
+    // Authentication is required
     const authError = validateRequired(formData.authId || '', 'Authentication');
     if (authError) newErrors.authId = authError;
 
@@ -68,9 +96,22 @@ export const ServerForm: React.FC<ServerFormProps> = ({
 
   const handleSave = () => {
     if (validateForm()) {
-      onSave(formData);
+      // If password authentication is selected, use the username from authentication
+      const serverToSave = { ...formData };
+      if (formData.authId) {
+        const selectedAuth = availableAuths.find((a) => a.id === formData.authId);
+        if (selectedAuth?.type === 'password' && selectedAuth.username) {
+          serverToSave.username = selectedAuth.username;
+        }
+      }
+      onSave(serverToSave);
     }
   };
+
+  // Expose submit method to parent via ref
+  useImperativeHandle(ref, () => ({
+    submit: handleSave,
+  }));
 
   const handleChange = (field: keyof Server, value: any) => {
     setFormData((prev) => ({
@@ -231,20 +272,34 @@ export const ServerForm: React.FC<ServerFormProps> = ({
           {errors.port && <p className="text-red-400 text-xs mt-1">{errors.port}</p>}
         </div>
 
+        {/* Username - show different UI based on authentication selection */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">
             Username
           </label>
-          <input
-            type="text"
-            value={formData.username}
-            onChange={(e) => handleChange('username', e.target.value)}
-            placeholder="e.g., ubuntu"
-            className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-              errors.username ? 'border-red-500' : 'border-gray-600'
-            } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
-          />
-          {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
+          {formData.authId && availableAuths.find((a) => a.id === formData.authId)?.type === 'password' ? (
+            <>
+              <div className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400">
+                {availableAuths.find((a) => a.id === formData.authId)?.username || 'N/A'}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                From selected password authentication
+              </p>
+            </>
+          ) : (
+            <>
+              <input
+                type="text"
+                value={formData.username}
+                onChange={(e) => handleChange('username', e.target.value)}
+                placeholder="e.g., ubuntu"
+                className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                  errors.username ? 'border-red-500' : 'border-gray-600'
+                } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              />
+              {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
+            </>
+          )}
         </div>
       </div>
 
@@ -501,16 +556,6 @@ export const ServerForm: React.FC<ServerFormProps> = ({
           </button>
         </div>
       </div>
-
-      {/* Save Button */}
-      <div className="flex justify-end pt-4 border-t border-gray-700">
-        <button
-          onClick={handleSave}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          Save Server
-        </button>
-      </div>
     </div>
   );
-};
+});

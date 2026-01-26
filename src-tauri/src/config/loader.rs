@@ -22,10 +22,12 @@ impl ConfigManager {
         self.app_data_dir.join("local.json")
     }
 
+    #[allow(dead_code)]
     pub fn sync_config_encrypted_path(&self) -> PathBuf {
         self.app_data_dir.join("sync.enc.json")
     }
 
+    #[allow(dead_code)]
     pub fn local_config_encrypted_path(&self) -> PathBuf {
         self.app_data_dir.join("local.enc.json")
     }
@@ -54,6 +56,7 @@ impl ConfigManager {
             .map_err(|e| format!("Failed to parse local config: {}", e))
     }
 
+    #[allow(dead_code)]
     pub fn load_encrypted_sync_config(&self, password: &str) -> Result<Config, String> {
         let path = self.sync_config_encrypted_path();
         if !path.exists() {
@@ -72,6 +75,7 @@ impl ConfigManager {
         Ok(config)
     }
 
+    #[allow(dead_code)]
     pub fn load_encrypted_local_config(&self, password: &str) -> Result<Config, String> {
         let path = self.local_config_encrypted_path();
         if !path.exists() {
@@ -90,6 +94,7 @@ impl ConfigManager {
         Ok(config)
     }
 
+    #[allow(dead_code)]
     pub fn save_encrypted_sync_config(
         &self,
         config: &Config,
@@ -109,6 +114,7 @@ impl ConfigManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn save_encrypted_local_config(
         &self,
         config: &Config,

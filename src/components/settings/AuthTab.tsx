@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Authentication } from '../../types/config';
 import { FormModal } from '../FormModal';
-import { AuthForm } from './AuthForm';
+import { AuthForm, AuthFormHandle } from './AuthForm';
 import { generateId } from '../../utils/idGenerator';
 
 interface AuthTabProps {
@@ -9,9 +9,44 @@ interface AuthTabProps {
   onAuthUpdate: (auths: Authentication[]) => void;
 }
 
+// Edit icon component
+const EditIcon: React.FC = () => (
+  <svg
+    className="w-5 h-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+  </svg>
+);
+
+// Delete icon component
+const DeleteIcon: React.FC = () => (
+  <svg
+    className="w-5 h-5"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+    <line x1="10" y1="11" x2="10" y2="17"></line>
+    <line x1="14" y1="11" x2="14" y2="17"></line>
+  </svg>
+);
+
 export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate }) => {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAuth, setEditingAuth] = useState<Authentication | null>(null);
+  const formRef = useRef<AuthFormHandle>(null);
 
   const existingNames = authentications
     .filter((a) => a.id !== editingAuth?.id)
@@ -43,6 +78,13 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
     }
     setIsFormOpen(false);
     setEditingAuth(null);
+  };
+
+  const handleFormSubmit = () => {
+    // Trigger form validation and submission via ref
+    if (formRef.current) {
+      formRef.current.submit();
+    }
   };
 
   return (
@@ -77,15 +119,17 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
               <div className="flex gap-2">
                 <button
                   onClick={() => handleEditAuth(auth)}
-                  className="px-3 py-1 text-sm bg-gray-700 text-white rounded hover:bg-gray-600"
+                  className="icon-btn icon-btn-edit"
+                  title="Edit authentication"
                 >
-                  Edit
+                  <EditIcon />
                 </button>
                 <button
                   onClick={() => handleDeleteAuth(auth.id)}
-                  className="px-3 py-1 text-sm bg-red-700 text-white rounded hover:bg-red-600"
+                  className="icon-btn icon-btn-delete"
+                  title="Delete authentication"
                 >
-                  Delete
+                  <DeleteIcon />
                 </button>
               </div>
             </div>
@@ -100,12 +144,11 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
           setIsFormOpen(false);
           setEditingAuth(null);
         }}
-        onSubmit={() => {
-          // Form submission is handled by AuthForm component via onSave callback
-        }}
+        onSubmit={handleFormSubmit}
         submitText="Save"
       >
         <AuthForm
+          ref={formRef}
           auth={editingAuth || undefined}
           existingNames={existingNames}
           onSave={handleSaveAuth}

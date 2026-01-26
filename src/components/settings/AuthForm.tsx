@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Authentication } from '../../types/config';
 import { validateRequired, validateUniqueName } from '../../utils/validation';
 
@@ -8,7 +8,12 @@ interface AuthFormProps {
   onSave: (auth: Authentication) => void;
 }
 
-export const AuthForm: React.FC<AuthFormProps> = ({ auth, existingNames, onSave }) => {
+export interface AuthFormHandle {
+  submit: () => void;
+}
+
+export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
+  ({ auth, existingNames, onSave }, ref) => {
   const [formData, setFormData] = useState<Authentication>(
     auth || {
       id: '',
@@ -50,6 +55,11 @@ export const AuthForm: React.FC<AuthFormProps> = ({ auth, existingNames, onSave 
       onSave(formData);
     }
   };
+
+  // Expose submit method to parent via ref
+  useImperativeHandle(ref, () => ({
+    submit: handleSave,
+  }));
 
   const handleChange = (field: keyof Authentication, value: any) => {
     setFormData((prev) => ({
@@ -195,14 +205,6 @@ export const AuthForm: React.FC<AuthFormProps> = ({ auth, existingNames, onSave 
           </div>
         </>
       )}
-
-      {/* Save Button */}
-      <button
-        onClick={handleSave}
-        className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors"
-      >
-        Save Authentication
-      </button>
     </div>
   );
-};
+});

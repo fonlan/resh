@@ -1,6 +1,6 @@
 use crate::ssh_manager::ssh::SSHClient;
 use serde::{Deserialize, Serialize};
-use tauri::{State, Window};
+use tauri::{State, Window, Emitter};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

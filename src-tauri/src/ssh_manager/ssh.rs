@@ -19,29 +19,45 @@ impl SSHClient {
         port: u16,
         username: &str,
         password: &str,
-        _tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel - unused for now
+        tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel for forwarding SSH data
     ) -> Result<String, String> {
         let config = client::Config::default();
         let config = Arc::new(config);
-        
+
         let session_id = uuid::Uuid::new_v4().to_string();
-        
-        let handler = ClientHandler;
+
+        // Create handler with session_id and channel
+        let handler = ClientHandler::with_channel(session_id.clone(), tx);
+
+        println!("Connecting to {}:{} as {}", host, port, username);
 
         // Connect
         let mut session = client::connect(config, (host, port), handler)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                println!("Connection error: {}", e);
+                e.to_string()
+            })?;
+
+        println!("Connected to host. Attempting password auth...");
+        println!("Password length: {}", password.len());
 
         // Auth
         let auth_res = session
             .authenticate_password(username, password)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                println!("Auth error: {}", e);
+                e.to_string()
+            })?;
+
+        println!("Auth result: {}", auth_res);
 
         if !auth_res {
             return Err("Authentication failed".to_string());
         }
+
+        println!("Authentication successful. Opening channel...");
 
         // Open channel
         let channel = session

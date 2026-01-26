@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 /// Represents the status of an SSH connection
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum ConnectionStatus {
     Connecting,
     Connected,
@@ -12,12 +13,14 @@ pub enum ConnectionStatus {
 }
 
 /// Represents an SSH connection
+#[allow(dead_code)]
 pub struct SSHConnection {
     session_id: String,
     server_name: String,
     status: Arc<Mutex<ConnectionStatus>>,
 }
 
+#[allow(dead_code)]
 impl SSHConnection {
     /// Create a new SSH connection
     pub fn new(session_id: String, server_name: String) -> Self {
@@ -50,10 +53,12 @@ impl SSHConnection {
 }
 
 /// Manages multiple SSH connections
+#[allow(dead_code)]
 pub struct SSHConnectionManager {
     connections: Arc<Mutex<HashMap<String, SSHConnection>>>,
 }
 
+#[allow(dead_code)]
 impl SSHConnectionManager {
     /// Create a new SSH connection manager
     pub fn new() -> Self {
@@ -83,6 +88,7 @@ impl SSHConnectionManager {
     }
 }
 
+#[allow(dead_code)]
 impl Clone for SSHConnection {
     fn clone(&self) -> Self {
         Self {
@@ -93,6 +99,7 @@ impl Clone for SSHConnection {
     }
 }
 
+#[allow(dead_code)]
 impl Default for SSHConnectionManager {
     fn default() -> Self {
         Self::new()

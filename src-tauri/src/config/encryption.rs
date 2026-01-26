@@ -7,17 +7,22 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
+#[allow(dead_code)]
 const SALT_LEN: usize = 16;
+#[allow(dead_code)]
 const NONCE_LEN: usize = 12;
+#[allow(dead_code)]
 const PBKDF2_ITERATIONS: u32 = 480_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct EncryptedData {
     pub salt: String,
     pub nonce: String,
     pub ciphertext: String,
 }
 
+#[allow(dead_code)]
 pub fn encrypt(plaintext: &[u8], password: &str) -> Result<EncryptedData, String> {
     let mut rng = rand::thread_rng();
     
@@ -50,6 +55,7 @@ pub fn encrypt(plaintext: &[u8], password: &str) -> Result<EncryptedData, String
     })
 }
 
+#[allow(dead_code)]
 pub fn decrypt(encrypted: &EncryptedData, password: &str) -> Result<Vec<u8>, String> {
     // Decode hex strings
     let salt = hex::decode(&encrypted.salt)

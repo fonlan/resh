@@ -10,10 +10,10 @@ repository = ""
 default-run = "resh"
 
 [build-dependencies]
-tauri-build = "1"
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "1", features = ["shell-open"] }
+tauri = { version = "2", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 russh = "0.40"
@@ -31,6 +31,7 @@ argon2 = "0.5"
 lazy_static = "1.5.0"
 async-trait = "0.1.89"
 russh-keys = "0.40.0"
+image = "0.24"
 
 [features]
 default = ["custom-protocol"]

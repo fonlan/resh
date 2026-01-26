@@ -1,10 +1,10 @@
 import React from 'react';
-import { appWindow } from '@tauri-apps/api/window';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 export const WindowControls: React.FC = () => {
   const handleMinimize = async () => {
     try {
-      await appWindow.minimize();
+      await getCurrentWebviewWindow().minimize();
     } catch (err) {
       console.error('Failed to minimize window:', err);
     }
@@ -12,7 +12,7 @@ export const WindowControls: React.FC = () => {
 
   const handleMaximize = async () => {
     try {
-      await appWindow.toggleMaximize();
+      await getCurrentWebviewWindow().toggleMaximize();
     } catch (err) {
       console.error('Failed to maximize window:', err);
     }
@@ -20,7 +20,7 @@ export const WindowControls: React.FC = () => {
 
   const handleClose = async () => {
     try {
-      await appWindow.close();
+      await getCurrentWebviewWindow().close();
     } catch (err) {
       console.error('Failed to close window:', err);
     }

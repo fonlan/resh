@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/tauri';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
+import { Server, Authentication, Proxy } from '../types/config';
 
 type UnlistenFn = () => void;
 
@@ -10,13 +11,29 @@ interface TerminalTabProps {
   serverId: string;
   isActive: boolean;
   onClose: () => void;
+  server: Server;
+  authentications: Authentication[];
+  proxies: Proxy[];
 }
 
-export const TerminalTab: React.FC<TerminalTabProps> = ({ tabId, serverId, isActive }) => {
+export const TerminalTab: React.FC<TerminalTabProps> = ({
+  tabId,
+  serverId,
+  isActive,
+  server,
+  authentications,
+  proxies: _proxies,
+}) => {
   const containerId = `terminal-${tabId}`;
   const { terminal, write } = useTerminal(containerId);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const connectedRef = useRef(false);
+  const authenticationsRef = useRef(authentications);
+
+  // Update ref when authentications changes (but don't trigger reconnection)
+  useEffect(() => {
+    authenticationsRef.current = authentications;
+  }, [authentications]);
 
   useEffect(() => {
     if (!serverId || connectedRef.current) return;
@@ -27,13 +44,32 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({ tabId, serverId, isAct
     const connect = async () => {
       try {
         connectedRef.current = true;
-        write(`Connecting to server ${serverId}...\r\n`);
-        
+        write(`Connecting to server ${server.name}...\r\n`);
+
+        // Get authentication credentials
+        const auth = authenticationsRef.current.find(a => a.id === server.authId);
+
+        console.log('Connecting Debug:', {
+          serverAuthId: server.authId,
+          authentications: authenticationsRef.current,
+          foundAuth: auth
+        });
+
+        let password = '';
+        if (auth?.type === 'password') {
+          password = auth.password || '';
+        }
+
+        console.log('Resolved password:', password ? '******' : '<empty>');
+
+        // For SSH key authentication, use the passphrase if available
+        // Note: In a real implementation, the key would be passed differently
+
         const params = {
-          host: 'localhost',
-          port: 22,
-          username: 'dummy',
-          password: 'dummy'
+          host: server.host,
+          port: server.port,
+          username: server.username,
+          password
         };
 
         const response = await invoke<{ session_id: string }>('connect_to_server', { params });
@@ -62,7 +98,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({ tabId, serverId, isAct
       if (closedUnlistener) closedUnlistener();
       connectedRef.current = false;
     };
-  }, [serverId]);
+  }, [server]);
 
   useEffect(() => {
     if (!terminal || !sessionId) return;
