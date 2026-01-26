@@ -1,6 +1,7 @@
 use crate::ssh_manager::handler::ClientHandler;
 use russh::client;
 use russh::ChannelId;
+use russh_keys;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use std::collections::HashMap;
@@ -18,7 +19,9 @@ impl SSHClient {
         host: &str,
         port: u16,
         username: &str,
-        password: &str,
+        password: Option<String>,
+        private_key: Option<String>,
+        passphrase: Option<String>,
         tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel for forwarding SSH data
     ) -> Result<String, String> {
         let config = client::Config::default();
@@ -39,21 +42,38 @@ impl SSHClient {
                 e.to_string()
             })?;
 
-        println!("Connected to host. Attempting password auth...");
-        println!("Password length: {}", password.len());
+        let mut authenticated = false;
 
-        // Auth
-        let auth_res = session
-            .authenticate_password(username, password)
-            .await
-            .map_err(|e| {
-                println!("Auth error: {}", e);
-                e.to_string()
-            })?;
+        // Try publickey auth if private key is provided
+        if let Some(key_content) = private_key {
+            println!("Attempting publickey auth...");
+            let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())
+                .map_err(|e| format!("Failed to decode private key: {}", e))?;
+            
+            let key_pair = Arc::new(key);
+            
+            if session.authenticate_publickey(username, key_pair).await.map_err(|e| e.to_string())? {
+                authenticated = true;
+                println!("Publickey authentication successful.");
+            } else {
+                println!("Publickey authentication failed.");
+            }
+        }
 
-        println!("Auth result: {}", auth_res);
+        // Try password auth if not authenticated and password is provided
+        if !authenticated {
+            if let Some(pwd) = password {
+                println!("Attempting password auth...");
+                if session.authenticate_password(username, &pwd).await.map_err(|e| e.to_string())? {
+                    authenticated = true;
+                    println!("Password authentication successful.");
+                } else {
+                    println!("Password authentication failed.");
+                }
+            }
+        }
 
-        if !auth_res {
+        if !authenticated {
             return Err("Authentication failed".to_string());
         }
 

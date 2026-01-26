@@ -62,21 +62,31 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           foundAuth: auth
         });
 
-        let password = '';
+        let password = undefined;
+        let private_key = undefined;
+        let passphrase = undefined;
+
         if (auth?.type === 'password') {
-          password = auth.password || '';
+          password = auth.password;
+        } else if (auth?.type === 'key') {
+          private_key = auth.keyContent;
+          passphrase = auth.passphrase;
         }
 
-        console.log('Resolved password:', password ? '******' : '<empty>');
-
-        // For SSH key authentication, use the passphrase if available
-        // Note: In a real implementation, the key would be passed differently
+        console.log('Resolved auth:', {
+          type: auth?.type,
+          hasPassword: !!password,
+          hasKey: !!private_key,
+          hasPassphrase: !!passphrase
+        });
 
         const params = {
           host: server.host,
           port: server.port,
           username: server.username,
-          password
+          password,
+          private_key,
+          passphrase
         };
 
         const response = await invoke<{ session_id: string }>('connect_to_server', { params });

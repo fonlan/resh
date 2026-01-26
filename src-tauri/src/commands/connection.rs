@@ -11,7 +11,9 @@ pub struct ConnectParams {
     pub host: String,
     pub port: u16,
     pub username: String,
-    pub password: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,7 +68,9 @@ pub async fn connect_to_server(
         &params.host,
         params.port,
         &params.username,
-        &params.password,
+        params.password,
+        params.private_key,
+        params.passphrase,
         tx,
     )
     .await?;
