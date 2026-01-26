@@ -31,7 +31,7 @@
 .new-tab-dropdown {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   min-width: 260px;
   max-width: 360px;
   background: var(--bg-secondary);

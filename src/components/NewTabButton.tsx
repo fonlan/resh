@@ -56,6 +56,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
         onClick={() => setIsOpen(!isOpen)}
         aria-label="New connection"
         title="New connection"
+        data-tauri-drag-region="false"
       >
         <Plus size={16} />
       </button>

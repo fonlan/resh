@@ -146,12 +146,12 @@ export const MainWindow: React.FC = () => {
               </button>
             </button>
           ))}
-          <NewTabButton
-            servers={config?.servers || []}
-            onServerSelect={handleAddTab}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-          />
         </div>
+        <NewTabButton
+          servers={config?.servers || []}
+          onServerSelect={handleAddTab}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+        />
 
         {/* Drag region spacer - empty area for dragging */}
         <div className="drag-spacer" data-tauri-drag-region></div>
