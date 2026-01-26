@@ -16,6 +16,8 @@ src-tauri/Cargo.lock
 *.swo
 *~
 .DS_Store
+AGENTS.md
+CLAUDE.md
 
 # OS
 Thumbs.db

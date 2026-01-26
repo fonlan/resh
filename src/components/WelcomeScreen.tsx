@@ -94,11 +94,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           </div>
         )}
 
-        <div className="welcome-actions">
-          <button className="btn-secondary" onClick={onOpenSettings}>
-            Settings
-          </button>
-        </div>
       </div>
     </div>
   );

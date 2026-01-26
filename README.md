@@ -237,7 +237,6 @@ Output: `src-tauri/target/release/Resh.exe` (portable executable)
 
 ### Future Phases
 - [ ] AI Assistant Integration (per-tab chat context)
-- [ ] Multi-platform support (macOS, Linux)
 - [ ] Session recording and playback
 - [ ] Custom themes and color schemes
 - [ ] SFTP file browser integration
