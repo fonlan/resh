@@ -1,4 +1,4 @@
-import { locales, LocaleType, TranslationKeys } from './locales';
+import { locales, LocaleType } from './locales';
 import { useConfig } from '../hooks/useConfig';
 
 export const useTranslation = () => {

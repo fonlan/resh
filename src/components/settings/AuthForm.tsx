@@ -1,7 +1,8 @@
-import { useState, useImperativeHandle, forwardRef } from 'react';
+import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
 import { Authentication } from '../../types/config';
 import { validateRequired, validateUniqueName } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
+import { Upload } from 'lucide-react';
 
 interface AuthFormProps {
   auth?: Authentication;
@@ -27,6 +28,7 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   );
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -92,6 +94,22 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       }
       return newErrors;
     });
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        handleChange('keyContent', content);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input so the same file can be selected again
+    e.target.value = '';
   };
 
   return (
@@ -178,9 +196,26 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       {formData.type === 'key' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              {t.authForm.keyContentLabel}
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-sm font-medium text-gray-300">
+                {t.authForm.keyContentLabel}
+              </label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="btn btn-secondary py-1 px-2 text-xs flex items-center gap-1.5"
+                title={t.authForm.uploadKey}
+              >
+                <Upload size={14} />
+                <span>{t.authForm.uploadKey}</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </div>
             <textarea
               value={formData.keyContent || ''}
               onChange={(e) => handleChange('keyContent', e.target.value)}
