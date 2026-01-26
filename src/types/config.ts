@@ -32,7 +32,7 @@ export interface Authentication {
   password?: string;
 }
 
-export interface Proxy {
+export interface ProxyConfig {
   id: string;
   name: string;
   type: 'http' | 'socks5';
@@ -69,7 +69,7 @@ export interface Config {
   version: string;
   servers: Server[];
   authentications: Authentication[];
-  proxies: Proxy[];
+  proxies: ProxyConfig[];
   general: GeneralSettings;
 }
 

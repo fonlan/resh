@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
-import { Server, Authentication, Proxy, TerminalSettings } from '../types/config';
+import { Server, Authentication, ProxyConfig, TerminalSettings } from '../types/config';
 import { useTranslation } from '../i18n';
 
 type UnlistenFn = () => void;
@@ -14,7 +14,7 @@ interface TerminalTabProps {
   onClose: () => void;
   server: Server;
   authentications: Authentication[];
-  proxies: Proxy[];
+  proxies: ProxyConfig[];
   terminalSettings?: TerminalSettings;
   theme?: 'light' | 'dark' | 'system';
 }
@@ -44,7 +44,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
   useEffect(() => {
     if (!serverId || connectedRef.current) return;
-    
+
     let outputUnlistener: UnlistenFn | null = null;
     let closedUnlistener: UnlistenFn | null = null;
 
@@ -96,11 +96,11 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         write(t.terminalTab.connected.replace('{id}', sid) + '\r\n');
 
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
-           write(event.payload);
+          write(event.payload);
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-           write('\r\n' + t.terminalTab.connectionClosed + '\r\n');
+          write('\r\n' + t.terminalTab.connectionClosed + '\r\n');
         });
 
       } catch (err) {
@@ -114,10 +114,10 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     return () => {
       if (outputUnlistener) outputUnlistener();
       if (closedUnlistener) closedUnlistener();
-      
+
       const currentSid = sessionIdRef.current;
       if (currentSid) {
-        invoke('close_session', { session_id: currentSid }).catch(err => 
+        invoke('close_session', { session_id: currentSid }).catch(err =>
           console.error(`Failed to close session ${currentSid}:`, err)
         );
       }

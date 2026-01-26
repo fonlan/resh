@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Server, Authentication, Proxy, PortForward } from '../../types/config';
+import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 
@@ -7,7 +7,7 @@ interface ServerFormProps {
   server?: Server;
   existingNames: string[];
   availableAuths: Authentication[];
-  availableProxies: Proxy[];
+  availableProxies: ProxyConfig[];
   availableServers: Server[]; // For jumphost selection
   onSave: (server: Server) => void;
 }

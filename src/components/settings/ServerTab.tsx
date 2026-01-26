@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
-import { Server, Authentication, Proxy as ProxyType } from '../../types/config';
+import { Server, Authentication, ProxyConfig as ProxyType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ServerForm, ServerFormHandle } from './ServerForm';
 import { generateId } from '../../utils/idGenerator';

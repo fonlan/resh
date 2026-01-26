@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { Proxy as ProxyType } from '../../types/config';
+import { ProxyConfig as ProxyType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ProxyForm, ProxyFormHandle } from './ProxyForm';
 import { generateId } from '../../utils/idGenerator';

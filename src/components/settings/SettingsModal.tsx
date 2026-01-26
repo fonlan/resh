@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle } from 'lucide-react';
-import { Config, Server as ServerType, Authentication, Proxy as ProxyType, GeneralSettings } from '../../types/config';
+import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';

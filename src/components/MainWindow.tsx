@@ -116,8 +116,7 @@ export const MainWindow: React.FC = () => {
         {/* Tab Bar */}
         <div className="tab-bar" role="tablist">
           {tabs.map((tab, index) => (
-            <button
-              type="button"
+            <div
               key={tab.id}
               draggable
               onDragStart={() => handleTabDragStart(index)}
@@ -146,7 +145,7 @@ export const MainWindow: React.FC = () => {
               >
                 <X size={14} />
               </button>
-            </button>
+            </div>
           ))}
         </div>
         <NewTabButton

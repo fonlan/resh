@@ -46,7 +46,14 @@ export const useTerminal = (containerId: string, settings?: TerminalSettings, th
     term.loadAddon(fitAddon);
 
     term.open(container);
-    fitAddon.fit();
+    
+    // Use setTimeout to ensure the terminal is fully rendered and container has dimensions
+    // This fixes "Cannot read properties of undefined (reading 'dimensions')" in RenderService
+    const timer = setTimeout(() => {
+      if (container.clientWidth > 0 && container.clientHeight > 0) {
+        fitAddon.fit();
+      }
+    }, 10);
 
     term.write('Connected to terminal\r\n');
 
@@ -55,11 +62,14 @@ export const useTerminal = (containerId: string, settings?: TerminalSettings, th
 
     // Handle resize
     const handleResize = () => {
-      fitAddon.fit();
+      if (container.clientWidth > 0 && container.clientHeight > 0) {
+        fitAddon.fit();
+      }
     };
     window.addEventListener('resize', handleResize);
 
     return () => {
+      clearTimeout(timer);
       window.removeEventListener('resize', handleResize);
       term.dispose();
     };

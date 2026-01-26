@@ -1,12 +1,12 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Proxy } from '../../types/config';
+import { ProxyConfig } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 
 interface ProxyFormProps {
-  proxy?: Proxy;
+  proxy?: ProxyConfig;
   existingNames: string[];
-  onSave: (proxy: Proxy) => void;
+  onSave: (proxy: ProxyConfig) => void;
 }
 
 export interface ProxyFormHandle {
@@ -16,7 +16,7 @@ export interface ProxyFormHandle {
 export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
   ({ proxy, existingNames, onSave }, ref) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<Proxy>(
+  const [formData, setFormData] = useState<ProxyConfig>(
     proxy || {
       id: '',
       name: '',
@@ -60,7 +60,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
     submit: handleSave,
   }));
 
-  const handleChange = (field: keyof Proxy, value: any) => {
+  const handleChange = (field: keyof ProxyConfig, value: any) => {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
