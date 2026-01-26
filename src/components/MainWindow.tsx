@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Settings, X } from 'lucide-react';
 import { SettingsModal } from './settings/SettingsModal';
 import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
@@ -114,6 +115,7 @@ export const MainWindow: React.FC = () => {
         <div className="tab-bar" role="tablist">
           {tabs.map((tab, index) => (
             <button
+              type="button"
               key={tab.id}
               draggable
               onDragStart={() => handleTabDragStart(index)}
@@ -132,6 +134,7 @@ export const MainWindow: React.FC = () => {
             >
               <span className="tab-label">{tab.label}</span>
               <button
+                type="button"
                 className="tab-close"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -139,7 +142,7 @@ export const MainWindow: React.FC = () => {
                 }}
                 aria-label="Close tab"
               >
-                ×
+                <X size={14} />
               </button>
             </button>
           ))}
@@ -156,12 +159,13 @@ export const MainWindow: React.FC = () => {
         {/* Right side: Settings button + Window controls */}
         <div className="title-bar-right">
           <button
+            type="button"
             className="settings-btn"
             onClick={() => setIsSettingsOpen(true)}
             aria-label="Open settings"
             title="Settings"
           >
-            ⚙️
+            <Settings size={18} />
           </button>
           <WindowControls />
         </div>

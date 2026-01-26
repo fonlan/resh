@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Config, Server, Authentication, Proxy, GeneralSettings } from '../../types/config';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Config, Server as ServerType, Authentication, Proxy as ProxyType, GeneralSettings } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
@@ -16,23 +17,6 @@ export interface SettingsModalProps {
 
 type TabType = 'servers' | 'auth' | 'proxies' | 'general';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
-
-// Simple X icon component
-const XIcon: React.FC = () => (
-  <svg
-    width="20"
-    height="20"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <line x1="18" y1="6" x2="6" y2="18"></line>
-    <line x1="6" y1="6" x2="18" y2="18"></line>
-  </svg>
-);
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer }) => {
   const { config, loading, error, saveConfig } = useConfig();
@@ -151,8 +135,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   if (loading) {
     return (
       <div className="settings-overlay">
-        <div className="settings-modal" style={{ padding: '24px' }}>
-          <p style={{ color: '#cccccc' }}>Loading configuration...</p>
+        <div className="settings-modal loading-modal">
+          <Loader2 className="spinner" size={32} />
+          <p>Loading configuration...</p>
         </div>
       </div>
     );
@@ -162,8 +147,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     return null;
   }
 
-  const handleServersUpdate = (servers: Server[]) => {
-    console.log('SettingsModal: Received servers update:', servers);
+  const handleServersUpdate = (servers: ServerType[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, servers } : null));
   };
 
@@ -171,7 +155,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, authentications } : null));
   };
 
-  const handleProxiesUpdate = (proxies: Proxy[]) => {
+  const handleProxiesUpdate = (proxies: ProxyType[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, proxies } : null));
   };
 
@@ -179,11 +163,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, general } : null));
   };
 
-  const tabs: { id: TabType; label: string; icon: string }[] = [
-    { id: 'servers', label: t.servers, icon: '🖥️' },
-    { id: 'auth', label: t.auth, icon: '🔐' },
-    { id: 'proxies', label: t.proxies, icon: '🔄' },
-    { id: 'general', label: t.general, icon: '⚙️' },
+  const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
+    { id: 'servers', label: t.servers, icon: <Server size={18} /> },
+    { id: 'auth', label: t.auth, icon: <Key size={18} /> },
+    { id: 'proxies', label: t.proxies, icon: <Globe size={18} /> },
+    { id: 'general', label: t.general, icon: <Settings size={18} /> },
   ];
 
   return (
@@ -195,20 +179,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             <h2>{t.settings}</h2>
             {/* Save Status Indicator */}
             {saveStatus !== 'idle' && (
-              <span className={`save-status save-status-${saveStatus}`}>
+              <div className={`save-status save-status-${saveStatus}`}>
                 {saveStatus === 'saving' && (
                   <>
-                    <span className="spinner">⟳</span>
-                    {t.saveStatus.saving}
+                    <Loader2 size={14} className="spinner" />
+                    <span>{t.saveStatus.saving}</span>
                   </>
                 )}
-                {saveStatus === 'saved' && `✓ ${t.saveStatus.saved}`}
-                {saveStatus === 'error' && `⚠ ${t.saveStatus.error}`}
-              </span>
+                {saveStatus === 'saved' && (
+                  <>
+                    <Check size={14} />
+                    <span>{t.saveStatus.saved}</span>
+                  </>
+                )}
+                {saveStatus === 'error' && (
+                  <>
+                    <AlertCircle size={14} />
+                    <span>{t.saveStatus.error}</span>
+                  </>
+                )}
+              </div>
             )}
           </div>
-          <button onClick={onClose} className="settings-close-btn">
-            <XIcon />
+          <button type="button" onClick={onClose} className="settings-close-btn">
+            <X size={20} />
           </button>
         </div>
 
@@ -218,11 +212,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           <div className="settings-sidebar">
             {tabs.map((tab) => (
               <button
+                type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`settings-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
               >
-                <span>{tab.icon}</span>
+                {tab.icon}
                 <span>{tab.label}</span>
               </button>
             ))}

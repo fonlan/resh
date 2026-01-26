@@ -8,8 +8,21 @@
 .main-window {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
   animation: fadeIn 0.4s ease-out;
+}
+
+/* ==================== Content Area ==================== */
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+  overflow: hidden;
+  position: relative;
+  min-height: 0;
 }
 
 @keyframes fadeIn {
@@ -26,29 +39,11 @@
 /* ==================== Title Bar ==================== */
 .title-bar {
   display: flex;
-  background: var(--glass-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  height: 48px;
+  background: var(--bg-secondary);
+  height: 40px;
   border-bottom: 1px solid var(--glass-border);
   user-select: none;
   position: relative;
-}
-
-.title-bar::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent 0%,
-    var(--accent-cyan) 20%,
-    var(--accent-purple) 50%,
-    var(--accent-cyan) 80%,
-    transparent 100%);
-  opacity: 0.3;
 }
 
 /* ==================== Tab Bar ==================== */
@@ -57,8 +52,8 @@
   flex: 1;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 6px 8px;
-  gap: 4px;
+  padding: 4px 6px;
+  gap: 2px;
 }
 
 .tab-bar::-webkit-scrollbar {
@@ -67,156 +62,108 @@
 
 .drag-spacer {
   flex: 1;
-  min-width: 80px;
+  min-width: 40px;
 }
 
 /* ==================== Tab ==================== */
 .tab {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 16px;
-  height: 36px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--glass-border);
+  gap: 8px;
+  padding: 0 12px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
-  cursor: grab;
+  cursor: pointer;
   white-space: nowrap;
   transition: all var(--transition-fast);
   position: relative;
   overflow: hidden;
-  font-family: var(--font-display);
+  font-family: var(--font-ui);
   font-size: 13px;
   font-weight: 500;
 }
 
-.tab::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  opacity: 0;
-  transition: opacity var(--transition-fast);
-}
-
 .tab:hover {
-  background: var(--bg-elevated);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
-  border-color: rgba(0, 245, 255, 0.2);
-  box-shadow: 0 0 15px rgba(0, 245, 255, 0.1);
 }
 
 .tab.active {
-  background: linear-gradient(135deg,
-    rgba(0, 245, 255, 0.1) 0%,
-    rgba(176, 38, 255, 0.1) 100%);
-  border-color: var(--accent-cyan);
+  background: var(--bg-primary);
+  border-color: var(--glass-border);
   color: var(--text-primary);
-  box-shadow: var(--glow-cyan);
-}
-
-.tab.active::before {
-  opacity: 0.1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 .tab.dragging {
   opacity: 0.4;
   cursor: grabbing;
-  transform: scale(0.98);
 }
 
 .tab.drop-target {
-  border-left: 3px solid var(--accent-cyan);
-  box-shadow: var(--glow-cyan);
-}
-
-.tab:active {
-  cursor: grabbing;
+  border-left: 2px solid var(--accent-primary);
 }
 
 .tab-label {
   flex: 1;
-  position: relative;
-  z-index: 1;
 }
 
 .tab-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 18px;
-  line-height: 1;
+  font-size: 14px;
   cursor: pointer;
   border-radius: 4px;
   transition: all var(--transition-fast);
-  position: relative;
-  z-index: 1;
 }
 
 .tab-close:hover {
-  background: var(--color-danger);
-  color: white;
-  box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
-  transform: rotate(90deg);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 /* ==================== Title Bar Right ==================== */
 .title-bar-right {
   display: flex;
   align-items: center;
-  gap: 0;
 }
 
 .settings-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 46px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   background: transparent;
   border: none;
   color: var(--text-secondary);
-  font-size: 20px;
   cursor: pointer;
   transition: all var(--transition-fast);
-  position: relative;
-}
-
-.settings-btn::before {
-  content: '';
-  position: absolute;
-  inset: 8px;
-  background: var(--accent-cyan);
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
 }
 
 .settings-btn:hover {
+  background: var(--bg-tertiary);
   color: var(--text-primary);
-}
-
-.settings-btn:hover::before {
-  opacity: 0.1;
 }
 
 /* ==================== Window Controls ==================== */
 .window-controls {
   display: flex;
   align-items: center;
-  gap: 0;
-  margin-left: 0;
 }
 
 .window-control-btn {
-  width: 50px;
-  height: 48px;
+  width: 46px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -225,140 +172,41 @@
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
-  padding: 0;
-  outline: none;
 }
 
 .window-control-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
 }
 
 .window-control-btn.close-btn:hover {
   background: var(--color-danger);
   color: white;
-  box-shadow: 0 0 15px rgba(255, 71, 87, 0.4);
-}
-
-.window-control-btn svg {
-  pointer-events: none;
-}
-
-/* ==================== Content Area ==================== */
-.content-area {
-  flex: 1;
-  background-color: var(--bg-primary);
-  overflow: hidden;
-  position: relative;
 }
 
 /* ==================== Welcome Screen ==================== */
-.welcome-screen {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  background: var(--bg-primary);
-  position: relative;
-  overflow: hidden;
-}
-
-.welcome-screen::before {
-  content: '';
-  position: absolute;
-  width: 500px;
-  height: 500px;
-  background: radial-gradient(circle, rgba(0, 245, 255, 0.1) 0%, transparent 70%);
-  border-radius: 50%;
-  animation: float 8s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% {
-    transform: translate(-30%, -30%) scale(1);
-  }
-  50% {
-    transform: translate(-20%, -20%) scale(1.1);
-  }
-}
-
-.welcome-content {
-  text-align: center;
-  color: var(--text-primary);
-  position: relative;
-  z-index: 1;
-  animation: slideUp 0.6s ease-out;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.welcome-content h1 {
-  font-family: var(--font-display);
-  font-size: 42px;
-  margin-bottom: 12px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  font-weight: 700;
-  letter-spacing: -1px;
-  text-shadow: 0 0 40px rgba(0, 245, 255, 0.3);
-}
-
-.welcome-content p {
-  font-size: 16px;
-  margin-bottom: 32px;
-  color: var(--text-secondary);
-  font-weight: 400;
-}
+/* Styles moved to WelcomeScreen.css */
 
 .btn-primary {
-  padding: 12px 28px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  color: var(--bg-primary);
+  padding: 10px 24px;
+  background: var(--accent-success);
+  color: white;
   border: none;
   border-radius: var(--radius-md);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
   transition: all var(--transition-smooth);
-  position: relative;
-  overflow: hidden;
-  box-shadow: var(--glow-cyan);
-}
-
-.btn-primary::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
-  opacity: 0;
-  transition: opacity var(--transition-smooth);
+  box-shadow: var(--glow-success);
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 0 30px rgba(0, 245, 255, 0.5);
-}
-
-.btn-primary:hover::before {
-  opacity: 1;
-}
-
-.btn-primary span {
-  position: relative;
-  z-index: 1;
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
 }
 
 .btn-primary:active {
   transform: translateY(0);
 }
+

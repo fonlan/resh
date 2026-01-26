@@ -37,24 +37,18 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
   };
 
   return (
-    <div className="space-y-6" style={{ color: '#e0e0e0' }}>
+    <div className="tab-container space-y-6">
       {/* Appearance Section */}
-      <div>
-        <h3 className="text-lg font-semibold mb-4" style={{ color: '#ffffff' }}>
-          {t.appearance}
-        </h3>
+      <div className="section">
+        <h3 className="section-title mb-4">{t.appearance}</h3>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.theme}</label>
+          <div className="form-group">
+            <label htmlFor="theme-select" className="form-label">{t.theme}</label>
             <select
+              id="theme-select"
               value={general.theme}
               onChange={(e) => handleThemeChange(e.target.value as 'light' | 'dark' | 'system')}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input form-select"
             >
               <option value="system">{t.system}</option>
               <option value="light">{t.light}</option>
@@ -62,17 +56,13 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.language}</label>
+          <div className="form-group">
+            <label htmlFor="language-select" className="form-label">{t.language}</label>
             <select
+              id="language-select"
               value={general.language}
               onChange={(e) => handleLanguageChange(e.target.value as 'en' | 'zh-CN')}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input form-select"
             >
               <option value="en">English</option>
               <option value="zh-CN">简体中文</option>
@@ -82,55 +72,41 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
       </div>
 
       {/* Terminal Settings Section */}
-      <div>
-        <h3 className="text-lg font-semibold mb-4" style={{ color: '#ffffff' }}>
-          {t.terminal}
-        </h3>
+      <div className="section">
+        <h3 className="section-title mb-4">{t.terminal}</h3>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.fontFamily}</label>
+          <div className="form-group">
+            <label htmlFor="font-family" className="form-label">{t.fontFamily}</label>
             <input
+              id="font-family"
               type="text"
               value={general.terminal.fontFamily}
               onChange={(e) => handleTerminalUpdate('fontFamily', e.target.value)}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
               placeholder="e.g., 'Courier New', monospace"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.fontSize}</label>
+          <div className="form-group">
+            <label htmlFor="font-size" className="form-label">{t.fontSize}</label>
             <input
+              id="font-size"
               type="number"
               value={general.terminal.fontSize}
               onChange={(e) => handleTerminalUpdate('fontSize', parseInt(e.target.value) || 14)}
               min="8"
               max="32"
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.cursorStyle}</label>
+          <div className="form-group">
+            <label htmlFor="cursor-style" className="form-label">{t.cursorStyle}</label>
             <select
+              id="cursor-style"
               value={general.terminal.cursorStyle}
               onChange={(e) => handleTerminalUpdate('cursorStyle', e.target.value)}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input form-select"
             >
               <option value="block">Block</option>
               <option value="underline">Underline</option>
@@ -138,94 +114,73 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.scrollback}</label>
+          <div className="form-group">
+            <label htmlFor="scrollback-limit" className="form-label">{t.scrollback}</label>
             <input
+              id="scrollback-limit"
               type="number"
               value={general.terminal.scrollback}
               onChange={(e) => handleTerminalUpdate('scrollback', parseInt(e.target.value) || 1000)}
               min="100"
               max="50000"
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
             />
           </div>
         </div>
       </div>
 
       {/* WebDAV Settings Section */}
-      <div>
-        <h3 className="text-lg font-semibold mb-4" style={{ color: '#ffffff' }}>
-          {t.webdav}
-        </h3>
+      <div className="section">
+        <h3 className="section-title mb-4">{t.webdav}</h3>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.webdavUrl}</label>
+          <div className="form-group">
+            <label htmlFor="webdav-url" className="form-label">{t.webdavUrl}</label>
             <input
+              id="webdav-url"
               type="text"
               value={general.webdav.url}
               onChange={(e) => handleWebDAVUpdate('url', e.target.value)}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
               placeholder="https://example.com/webdav"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.username}</label>
+          <div className="form-group">
+            <label htmlFor="webdav-username" className="form-label">{t.username}</label>
             <input
+              id="webdav-username"
               type="text"
               value={general.webdav.username}
               onChange={(e) => handleWebDAVUpdate('username', e.target.value)}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">{t.password}</label>
+          <div className="form-group">
+            <label htmlFor="webdav-password" className="form-label">{t.password}</label>
             <input
+              id="webdav-password"
               type="password"
               value={general.webdav.password}
               onChange={(e) => handleWebDAVUpdate('password', e.target.value)}
-              className="w-full px-3 py-2 rounded border"
-              style={{
-                backgroundColor: '#2a2a2a',
-                color: '#e0e0e0',
-                borderColor: '#3a3a3a'
-              }}
+              className="form-input"
             />
           </div>
         </div>
       </div>
 
       {/* Confirmations Section */}
-      <div>
-        <h3 className="text-lg font-semibold mb-4" style={{ color: '#ffffff' }}>
-          {t.confirmations}
-        </h3>
+      <div className="section">
+        <h3 className="section-title mb-4">{t.confirmations}</h3>
         <div className="space-y-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={general.confirmCloseTab}
               onChange={(e) => handleConfirmationChange('confirmCloseTab', e.target.checked)}
-              className="w-4 h-4"
-              style={{ accentColor: '#0066cc' }}
+              className="checkbox"
             />
-            <span className="text-sm">{t.confirmCloseTab}</span>
+            <span className="form-label mb-0">{t.confirmCloseTab}</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -233,10 +188,9 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.confirmExitApp}
               onChange={(e) => handleConfirmationChange('confirmExitApp', e.target.checked)}
-              className="w-4 h-4"
-              style={{ accentColor: '#0066cc' }}
+              className="checkbox"
             />
-            <span className="text-sm">{t.confirmExitApp}</span>
+            <span className="form-label mb-0">{t.confirmExitApp}</span>
           </label>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Minus, Square, X } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 export const WindowControls: React.FC = () => {
@@ -29,34 +30,31 @@ export const WindowControls: React.FC = () => {
   return (
     <div className="window-controls">
       <button
+        type="button"
         onClick={handleMinimize}
         aria-label="Minimize window"
-        className="window-control-btn minimize-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="window-control-btn minimize-btn"
         title="Minimize"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M0 6h12" stroke="currentColor" strokeWidth="1" />
-        </svg>
+        <Minus size={14} />
       </button>
       <button
+        type="button"
         onClick={handleMaximize}
         aria-label="Maximize window"
-        className="window-control-btn maximize-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="window-control-btn maximize-btn"
         title="Maximize"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <rect x="0.5" y="0.5" width="11" height="11" stroke="currentColor" strokeWidth="1" fill="none" />
-        </svg>
+        <Square size={12} />
       </button>
       <button
+        type="button"
         onClick={handleClose}
         aria-label="Close window"
-        className="window-control-btn close-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+        className="window-control-btn close-btn"
         title="Close"
       >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-          <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1" />
-        </svg>
+        <X size={16} />
       </button>
     </div>
   );

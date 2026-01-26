@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Settings, Server as ServerIcon } from 'lucide-react';
 import { Server } from '../types/config';
 import './NewTabButton.css';
 
@@ -7,56 +8,6 @@ interface NewTabButtonProps {
   onServerSelect: (serverId: string) => void;
   onOpenSettings: () => void;
 }
-
-// Plus icon
-const PlusIcon: React.FC = () => (
-  <svg
-    className="new-tab-icon"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <line x1="12" y1="5" x2="12" y2="19"></line>
-    <line x1="5" y1="12" x2="19" y2="12"></line>
-  </svg>
-);
-
-// Settings icon
-const SettingsIcon: React.FC = () => (
-  <svg
-    className="dropdown-icon"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <circle cx="12" cy="12" r="3"></circle>
-    <path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m5.08 5.08l4.24 4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m5.08-5.08l4.24-4.24"></path>
-  </svg>
-);
-
-// Server icon
-const ServerSmallIcon: React.FC = () => (
-  <svg
-    className="server-small-icon"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
-    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
-    <line x1="6" y1="6" x2="6.01" y2="6"></line>
-    <line x1="6" y1="18" x2="6.01" y2="18"></line>
-  </svg>
-);
 
 export const NewTabButton: React.FC<NewTabButtonProps> = ({
   servers,
@@ -99,13 +50,14 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
   return (
     <div className="new-tab-container">
       <button
+        type="button"
         ref={buttonRef}
         className="new-tab-btn"
         onClick={() => setIsOpen(!isOpen)}
         aria-label="New connection"
         title="New connection"
       >
-        <PlusIcon />
+        <Plus size={16} />
       </button>
 
       {isOpen && (
@@ -116,10 +68,14 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
 
           {servers.length === 0 ? (
             <div className="dropdown-empty">
-              <ServerSmallIcon />
+              <ServerIcon size={32} />
               <span>No servers configured</span>
-              <button className="dropdown-settings-btn" onClick={handleSettingsClick}>
-                <SettingsIcon />
+              <button
+                type="button"
+                className="dropdown-settings-btn"
+                onClick={handleSettingsClick}
+              >
+                <Plus size={14} />
                 Add Server
               </button>
             </div>
@@ -127,15 +83,16 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
             <div className="dropdown-list">
               {servers.map((server) => (
                 <button
+                  type="button"
                   key={server.id}
                   className="dropdown-item"
                   onClick={() => handleServerClick(server.id)}
                 >
-                  <ServerSmallIcon />
+                  <ServerIcon size={18} />
                   <div className="dropdown-item-content">
                     <span className="dropdown-item-name">{server.name}</span>
                     <span className="dropdown-item-info">
-                      {server.username}@{server.host}:{server.port}
+                      {server.username}@{server.host}
                     </span>
                   </div>
                 </button>
@@ -143,14 +100,16 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
             </div>
           )}
 
-          {servers.length > 0 && (
-            <div className="dropdown-footer">
-              <button className="dropdown-settings-link" onClick={handleSettingsClick}>
-                <SettingsIcon />
-                Manage Servers
-              </button>
-            </div>
-          )}
+          <div className="dropdown-footer">
+            <button
+              type="button"
+              className="dropdown-settings-link"
+              onClick={handleSettingsClick}
+            >
+              <Settings size={14} />
+              Manage Servers
+            </button>
+          </div>
         </div>
       )}
     </div>
