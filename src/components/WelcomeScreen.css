@@ -43,12 +43,16 @@
   color: var(--text-primary);
   margin: 0 0 8px 0;
   letter-spacing: -0.02em;
+  line-height: 1.2;
+  font-family: var(--font-display);
 }
 
 .welcome-subtitle {
   font-size: 16px;
   color: var(--text-secondary);
   margin: 0;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
 }
 
 /* ==================== Recent Servers Section ==================== */
@@ -70,6 +74,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin: 0;
+  line-height: 1.4;
 }
 
 .btn-text {
@@ -151,6 +156,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .server-card-info {
@@ -161,6 +168,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+  line-height: 1.5;
 }
 
 .add-card {
@@ -200,12 +209,16 @@
   font-weight: 600;
   color: var(--text-primary);
   margin: 0 0 8px 0;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .empty-state p {
   font-size: 14px;
   color: var(--text-secondary);
   margin: 0 0 32px 0;
+  line-height: 1.6;
+  letter-spacing: -0.01em;
 }
 
 /* ==================== Buttons ==================== */
@@ -223,6 +236,8 @@
   cursor: pointer;
   transition: all var(--transition-fast);
   box-shadow: var(--glow-success);
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .btn-primary:hover {

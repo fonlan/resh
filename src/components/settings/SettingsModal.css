@@ -206,6 +206,8 @@
   font-weight: 600;
   color: var(--text-secondary);
   margin-bottom: 8px;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .form-input {
@@ -216,6 +218,9 @@
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 13px;
+  font-family: var(--font-ui);
+  letter-spacing: -0.01em;
+  line-height: 1.5;
   transition: all var(--transition-fast);
 }
 
@@ -500,6 +505,7 @@
   background-clip: text;
   margin: 0;
   letter-spacing: -0.5px;
+  line-height: 1.3;
 }
 
 /* ==================== Save Status ==================== */
@@ -597,6 +603,8 @@
   gap: 10px;
   position: relative;
   overflow: hidden;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .settings-tab-btn::before {
