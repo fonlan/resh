@@ -137,7 +137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       <div className="settings-overlay">
         <div className="settings-modal loading-modal">
           <Loader2 className="spinner" size={32} />
-          <p>Loading configuration...</p>
+          <p>{t.common.loading}</p>
         </div>
       </div>
     );

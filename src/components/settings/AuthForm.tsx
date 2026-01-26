@@ -1,6 +1,7 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Authentication } from '../../types/config';
 import { validateRequired, validateUniqueName } from '../../utils/validation';
+import { useTranslation } from '../../i18n';
 
 interface AuthFormProps {
   auth?: Authentication;
@@ -14,6 +15,7 @@ export interface AuthFormHandle {
 
 export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   ({ auth, existingNames, onSave }, ref) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<Authentication>(
     auth || {
       id: '',
@@ -29,20 +31,20 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    const nameError = validateRequired(formData.name, 'Name');
+    const nameError = validateRequired(formData.name, t.authForm.nameLabel);
     if (nameError) newErrors.name = nameError;
 
     const uniqueError = validateUniqueName(formData.name, existingNames, auth?.name);
     if (uniqueError) newErrors.name = uniqueError;
 
     if (formData.type === 'password') {
-      const usernameError = validateRequired(formData.username, 'Username');
+      const usernameError = validateRequired(formData.username, t.authForm.usernameLabel);
       if (usernameError) newErrors.username = usernameError;
 
-      const passwordError = validateRequired(formData.password, 'Password');
+      const passwordError = validateRequired(formData.password, t.authForm.passwordLabel);
       if (passwordError) newErrors.password = passwordError;
     } else {
-      const keyContentError = validateRequired(formData.keyContent, 'SSH Key Content');
+      const keyContentError = validateRequired(formData.keyContent || '', t.authForm.keyContentLabel);
       if (keyContentError) newErrors.keyContent = keyContentError;
     }
 
@@ -97,13 +99,13 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       {/* Name */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Authentication Name
+          {t.authForm.nameLabel}
         </label>
         <input
           type="text"
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
-          placeholder="e.g., My AWS Key, Work Password"
+          placeholder={t.authForm.namePlaceholder}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
             errors.name ? 'border-red-500' : 'border-gray-600'
           } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -114,7 +116,7 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       {/* Type Toggle */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-2">
-          Authentication Type
+          {t.authForm.typeLabel}
         </label>
         <div className="flex gap-4">
           {(['password', 'key'] as const).map((type) => (
@@ -128,7 +130,7 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
                 className="w-4 h-4"
               />
               <span className="text-gray-300 capitalize">
-                {type === 'key' ? 'SSH Key' : 'Password'}
+                {type === 'key' ? t.authTab.keyType : t.authTab.passwordType}
               </span>
             </label>
           ))}
@@ -140,13 +142,13 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
         <>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              Username
+              {t.authForm.usernameLabel}
             </label>
             <input
               type="text"
               value={formData.username || ''}
               onChange={(e) => handleChange('username', e.target.value)}
-              placeholder="e.g., ubuntu"
+              placeholder={t.authForm.usernamePlaceholder}
               className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
                 errors.username ? 'border-red-500' : 'border-gray-600'
               } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -156,13 +158,13 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              Password
+              {t.authForm.passwordLabel}
             </label>
             <input
               type="password"
               value={formData.password || ''}
               onChange={(e) => handleChange('password', e.target.value)}
-              placeholder="Enter password"
+              placeholder={t.authForm.passwordPlaceholder}
               className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
                 errors.password ? 'border-red-500' : 'border-gray-600'
               } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -177,12 +179,12 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
         <>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              SSH Key Content
+              {t.authForm.keyContentLabel}
             </label>
             <textarea
               value={formData.keyContent || ''}
               onChange={(e) => handleChange('keyContent', e.target.value)}
-              placeholder="Paste your SSH private key here (-----BEGIN PRIVATE KEY-----...)"
+              placeholder={t.authForm.keyContentPlaceholder}
               rows={6}
               className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
                 errors.keyContent ? 'border-red-500' : 'border-gray-600'
@@ -193,13 +195,13 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
-              Key Passphrase (Optional)
+              {t.authForm.passphraseLabel}
             </label>
             <input
               type="password"
               value={formData.passphrase || ''}
               onChange={(e) => handleChange('passphrase', e.target.value)}
-              placeholder="Enter passphrase if your key is encrypted"
+              placeholder={t.authForm.passphrasePlaceholder}
               className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

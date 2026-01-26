@@ -1,6 +1,7 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Proxy } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
+import { useTranslation } from '../../i18n';
 
 interface ProxyFormProps {
   proxy?: Proxy;
@@ -14,6 +15,7 @@ export interface ProxyFormHandle {
 
 export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
   ({ proxy, existingNames, onSave }, ref) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<Proxy>(
     proxy || {
       id: '',
@@ -31,16 +33,16 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    const nameError = validateRequired(formData.name, 'Name');
+    const nameError = validateRequired(formData.name, t.common.name);
     if (nameError) newErrors.name = nameError;
 
     const uniqueError = validateUniqueName(formData.name, existingNames, proxy?.name);
     if (uniqueError) newErrors.name = uniqueError;
 
-    const hostError = validateRequired(formData.host, 'Host');
+    const hostError = validateRequired(formData.host, t.common.host);
     if (hostError) newErrors.host = hostError;
 
-    const portError = validatePort(formData.port, 'Port');
+    const portError = validatePort(formData.port, t.common.port);
     if (portError) newErrors.port = portError;
 
     setErrors(newErrors);
@@ -78,13 +80,13 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       {/* Name */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Proxy Name
+          {t.proxyForm.nameLabel}
         </label>
         <input
           type="text"
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
-          placeholder="e.g., Corporate Proxy, Home SOCKS5"
+          placeholder={t.proxyForm.namePlaceholder}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
             errors.name ? 'border-red-500' : 'border-gray-600'
           } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -95,7 +97,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       {/* Type */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-2">
-          Proxy Type
+          {t.proxyForm.typeLabel}
         </label>
         <div className="flex gap-4">
           {(['http', 'socks5'] as const).map((type) => (
@@ -117,13 +119,13 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       {/* Host */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Host
+          {t.proxyForm.hostLabel}
         </label>
         <input
           type="text"
           value={formData.host}
           onChange={(e) => handleChange('host', e.target.value)}
-          placeholder="e.g., proxy.example.com"
+          placeholder={t.proxyForm.hostPlaceholder}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
             errors.host ? 'border-red-500' : 'border-gray-600'
           } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -134,7 +136,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       {/* Port */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Port
+          {t.proxyForm.portLabel}
         </label>
         <input
           type="number"
@@ -152,20 +154,20 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       {/* Optional Credentials */}
       <div className="border-t border-gray-700 pt-4 mt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Authentication (Optional)
+          {t.proxyForm.authTitle}
         </h3>
 
         <div className="space-y-3">
           {/* Username */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">
-              Username
+              {t.username}
             </label>
             <input
               type="text"
               value={formData.username || ''}
               onChange={(e) => handleChange('username', e.target.value)}
-              placeholder="Leave empty if no auth required"
+              placeholder={t.proxyForm.usernamePlaceholder}
               className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -173,13 +175,13 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
           {/* Password */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">
-              Password
+              {t.password}
             </label>
             <input
               type="password"
               value={formData.password || ''}
               onChange={(e) => handleChange('password', e.target.value)}
-              placeholder="Leave empty if no auth required"
+              placeholder={t.proxyForm.passwordPlaceholder}
               className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>

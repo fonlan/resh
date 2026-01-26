@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Settings, Server as ServerIcon } from 'lucide-react';
 import { Server } from '../types/config';
+import { useTranslation } from '../i18n';
 import './NewTabButton.css';
 
 interface NewTabButtonProps {
@@ -14,6 +15,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
   onServerSelect,
   onOpenSettings,
 }) => {
+  const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -54,8 +56,8 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
         ref={buttonRef}
         className="new-tab-btn"
         onClick={() => setIsOpen(!isOpen)}
-        aria-label="New connection"
-        title="New connection"
+        aria-label={t.welcome.newConnection}
+        title={t.welcome.newConnection}
         data-tauri-drag-region="false"
       >
         <Plus size={16} />
@@ -64,20 +66,20 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
       {isOpen && (
         <div ref={menuRef} className="new-tab-dropdown">
           <div className="dropdown-header">
-            <span>Connect to Server</span>
+            <span>{t.newTabButton.connectTo}</span>
           </div>
 
           {servers.length === 0 ? (
             <div className="dropdown-empty">
               <ServerIcon size={32} />
-              <span>No servers configured</span>
+              <span>{t.welcome.noServers}</span>
               <button
                 type="button"
                 className="dropdown-settings-btn"
                 onClick={handleSettingsClick}
               >
                 <Plus size={14} />
-                Add Server
+                {t.serverTab.addServer}
               </button>
             </div>
           ) : (
@@ -108,7 +110,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               onClick={handleSettingsClick}
             >
               <Settings size={14} />
-              Manage Servers
+              {t.newTabButton.manageServers}
             </button>
           </div>
         </div>

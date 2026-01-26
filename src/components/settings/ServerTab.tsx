@@ -4,6 +4,7 @@ import { Server, Authentication, Proxy as ProxyType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ServerForm, ServerFormHandle } from './ServerForm';
 import { generateId } from '../../utils/idGenerator';
+import { useTranslation } from '../../i18n';
 
 interface ServerTabProps {
   servers: Server[];
@@ -20,6 +21,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   onServersUpdate,
   onConnectServer,
 }) => {
+  const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
   const formRef = useRef<ServerFormHandle>(null);
@@ -65,20 +67,20 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   return (
     <div className="tab-container">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="section-title">SSH Servers</h3>
+        <h3 className="section-title">{t.serverTab.title}</h3>
         <button
           type="button"
           onClick={handleAddServer}
           className="btn btn-primary"
         >
           <Plus size={16} />
-          Add Server
+          {t.serverTab.addServer}
         </button>
       </div>
 
       {servers.length === 0 ? (
         <div className="empty-state-mini">
-          <p>No servers configured. Add one to get started.</p>
+          <p>{t.serverTab.emptyState}</p>
         </div>
       ) : (
         <div className="item-list">
@@ -99,9 +101,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   </p>
                   {(auth || proxy || jumphost) && (
                     <div className="item-tags">
-                      {auth && <span className="tag">Auth: {auth.name}</span>}
-                      {proxy && <span className="tag">Proxy: {proxy.name}</span>}
-                      {jumphost && <span className="tag">Jumphost: {jumphost.name}</span>}
+                      {auth && <span className="tag">{t.auth}: {auth.name}</span>}
+                      {proxy && <span className="tag">{t.proxyTab.editTooltip.split(' ')[1]}: {proxy.name}</span>}
+                      {jumphost && <span className="tag">{t.serverTab.jumphost}: {jumphost.name}</span>}
                     </div>
                   )}
                 </div>
@@ -111,7 +113,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                       type="button"
                       onClick={() => onConnectServer(server.id)}
                       className="btn-icon btn-secondary"
-                      title="Connect to server"
+                      title={t.serverTab.connectTooltip}
                     >
                       <Power size={14} />
                     </button>
@@ -120,7 +122,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                     type="button"
                     onClick={() => handleEditServer(server)}
                     className="btn-icon btn-secondary"
-                    title="Edit server"
+                    title={t.serverTab.editTooltip}
                   >
                     <Edit2 size={14} />
                   </button>
@@ -128,7 +130,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                     type="button"
                     onClick={() => handleDeleteServer(server.id)}
                     className="btn-icon btn-secondary hover-danger"
-                    title="Delete server"
+                    title={t.serverTab.deleteTooltip}
                   >
                     <Trash2 size={14} />
                   </button>
@@ -141,13 +143,13 @@ export const ServerTab: React.FC<ServerTabProps> = ({
 
       <FormModal
         isOpen={isFormOpen}
-        title={editingServer ? 'Edit Server' : 'Add Server'}
+        title={editingServer ? t.serverTab.editServer : t.serverTab.addServer}
         onClose={() => {
           setIsFormOpen(false);
           setEditingServer(null);
         }}
         onSubmit={handleFormSubmit}
-        submitText="Save"
+        submitText={t.common.save}
       >
         <ServerForm
           ref={formRef}

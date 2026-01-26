@@ -1,8 +1,10 @@
 import React from 'react';
 import { Minus, Square, X } from 'lucide-react';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { useTranslation } from '../i18n';
 
 export const WindowControls: React.FC = () => {
+  const { t } = useTranslation();
   const handleMinimize = async () => {
     try {
       await getCurrentWebviewWindow().minimize();
@@ -32,27 +34,27 @@ export const WindowControls: React.FC = () => {
       <button
         type="button"
         onClick={handleMinimize}
-        aria-label="Minimize window"
+        aria-label={t.windowControls.minimize}
         className="window-control-btn minimize-btn"
-        title="Minimize"
+        title={t.windowControls.minimize}
       >
         <Minus size={14} />
       </button>
       <button
         type="button"
         onClick={handleMaximize}
-        aria-label="Maximize window"
+        aria-label={t.windowControls.maximize}
         className="window-control-btn maximize-btn"
-        title="Maximize"
+        title={t.windowControls.maximize}
       >
         <Square size={12} />
       </button>
       <button
         type="button"
         onClick={handleClose}
-        aria-label="Close window"
+        aria-label={t.windowControls.close}
         className="window-control-btn close-btn"
-        title="Close"
+        title={t.windowControls.close}
       >
         <X size={16} />
       </button>

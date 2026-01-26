@@ -8,6 +8,7 @@ import { NewTabButton } from './NewTabButton';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
+import { useTranslation } from '../i18n';
 
 interface Tab {
   id: string;
@@ -17,6 +18,7 @@ interface Tab {
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig } = useConfig();
+  const { t } = useTranslation();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -126,7 +128,7 @@ export const MainWindow: React.FC = () => {
               role="tab"
               tabIndex={activeTabId === tab.id ? 0 : -1}
               aria-selected={activeTabId === tab.id}
-              aria-label={`${tab.label} (Tab ${index + 1} of ${tabs.length})`}
+              aria-label={t.mainWindow.tabAriaLabel.replace('{index}', (index + 1).toString()).replace('{total}', tabs.length.toString())}
               className={`tab ${activeTabId === tab.id ? 'active' : ''} ${
                 draggedTabIndex === index ? 'dragging' : ''
               } ${dropTargetIndex === index ? 'drop-target' : ''}`}
@@ -140,7 +142,7 @@ export const MainWindow: React.FC = () => {
                   e.stopPropagation();
                   handleCloseTab(tab.id);
                 }}
-                aria-label="Close tab"
+                aria-label={t.mainWindow.closeTab}
               >
                 <X size={14} />
               </button>
@@ -162,8 +164,8 @@ export const MainWindow: React.FC = () => {
             type="button"
             className="settings-btn"
             onClick={() => setIsSettingsOpen(true)}
-            aria-label="Open settings"
-            title="Settings"
+            aria-label={t.mainWindow.settings}
+            title={t.mainWindow.settings}
           >
             <Settings size={18} />
           </button>

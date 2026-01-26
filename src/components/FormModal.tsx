@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from '../i18n';
 
 interface FormModalProps {
   isOpen: boolean;
@@ -17,8 +18,9 @@ export const FormModal: React.FC<FormModalProps> = ({
   onSubmit,
   onClose,
   isLoading = false,
-  submitText = 'Save',
+  submitText,
 }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = React.useState(false);
 
   const handleSubmit = async () => {
@@ -33,6 +35,8 @@ export const FormModal: React.FC<FormModalProps> = ({
   if (!isOpen) {
     return null;
   }
+
+  const effectiveSubmitText = submitText || t.common.save;
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -50,19 +54,21 @@ export const FormModal: React.FC<FormModalProps> = ({
         {/* Footer */}
         <div className="border-t border-gray-700 p-6 flex justify-end gap-3">
           <button
+            type="button"
             onClick={onClose}
             disabled={loading || isLoading}
             className="px-4 py-2 rounded-md border border-gray-600 text-gray-300 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            Cancel
+            {t.common.cancel}
           </button>
           <button
+            type="button"
             onClick={handleSubmit}
             disabled={loading || isLoading}
             className="px-4 py-2 rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
           >
             {(loading || isLoading) && <span className="inline-block animate-spin">⟳</span>}
-            {submitText}
+            {effectiveSubmitText}
           </button>
         </div>
       </div>

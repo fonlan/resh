@@ -4,6 +4,7 @@ import { Proxy as ProxyType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ProxyForm, ProxyFormHandle } from './ProxyForm';
 import { generateId } from '../../utils/idGenerator';
+import { useTranslation } from '../../i18n';
 
 interface ProxyTabProps {
   proxies: ProxyType[];
@@ -11,6 +12,7 @@ interface ProxyTabProps {
 }
 
 export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) => {
+  const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null);
   const formRef = useRef<ProxyFormHandle>(null);
@@ -57,20 +59,20 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
   return (
     <div className="tab-container">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="section-title">Proxy Servers</h3>
+        <h3 className="section-title">{t.proxyTab.title}</h3>
         <button
           type="button"
           onClick={handleAddProxy}
           className="btn btn-primary"
         >
           <Plus size={16} />
-          Add Proxy
+          {t.proxyTab.addProxy}
         </button>
       </div>
 
       {proxies.length === 0 ? (
         <div className="empty-state-mini">
-          <p>No proxies configured. Add one to get started.</p>
+          <p>{t.proxyTab.emptyState}</p>
         </div>
       ) : (
         <div className="item-list">
@@ -90,7 +92,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
                   type="button"
                   onClick={() => handleEditProxy(proxy)}
                   className="btn-icon btn-secondary"
-                  title="Edit proxy"
+                  title={t.proxyTab.editTooltip}
                 >
                   <Edit2 size={14} />
                 </button>
@@ -98,7 +100,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
                   type="button"
                   onClick={() => handleDeleteProxy(proxy.id)}
                   className="btn-icon btn-secondary hover-danger"
-                  title="Delete proxy"
+                  title={t.proxyTab.deleteTooltip}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -110,13 +112,13 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
 
       <FormModal
         isOpen={isFormOpen}
-        title={editingProxy ? 'Edit Proxy' : 'Add Proxy'}
+        title={editingProxy ? t.proxyTab.editProxy : t.proxyTab.addProxy}
         onClose={() => {
           setIsFormOpen(false);
           setEditingProxy(null);
         }}
         onSubmit={handleFormSubmit}
-        submitText="Save"
+        submitText={t.common.save}
       >
         <ProxyForm
           ref={formRef}

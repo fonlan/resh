@@ -4,6 +4,7 @@ import { Authentication } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { AuthForm, AuthFormHandle } from './AuthForm';
 import { generateId } from '../../utils/idGenerator';
+import { useTranslation } from '../../i18n';
 
 interface AuthTabProps {
   authentications: Authentication[];
@@ -11,6 +12,7 @@ interface AuthTabProps {
 }
 
 export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate }) => {
+  const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAuth, setEditingAuth] = useState<Authentication | null>(null);
   const formRef = useRef<AuthFormHandle>(null);
@@ -57,20 +59,20 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
   return (
     <div className="tab-container">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="section-title">SSH Authentications</h3>
+        <h3 className="section-title">{t.authTab.title}</h3>
         <button
           type="button"
           onClick={handleAddAuth}
           className="btn btn-primary"
         >
           <Plus size={16} />
-          Add Authentication
+          {t.authTab.addAuth}
         </button>
       </div>
 
       {authentications.length === 0 ? (
         <div className="empty-state-mini">
-          <p>No authentications configured. Add one to get started.</p>
+          <p>{t.authTab.emptyState}</p>
         </div>
       ) : (
         <div className="item-list">
@@ -82,7 +84,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
               <div className="item-info">
                 <p className="item-name">{auth.name}</p>
                 <p className="item-detail">
-                  {auth.type === 'password' ? 'Password' : 'SSH Key'} • {auth.username}
+                  {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType} • {auth.username}
                 </p>
               </div>
               <div className="item-actions">
@@ -90,7 +92,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
                   type="button"
                   onClick={() => handleEditAuth(auth)}
                   className="btn-icon btn-secondary"
-                  title="Edit authentication"
+                  title={t.authTab.editTooltip}
                 >
                   <Edit2 size={14} />
                 </button>
@@ -98,7 +100,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
                   type="button"
                   onClick={() => handleDeleteAuth(auth.id)}
                   className="btn-icon btn-secondary hover-danger"
-                  title="Delete authentication"
+                  title={t.authTab.deleteTooltip}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -110,13 +112,13 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
 
       <FormModal
         isOpen={isFormOpen}
-        title={editingAuth ? 'Edit Authentication' : 'Add Authentication'}
+        title={editingAuth ? t.authTab.editAuth : t.authTab.addAuth}
         onClose={() => {
           setIsFormOpen(false);
           setEditingAuth(null);
         }}
         onSubmit={handleFormSubmit}
-        submitText="Save"
+        submitText={t.common.save}
       >
         <AuthForm
           ref={formRef}

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
 import { Server, Authentication, Proxy, TerminalSettings } from '../types/config';
+import { useTranslation } from '../i18n';
 
 type UnlistenFn = () => void;
 
@@ -28,6 +29,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   terminalSettings,
   theme,
 }) => {
+  const { t } = useTranslation();
   const containerId = `terminal-${tabId}`;
   const { terminal, write } = useTerminal(containerId, terminalSettings, theme);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     const connect = async () => {
       try {
         connectedRef.current = true;
-        write(`Connecting to server ${server.name}...\r\n`);
+        write(t.terminalTab.connecting.replace('{name}', server.name) + '\r\n');
 
         // Get authentication credentials
         const auth = authenticationsRef.current.find(a => a.id === server.authId);
@@ -81,18 +83,18 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         const sid = response.session_id;
         sessionIdRef.current = sid;
         setSessionId(sid);
-        write(`Connected! Session ID: ${sid}\r\n`);
+        write(t.terminalTab.connected.replace('{id}', sid) + '\r\n');
 
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
            write(event.payload);
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-           write('\r\nConnection closed.\r\n');
+           write('\r\n' + t.terminalTab.connectionClosed + '\r\n');
         });
 
       } catch (err) {
-        write(`\r\nError: ${err}\r\n`);
+        write('\r\n' + t.terminalTab.error.replace('{error}', String(err)) + '\r\n');
         connectedRef.current = false;
       }
     };
@@ -110,7 +112,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         );
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, write]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, write, t]);
 
   useEffect(() => {
     if (!terminal || !sessionId) return;

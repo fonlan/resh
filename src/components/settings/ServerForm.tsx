@@ -1,6 +1,7 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Server, Authentication, Proxy, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
+import { useTranslation } from '../../i18n';
 
 interface ServerFormProps {
   server?: Server;
@@ -23,6 +24,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   availableServers,
   onSave,
 }, ref) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<Server>(() => {
     if (server) {
       // Merge existing server data with default values to handle potential missing fields (dirty data)
@@ -65,16 +67,16 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    const nameError = validateRequired(formData.name, 'Name');
+    const nameError = validateRequired(formData.name, t.common.name);
     if (nameError) newErrors.name = nameError;
 
     const uniqueError = validateUniqueName(formData.name, existingNames, server?.name);
     if (uniqueError) newErrors.name = uniqueError;
 
-    const hostError = validateRequired(formData.host, 'Host');
+    const hostError = validateRequired(formData.host, t.common.host);
     if (hostError) newErrors.host = hostError;
 
-    const portError = validatePort(formData.port, 'Port');
+    const portError = validatePort(formData.port, t.common.port);
     if (portError) newErrors.port = portError;
 
     // Only validate username if no authentication is selected OR if authentication is key type
@@ -82,12 +84,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     const shouldValidateUsername = !formData.authId || selectedAuth?.type === 'key';
 
     if (shouldValidateUsername) {
-      const usernameError = validateRequired(formData.username, 'Username');
+      const usernameError = validateRequired(formData.username, t.serverForm.usernameLabel);
       if (usernameError) newErrors.username = usernameError;
     }
 
     // Authentication is required
-    const authError = validateRequired(formData.authId || '', 'Authentication');
+    const authError = validateRequired(formData.authId || '', t.serverForm.authLabel);
     if (authError) newErrors.authId = authError;
 
     setErrors(newErrors);
@@ -222,13 +224,13 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Name */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Server Name
+          {t.serverForm.nameLabel}
         </label>
         <input
           type="text"
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
-          placeholder="e.g., Production Server, AWS EC2"
+          placeholder={t.serverForm.namePlaceholder}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
             errors.name ? 'border-red-500' : 'border-gray-600'
           } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -239,13 +241,13 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Host */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Host
+          {t.common.host}
         </label>
         <input
           type="text"
           value={formData.host}
           onChange={(e) => handleChange('host', e.target.value)}
-          placeholder="e.g., example.com or 192.168.1.100"
+          placeholder={t.serverForm.hostPlaceholder}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
             errors.host ? 'border-red-500' : 'border-gray-600'
           } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -257,7 +259,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">
-            Port
+            {t.common.port}
           </label>
           <input
             type="number"
@@ -275,7 +277,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         {/* Username - show different UI based on authentication selection */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1">
-            Username
+            {t.serverForm.usernameLabel}
           </label>
           {formData.authId && availableAuths.find((a) => a.id === formData.authId)?.type === 'password' ? (
             <>
@@ -283,7 +285,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 {availableAuths.find((a) => a.id === formData.authId)?.username || 'N/A'}
               </div>
               <p className="text-xs text-gray-500 mt-1">
-                From selected password authentication
+                {t.serverForm.fromAuth}
               </p>
             </>
           ) : (
@@ -292,7 +294,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 type="text"
                 value={formData.username}
                 onChange={(e) => handleChange('username', e.target.value)}
-                placeholder="e.g., ubuntu"
+                placeholder={t.serverForm.usernamePlaceholder}
                 className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
                   errors.username ? 'border-red-500' : 'border-gray-600'
                 } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
@@ -306,7 +308,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Authentication Selection */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
-          Authentication
+          {t.serverForm.authLabel}
         </label>
         <select
           value={formData.authId || ''}
@@ -315,10 +317,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
             errors.authId ? 'border-red-500' : 'border-gray-600'
           } text-white focus:outline-none focus:ring-2 focus:ring-blue-500`}
         >
-          <option value="">Select authentication...</option>
+          <option value="">{t.serverForm.authPlaceholder}</option>
           {availableAuths.map((auth) => (
             <option key={auth.id} value={auth.id}>
-              {auth.name} ({auth.type})
+              {auth.name} ({auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType})
             </option>
           ))}
         </select>
@@ -330,24 +332,24 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Proxy or Jumphost Selection */}
       <div className="border-t border-gray-700 pt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Connection Routing (Optional)
+          {t.serverForm.routingTitle}
         </h3>
 
         <div className="space-y-3">
           {/* Proxy */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">
-              Proxy
+              {t.serverForm.proxyLabel}
             </label>
             <select
               value={formData.proxyId || ''}
               onChange={(e) => handleProxyOrJumphostChange('proxy', e.target.value)}
               className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">None</option>
+              <option value="">{t.common.none}</option>
               {availableProxies.map((proxy) => (
                 <option key={proxy.id} value={proxy.id}>
-                  {proxy.name} ({proxy.type})
+                  {proxy.name} ({proxy.type.toUpperCase()})
                 </option>
               ))}
             </select>
@@ -356,14 +358,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           {/* Jumphost */}
           <div>
             <label className="block text-sm font-medium text-gray-400 mb-1">
-              Jumphost (SSH Tunnel)
+              {t.serverForm.jumphostLabel}
             </label>
             <select
               value={formData.jumphostId || ''}
               onChange={(e) => handleProxyOrJumphostChange('jumphost', e.target.value)}
               className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="">None</option>
+              <option value="">{t.common.none}</option>
               {availableServers
                 .filter((s) => s.id !== server?.id) // Don't allow self as jumphost
                 .map((srv) => (
@@ -379,7 +381,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Port Forwarding */}
       <div className="border-t border-gray-700 pt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Port Forwarding
+          {t.serverForm.portForwardingTitle}
         </h3>
 
         {/* Existing Port Forwards */}
@@ -394,10 +396,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   {pf.local} → {pf.remote}
                 </span>
                 <button
+                  type="button"
                   onClick={() => removePortForward(index)}
                   className="text-red-400 hover:text-red-300 text-sm"
                 >
-                  Remove
+                  {t.common.remove}
                 </button>
               </div>
             ))}
@@ -408,7 +411,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         <div className="flex gap-2">
           <input
             type="number"
-            placeholder="Local port"
+            placeholder={t.serverForm.localPortPlaceholder}
             value={newPortForward.local}
             onChange={(e) =>
               setNewPortForward((prev) => ({ ...prev, local: e.target.value }))
@@ -418,7 +421,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           <span className="text-gray-500 self-center">→</span>
           <input
             type="number"
-            placeholder="Remote port"
+            placeholder={t.serverForm.remotePortPlaceholder}
             value={newPortForward.remote}
             onChange={(e) =>
               setNewPortForward((prev) => ({ ...prev, remote: e.target.value }))
@@ -426,10 +429,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
             className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
+            type="button"
             onClick={addPortForward}
             className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
           >
-            Add
+            {t.common.add}
           </button>
         </div>
       </div>
@@ -437,11 +441,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Keepalive Settings */}
       <div className="border-t border-gray-700 pt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Keepalive Settings
+          {t.serverForm.keepaliveTitle}
         </h3>
         <div>
           <label className="block text-sm font-medium text-gray-400 mb-1">
-            Keepalive Interval (seconds, 0 = disabled)
+            {t.serverForm.keepaliveInterval}
           </label>
           <input
             type="number"
@@ -456,7 +460,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Auto-Execute Commands */}
       <div className="border-t border-gray-700 pt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Auto-Execute Commands
+          {t.serverForm.autoExecTitle}
         </h3>
 
         {/* Existing Commands */}
@@ -472,10 +476,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
+                  type="button"
                   onClick={() => removeAutoExecCommand(index)}
                   className="text-red-400 hover:text-red-300 px-3 py-2"
                 >
-                  Remove
+                  {t.common.remove}
                 </button>
               </div>
             ))}
@@ -483,17 +488,18 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         )}
 
         <button
+          type="button"
           onClick={addAutoExecCommand}
           className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
         >
-          Add Command
+          {t.serverForm.addCommand}
         </button>
       </div>
 
       {/* Environment Variables */}
       <div className="border-t border-gray-700 pt-4">
         <h3 className="text-sm font-medium text-gray-300 mb-3">
-          Environment Variables
+          {t.serverForm.envVarsTitle}
         </h3>
 
         {/* Existing Env Vars */}
@@ -515,10 +521,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
+                  type="button"
                   onClick={() => removeEnvVar(key)}
                   className="text-red-400 hover:text-red-300 px-3 py-2"
                 >
-                  Remove
+                  {t.common.remove}
                 </button>
               </div>
             ))}
@@ -529,18 +536,19 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         <div className="flex gap-2">
           <input
             type="text"
-            placeholder="Variable name"
+            placeholder={t.serverForm.varNamePlaceholder}
             id="envVarName"
             className="w-32 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <span className="text-gray-500 self-center">=</span>
           <input
             type="text"
-            placeholder="Value"
+            placeholder={t.serverForm.varValuePlaceholder}
             id="envVarValue"
             className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
           <button
+            type="button"
             onClick={() => {
               const nameInput = document.getElementById('envVarName') as HTMLInputElement;
               const valueInput = document.getElementById('envVarValue') as HTMLInputElement;
@@ -552,7 +560,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
             }}
             className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
           >
-            Add
+            {t.common.add}
           </button>
         </div>
       </div>

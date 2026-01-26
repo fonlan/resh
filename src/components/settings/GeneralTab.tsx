@@ -108,9 +108,9 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleTerminalUpdate('cursorStyle', e.target.value)}
               className="form-input form-select"
             >
-              <option value="block">Block</option>
-              <option value="underline">Underline</option>
-              <option value="bar">Bar</option>
+              <option value="block">{t.cursorStyles.block}</option>
+              <option value="underline">{t.cursorStyles.underline}</option>
+              <option value="bar">{t.cursorStyles.bar}</option>
             </select>
           </div>
 

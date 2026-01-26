@@ -1,6 +1,7 @@
 import React from 'react';
 import { Server as ServerIcon, Plus, Terminal } from 'lucide-react';
 import { Server } from '../types/config';
+import { useTranslation } from '../i18n';
 import './WelcomeScreen.css';
 
 interface WelcomeScreenProps {
@@ -14,6 +15,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onServerClick,
   onOpenSettings,
 }) => {
+  const { t } = useTranslation();
   const hasServers = servers.length > 0;
 
   return (
@@ -23,16 +25,16 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div className="logo-container">
             <Terminal size={48} className="logo-icon" />
           </div>
-          <h1 className="welcome-title">Welcome to Resh</h1>
-          <p className="welcome-subtitle">A professional, high-performance SSH client.</p>
+          <h1 className="welcome-title">{t.welcome.title}</h1>
+          <p className="welcome-subtitle">{t.welcome.subtitle}</p>
         </div>
 
         {hasServers ? (
           <div className="recent-section">
             <div className="section-header">
-              <h2 className="recent-title">Recent Connections</h2>
+              <h2 className="recent-title">{t.welcome.recentTitle}</h2>
               <button type="button" className="btn-text" onClick={onOpenSettings}>
-                View All
+                {t.welcome.viewAll}
               </button>
             </div>
             <div className="server-grid">
@@ -63,8 +65,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   <Plus size={20} />
                 </div>
                 <div className="server-card-content">
-                  <h3 className="server-card-name">New Connection</h3>
-                  <p className="server-card-info">Configure a new server</p>
+                  <h3 className="server-card-name">{t.welcome.newConnection}</h3>
+                  <p className="server-card-info">{t.welcome.configureNew}</p>
                 </div>
               </button>
             </div>
@@ -74,11 +76,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             <div className="empty-state-icon">
               <ServerIcon size={32} />
             </div>
-            <h3>No servers configured</h3>
-            <p>Add your first server to get started with Resh.</p>
+            <h3>{t.welcome.noServers}</h3>
+            <p>{t.welcome.getFirstStarted}</p>
             <button type="button" className="btn-primary" onClick={onOpenSettings}>
               <Plus size={18} />
-              <span>Add Server</span>
+              <span>{t.serverTab.addServer}</span>
             </button>
           </div>
         )}
