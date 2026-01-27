@@ -69,6 +69,7 @@ export interface GeneralSettings {
   confirmCloseTab: boolean;
   confirmExitApp: boolean;
   debugEnabled: boolean;
+  maxRecentServers: number;
   recentServerIds: string[];
 }
 

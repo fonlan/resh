@@ -37,7 +37,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
     });
   };
 
-  const handleConfirmationChange = (field: 'confirmCloseTab' | 'confirmExitApp', value: boolean) => {
+  const handleConfirmationChange = (field: 'confirmCloseTab' | 'confirmExitApp' | 'debugEnabled' | 'maxRecentServers', value: boolean | number) => {
     onGeneralUpdate({ ...general, [field]: value });
   };
 
@@ -88,6 +88,19 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               <option value="en">English</option>
               <option value="zh-CN">简体中文</option>
             </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="max-recent-servers" className="form-label">{t.maxRecentServers}</label>
+            <input
+              id="max-recent-servers"
+              type="number"
+              value={general.maxRecentServers}
+              onChange={(e) => handleConfirmationChange('maxRecentServers', parseInt(e.target.value) || 0)}
+              min="0"
+              max="20"
+              className="form-input"
+            />
           </div>
         </div>
       </div>
@@ -266,7 +279,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             <input
               type="checkbox"
               checked={general.debugEnabled}
-              onChange={(e) => handleConfirmationChange('debugEnabled' as any, e.target.checked)}
+              onChange={(e) => handleConfirmationChange('debugEnabled', e.target.checked)}
               className="checkbox"
             />
             <span className="form-label mb-0">{t.debugEnabled}</span>

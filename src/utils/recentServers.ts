@@ -1,7 +1,5 @@
 import { Server, GeneralSettings } from '../types/config';
 
-export const MAX_RECENT_SERVERS = 10;
-
 /**
  * Add a server to the recent servers list
  * Moves the server to the front if it already exists
@@ -10,7 +8,9 @@ export const MAX_RECENT_SERVERS = 10;
 export function addRecentServer(general: GeneralSettings, serverId: string): GeneralSettings {
   const current = general.recentServerIds || [];
   const filtered = current.filter(id => id !== serverId);
-  const updated = [serverId, ...filtered].slice(0, MAX_RECENT_SERVERS);
+  // Store at least 20 or maxRecentServers * 2 to have some history
+  const limit = Math.max(20, general.maxRecentServers * 2);
+  const updated = [serverId, ...filtered].slice(0, limit);
   return { ...general, recentServerIds: updated };
 }
 

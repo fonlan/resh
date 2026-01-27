@@ -109,10 +109,16 @@ pub struct GeneralSettings {
     pub confirm_exit_app: bool,
     #[serde(default)]
     pub debug_enabled: bool,
+    #[serde(default = "default_max_recent_servers")]
+    pub max_recent_servers: u32,
     #[serde(default)]
     pub recent_server_ids: Vec<String>,
     #[serde(default = "default_window_state")]
     pub window_state: WindowState,
+}
+
+fn default_max_recent_servers() -> u32 {
+    3
 }
 
 fn default_window_state() -> WindowState {
@@ -174,6 +180,7 @@ impl Config {
                 confirm_close_tab: true,
                 confirm_exit_app: true,
                 debug_enabled: false,
+                max_recent_servers: 3,
                 recent_server_ids: vec![],
                 window_state: default_window_state(),
             },

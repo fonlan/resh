@@ -114,7 +114,7 @@ export const MainWindow: React.FC = () => {
     import('./settings/SettingsModal');
   }, []);
 
-  const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, 3) : [];
+  const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, config.general.maxRecentServers) : [];
 
   return (
     <div className="main-window">

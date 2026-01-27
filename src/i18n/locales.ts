@@ -33,6 +33,7 @@ export const locales = {
     confirmCloseTab: 'Confirm before closing tabs',
     confirmExitApp: 'Confirm before exiting application',
     debugEnabled: 'Enable debug logs',
+    maxRecentServers: 'Max recent connections (Welcome page)',
     saveStatus: {
       saving: 'Saving...',
       saved: 'Saved',
@@ -198,6 +199,7 @@ export const locales = {
     confirmCloseTab: '关闭标签页前确认',
     confirmExitApp: '退出应用前确认',
     debugEnabled: '启用调试日志',
+    maxRecentServers: '最近连接显示数量 (欢迎页)',
     saveStatus: {
       saving: '正在保存...',
       saved: '已保存',
