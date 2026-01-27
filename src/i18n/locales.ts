@@ -151,6 +151,9 @@ export const locales = {
       contentPlaceholder: '#!/bin/bash...',
       descriptionLabel: 'Description (Optional)',
       descriptionPlaceholder: 'Brief description of what this does',
+      groupLabel: 'Group',
+      groupPlaceholder: 'Group Name',
+      defaultGroup: 'Default',
     },
     welcome: {
       title: 'Welcome to Resh',
@@ -336,6 +339,9 @@ export const locales = {
       contentPlaceholder: '#!/bin/bash...',
       descriptionLabel: '描述 (可选)',
       descriptionPlaceholder: '简要描述此代码段的功能',
+      groupLabel: '分组',
+      groupPlaceholder: '分组名称',
+      defaultGroup: '默认',
     },
     welcome: {
       title: '欢迎使用 Resh',

@@ -76,6 +76,7 @@ pub struct Snippet {
     pub name: String,
     pub content: String,
     pub description: Option<String>,
+    pub group: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
     pub updated_at: String,

@@ -132,3 +132,35 @@
   cursor: not-allowed;
   box-shadow: none;
 }
+
+/* Snippet Group Suggestions */
+.snippet-group-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  margin-top: 4px;
+  background-color: #0f172a !important; /* Force dark blue-black */
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.snippet-suggestion-item {
+  width: 100%;
+  text-align: left;
+  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  color: #f8fafc !important; /* Force light text */
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.snippet-suggestion-item:hover {
+  background-color: #1e293b !important;
+}

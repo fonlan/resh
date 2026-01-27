@@ -40,6 +40,7 @@ export interface Snippet {
   name: string;
   content: string;
   description?: string;
+  group?: string;
   synced: boolean;
   updatedAt: string;
 }

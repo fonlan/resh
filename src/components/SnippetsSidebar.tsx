@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Snippet } from '../types/config';
-import { X, Code, Play } from 'lucide-react';
+import { X, Code, Play, ChevronRight, ChevronDown } from 'lucide-react';
 import { useTranslation } from '../i18n';
 import './SnippetsSidebar.css';
 
@@ -19,6 +19,38 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   const [width, setWidth] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  
+  // Grouping logic
+  const groupedSnippets = useMemo(() => {
+    return snippets.reduce((acc, snippet) => {
+      const groupName = snippet.group || t.snippetForm.defaultGroup;
+      if (!acc[groupName]) {
+        acc[groupName] = [];
+      }
+      acc[groupName].push(snippet);
+      return acc;
+    }, {} as Record<string, Snippet[]>);
+  }, [snippets, t.snippetForm.defaultGroup]);
+
+  const groupNames = useMemo(() => Object.keys(groupedSnippets).sort(), [groupedSnippets]);
+
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+
+  // Initialize default group expansion
+  useEffect(() => {
+    setExpandedGroups(prev => {
+        // If already initialized, don't override unless it's empty
+        if (Object.keys(prev).length > 0) return prev;
+        return { [t.snippetForm.defaultGroup]: true };
+    });
+  }, [t.snippetForm.defaultGroup]);
+
+  const toggleGroup = (groupName: string) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [groupName]: !prev[groupName]
+    }));
+  };
 
   const handleSnippetClick = (content: string) => {
     const event = new CustomEvent('paste-snippet', { detail: content });
@@ -110,24 +142,44 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
         {snippets.length === 0 ? (
            <p className="snippets-empty">{t.snippetsTab.emptyState}</p>
         ) : (
-          snippets.map(snippet => (
-            <button 
-              key={snippet.id}
-              type="button"
-              className="snippet-item group w-full text-left"
-              onClick={() => handleSnippetClick(snippet.content)}
-              onKeyDown={(e) => handleKeyDown(e, snippet.content)}
-              title={snippet.description}
-              aria-label={t.common.actions}
-            >
-              <div className="snippet-item-header">
-                <span className="snippet-name">{snippet.name}</span>
-                <Play size={10} className="snippet-play-icon" />
-              </div>
-              <div className="snippet-content">
-                {snippet.content}
-              </div>
-            </button>
+          groupNames.map(groupName => (
+            <div key={groupName} className="snippet-group">
+                <button 
+                    type="button"
+                    className="snippet-group-header"
+                    onClick={() => toggleGroup(groupName)}
+                    aria-expanded={!!expandedGroups[groupName]}
+                >
+                    {expandedGroups[groupName] ? (
+                        <ChevronDown size={14} className="snippet-group-icon" />
+                    ) : (
+                        <ChevronRight size={14} className="snippet-group-icon" />
+                    )}
+                    <span className="snippet-group-label">{groupName}</span>
+                </button>
+                
+                <div className={`snippet-group-content ${!expandedGroups[groupName] ? 'collapsed' : ''}`}>
+                    {groupedSnippets[groupName].map(snippet => (
+                        <button 
+                          key={snippet.id}
+                          type="button"
+                          className="snippet-item group w-full text-left"
+                          onClick={() => handleSnippetClick(snippet.content)}
+                          onKeyDown={(e) => handleKeyDown(e, snippet.content)}
+                          title={snippet.description}
+                          aria-label={t.common.actions}
+                        >
+                          <div className="snippet-item-header">
+                            <span className="snippet-name">{snippet.name}</span>
+                            <Play size={10} className="snippet-play-icon" />
+                          </div>
+                          <div className="snippet-content">
+                            {snippet.content}
+                          </div>
+                        </button>
+                    ))}
+                </div>
+            </div>
           ))
         )}
       </div>

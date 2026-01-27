@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Code } from 'lucide-react';
+import { Plus, Edit2, Trash2, Code, Folder } from 'lucide-react';
 import { Snippet } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { SnippetForm, SnippetFormHandle } from './SnippetForm';
@@ -20,6 +20,10 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
   const [isSynced, setIsSynced] = useState(true);
   const formRef = useRef<SnippetFormHandle>(null);
+
+  const existingGroups = Array.from(new Set(
+    snippets.map(s => s.group || t.snippetForm.defaultGroup)
+  ));
 
   useEffect(() => {
     if (formRef.current) {
@@ -93,9 +97,15 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
                     <Code size={14} className="text-gray-400" />
                     {snippet.name}
                 </p>
-                {snippet.description && (
-                  <p className="item-detail">{snippet.description}</p>
-                )}
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                   <span className="flex items-center gap-1 bg-gray-800 px-1.5 py-0.5 rounded border border-gray-700">
+                     <Folder size={10} />
+                     {snippet.group || t.snippetForm.defaultGroup}
+                   </span>
+                   {snippet.description && (
+                     <span className="truncate max-w-[200px]">{snippet.description}</span>
+                   )}
+                </div>
               </div>
               <div className="item-actions">
                 <button
@@ -152,6 +162,7 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
         <SnippetForm
           ref={formRef}
           snippet={editingSnippet || undefined}
+          existingGroups={existingGroups}
           onSave={handleSaveSnippet}
         />
       </FormModal>
