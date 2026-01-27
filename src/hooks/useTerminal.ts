@@ -1,18 +1,24 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { TerminalSettings } from '../types/config';
 
-export const useTerminal = (containerId: string, settings?: TerminalSettings, theme?: 'light' | 'dark' | 'system') => {
+export const useTerminal = (
+  containerId: string, 
+  settings?: TerminalSettings, 
+  theme?: 'light' | 'dark' | 'system',
+  onData?: (data: string) => void
+) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // Determine actual theme
+    // ... (theme logic remains the same)
     let actualTheme: 'light' | 'dark' = 'dark';
     if (theme === 'system') {
       actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -20,7 +26,6 @@ export const useTerminal = (containerId: string, settings?: TerminalSettings, th
       actualTheme = 'light';
     }
 
-    // Create terminal with user settings and theme
     const term = new Terminal({
       cursorBlink: true,
       fontSize: settings?.fontSize || 14,
@@ -28,58 +33,58 @@ export const useTerminal = (containerId: string, settings?: TerminalSettings, th
       cursorStyle: (settings?.cursorStyle as 'block' | 'underline' | 'bar') || 'block',
       scrollback: settings?.scrollback || 5000,
       theme: actualTheme === 'light' ? {
-        background: '#ffffff',
-        foreground: '#1a202c',
-        cursor: '#1a202c',
-        cursorAccent: '#ffffff',
-        selectionBackground: 'rgba(0, 245, 255, 0.3)',
+        background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
       } : {
-        background: '#000000',
-        foreground: '#ffffff',
-        cursor: '#00f5ff',
-        cursorAccent: '#000000',
-        selectionBackground: 'rgba(0, 245, 255, 0.3)',
+        background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
       },
     });
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
 
-    fitAddon.fit();
+    // Register onData inside the hook to ensure it's always attached to the current term
+    const disposable = term.onData((data) => {
+      if (onData) onData(data);
+    });
+
+    if (container.clientWidth > 0 && container.clientHeight > 0) {
+      term.open(container);
+      fitAddon.fit();
+    }
     
-    // Use ResizeObserver to handle container size changes
-    // This is more robust than window 'resize' event as it handles
-    // cases like switching tabs (display: none -> display: block)
     const resizeObserver = new ResizeObserver(() => {
       if (container.clientWidth > 0 && container.clientHeight > 0) {
-    term.open(container);
-    fitAddon.fit();
+        if (!term.element) term.open(container);
+        fitAddon.fit();
       }
     });
     resizeObserver.observe(container);
 
-    term.write('Connected to terminal\r\n');
-
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
+    setIsReady(true);
 
     return () => {
+      disposable.dispose();
       resizeObserver.disconnect();
       term.dispose();
+      terminalRef.current = null;
+      setIsReady(false);
     };
-  }, [containerId, settings, theme]);
+  }, [containerId, settings, theme, onData]); // onData is now a dependency
 
   const write = useCallback((data: string) => {
     terminalRef.current?.write(data);
   }, []);
 
-  const dispose = useCallback(() => {
-    terminalRef.current?.dispose();
+  const focus = useCallback(() => {
+    terminalRef.current?.focus();
   }, []);
 
   return useMemo(() => ({
     terminal: terminalRef.current,
+    isReady,
     write,
-    dispose,
-  }), [write, dispose]);
+    focus,
+  }), [isReady, write, focus]);
 };

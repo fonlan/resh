@@ -144,8 +144,12 @@ impl SSHClient {
         info!("[SSH] Authentication successful. Opening channel...");
 
         let channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
-        channel.request_pty(false, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| e.to_string())?;
-        channel.request_shell(true).await.map_err(|e| e.to_string())?;
+        
+        // Request PTY and wait for reply to ensure it's granted
+        channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
+        
+        // Request shell and wait for reply
+        channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
 
         let channel_id = channel.id();
         {

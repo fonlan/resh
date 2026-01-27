@@ -38,15 +38,18 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const memoizedSettings = React.useMemo(() => {
       if (!terminalSettings) return undefined;
       return { ...terminalSettings };
-  }, [
-    terminalSettings?.fontFamily,
-    terminalSettings?.fontSize,
-    terminalSettings?.cursorStyle,
-    terminalSettings?.scrollback
-  ]);
+  }, [terminalSettings]);
 
-  const { terminal, write } = useTerminal(containerId, memoizedSettings, theme);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  
+  // Define handleData before useTerminal
+  const handleData = React.useCallback((data: string) => {
+    if (sessionIdRef.current) {
+      invoke('send_command', { params: { session_id: sessionIdRef.current, command: data } });
+    }
+  }, []);
+
+  const { terminal, isReady, write, focus } = useTerminal(containerId, memoizedSettings, theme, handleData);
   const [showManualAuth, setShowManualAuth] = useState(false);
   const [manualCredentials, setManualCredentials] = useState({ username: server.username, password: '', privateKey: '', passphrase: '' });
   const [connectTrigger, setConnectTrigger] = useState(0);
@@ -56,13 +59,20 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const serversRef = useRef(servers);
   const proxiesRef = useRef(proxies);
 
-  // Update refs when props change (but don't trigger reconnection)
+  // Use refs for stable access inside the connect effect without triggering it
+  const writeRef = useRef(write);
+  useEffect(() => {
+    writeRef.current = write;
+  }, [write]);
+
+  // Update refs when props change
   useEffect(() => {
     authenticationsRef.current = authentications;
     serversRef.current = servers;
     proxiesRef.current = proxies;
   }, [authentications, servers, proxies]);
 
+  // Connection effect - now stabilized
   useEffect(() => {
     if (!serverId || connectedRef.current) return;
 
@@ -72,7 +82,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     const connect = async (manualCreds?: typeof manualCredentials) => {
       try {
         connectedRef.current = true;
-        write(t.terminalTab.connecting.replace('{name}', server.name) + '\r\n');
+        writeRef.current(t.terminalTab.connecting.replace('{name}', server.name) + '\r\n');
 
         let password = manualCreds?.password;
         let private_key = manualCreds?.privateKey;
@@ -80,16 +90,13 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         let username = manualCreds?.username || server.username;
 
         if (!manualCreds) {
-          // Get authentication credentials
           const auth = authenticationsRef.current.find(a => a.id === server.authId);
-
           if (!auth && server.authId) {
-            write('\r\n' + t.terminalTab.error.replace('{error}', 'Authentication not found.') + '\r\n');
+            writeRef.current('\r\n' + t.terminalTab.error.replace('{error}', 'Authentication not found.') + '\r\n');
             setShowManualAuth(true);
             connectedRef.current = false;
             return;
           }
-
           if (auth?.type === 'password') {
             password = auth.password;
             username = auth.username || server.username;
@@ -99,20 +106,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           }
         }
 
-        // Resolve proxy
         const proxy = proxiesRef.current.find(p => p.id === server.proxyId);
-        
-        // Resolve jumphost
         let jumphost = null;
         if (server.jumphostId) {
           const jhServer = serversRef.current.find(s => s.id === server.jumphostId);
           if (jhServer) {
             const jhAuth = authenticationsRef.current.find(a => a.id === jhServer.authId);
             let jhUsername = jhServer.username;
-            let jhPassword = undefined;
-            let jhPrivateKey = undefined;
-            let jhPassphrase = undefined;
-
+            let jhPassword: string | undefined = undefined;
+            let jhPrivateKey: string | undefined = undefined;
+            let jhPassphrase: string | undefined = undefined;
             if (jhAuth?.type === 'password') {
               jhPassword = jhAuth.password;
               jhUsername = jhAuth.username || jhServer.username;
@@ -120,111 +123,75 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
               jhPrivateKey = jhAuth.keyContent;
               jhPassphrase = jhAuth.passphrase;
             }
-
-            jumphost = {
-              host: jhServer.host,
-              port: jhServer.port,
-              username: jhUsername,
-              password: jhPassword,
-              private_key: jhPrivateKey,
-              passphrase: jhPassphrase,
-            };
+            jumphost = { host: jhServer.host, port: jhServer.port, username: jhUsername, password: jhPassword, private_key: jhPrivateKey, passphrase: jhPassphrase };
           }
         }
 
-        const params = {
-          host: server.host,
-          port: server.port,
-          username,
-          password,
-          private_key,
-          passphrase,
-          proxy: proxy || null,
-          jumphost: jumphost || null
-        };
-
-        const response = await invoke<{ session_id: string }>('connect_to_server', { params });
+        const response = await invoke<{ session_id: string }>('connect_to_server', { 
+          params: { host: server.host, port: server.port, username, password, private_key, passphrase, proxy: proxy || null, jumphost: jumphost || null } 
+        });
+        
         const sid = response.session_id;
         sessionIdRef.current = sid;
         setSessionId(sid);
         setShowManualAuth(false);
-        write(t.terminalTab.connected.replace('{id}', sid) + '\r\n');
+        writeRef.current(t.terminalTab.connected.replace('{id}', sid) + '\r\n');
 
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
-          write(event.payload);
+          writeRef.current(event.payload);
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-          write('\r\n' + t.terminalTab.connectionClosed + '\r\n');
+          writeRef.current('\r\n' + t.terminalTab.connectionClosed + '\r\n');
         });
 
       } catch (err) {
-        write('\r\n' + t.terminalTab.error.replace('{error}', String(err)) + '\r\n');
+        writeRef.current('\r\n' + t.terminalTab.error.replace('{error}', String(err)) + '\r\n');
         connectedRef.current = false;
       }
     };
 
     if (connectTrigger > 0) {
-        connect(manualCredentials.password || manualCredentials.privateKey ? manualCredentials : undefined);
+      connect(manualCredentials.password || manualCredentials.privateKey ? manualCredentials : undefined);
     } else if (!showManualAuth) {
-        connect();
+      connect();
     }
 
     return () => {
       if (outputUnlistener) outputUnlistener();
       if (closedUnlistener) closedUnlistener();
-
       const currentSid = sessionIdRef.current;
       if (currentSid) {
-        invoke('close_session', { session_id: currentSid }).catch(err =>
-          console.error(`Failed to close session ${currentSid}:`, err)
-        );
+        invoke('close_session', { session_id: currentSid }).catch(err => console.error(`Failed to close session ${currentSid}:`, err));
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, write, t, showManualAuth, connectTrigger, manualCredentials]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, connectTrigger, manualCredentials]);
 
+  // Terminal focus effect (input is now handled inside useTerminal)
   useEffect(() => {
-    if (!terminal || !sessionId) return;
+    if (!terminal || !isReady || !sessionId) return;
+    if (isActive) focus();
+  }, [terminal, isReady, sessionId, isActive, focus]);
 
-    const disposable = terminal.onData((data) => {
-      invoke('send_command', {
-        params: {
-          session_id: sessionId,
-          command: data
-        }
-      });
-    });
-
-    return () => disposable.dispose();
-  }, [terminal, sessionId]);
-
+  // Focus on active change
   useEffect(() => {
-    if (!terminal || !sessionId) return;
+    if (isActive && isReady) focus();
+  }, [isActive, isReady, focus]);
 
+  // Resize handler
+  useEffect(() => {
+    if (!terminal || !isReady || !sessionId) return;
     let resizeTimeout: ReturnType<typeof setTimeout>;
-
     const handleResize = () => {
       clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
-        const cols = terminal.cols || 80;
-        const rows = terminal.rows || 24;
-
-        invoke('resize_terminal', {
-          params: {
-            session_id: sessionId,
-            cols,
-            rows,
-          }
-        }).catch(err => console.error('Terminal resize failed:', err));
+        invoke('resize_terminal', { params: { session_id: sessionId, cols: terminal.cols || 80, rows: terminal.rows || 24 } })
+          .catch(err => console.error('Terminal resize failed:', err));
       }, 300);
     };
-
     window.addEventListener('resize', handleResize);
-    return () => {
-      clearTimeout(resizeTimeout);
-      window.removeEventListener('resize', handleResize);
-    };
-  }, [terminal, sessionId]);
+    return () => { clearTimeout(resizeTimeout); window.removeEventListener('resize', handleResize); };
+  }, [terminal, isReady, sessionId]);
 
   return (
     <div className="relative w-full h-full">
