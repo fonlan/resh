@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 use lazy_static::lazy_static;
+use tracing::{info, error, warn};
 
 lazy_static! {
     static ref SESSIONS: Mutex<HashMap<String, (client::Handle<ClientHandler>, ChannelId)>> = Mutex::new(HashMap::new());
@@ -24,7 +25,16 @@ impl SSHClient {
         passphrase: Option<String>,
         tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel for forwarding SSH data
     ) -> Result<String, String> {
-        let config = client::Config::default();
+        let mut config = client::Config::default();
+        
+        // Enhance RSA compatibility for modern OpenSSH servers
+        config.preferred.key = std::borrow::Cow::Owned(vec![
+            russh::keys::key::Name("ssh-ed25519"),
+            russh::keys::key::Name("rsa-sha2-256"), // Try 256 before 512 for better compatibility
+            russh::keys::key::Name("rsa-sha2-512"),
+            russh::keys::key::Name("ssh-rsa"),
+        ]);
+
         let config = Arc::new(config);
 
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -32,13 +42,13 @@ impl SSHClient {
         // Create handler with session_id and channel
         let handler = ClientHandler::with_channel(session_id.clone(), tx);
 
-        println!("Connecting to {}:{} as {}", host, port, username);
+        info!("[SSH] Connecting to {}:{} as {}", host, port, username);
 
         // Connect
         let mut session = client::connect(config, (host, port), handler)
             .await
             .map_err(|e| {
-                println!("Connection error: {}", e);
+                error!("[SSH] Connection error: {}", e);
                 e.to_string()
             })?;
 
@@ -46,27 +56,27 @@ impl SSHClient {
 
         // Try publickey auth if private key is provided
         if let Some(key_content) = private_key {
-            println!("Attempting publickey auth with {}...", username);
+            info!("[SSH] Attempting publickey auth for user: '{}'", username);
             let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())
                 .map_err(|e| {
                     let err = format!("Failed to decode private key: {}", e);
-                    println!("{}", err);
+                    error!("[SSH] {}", err);
                     err
                 })?;
             
-            println!("Decoded key type: {:?}", key.name());
+            info!("[SSH] Decoded key type: {:?}", key.name());
             let key_pair = Arc::new(key);
             
             match session.authenticate_publickey(username, key_pair).await {
                 Ok(true) => {
                     authenticated = true;
-                    println!("Publickey authentication successful.");
+                    info!("[SSH] Publickey authentication successful.");
                 },
                 Ok(false) => {
-                    println!("Publickey authentication rejected by server.");
+                    warn!("[SSH] Publickey authentication rejected by server.");
                 },
                 Err(e) => {
-                    println!("Publickey authentication error: {}", e);
+                    error!("[SSH] Publickey authentication error: {}", e);
                 }
             }
         }
@@ -74,12 +84,12 @@ impl SSHClient {
         // Try password auth if not authenticated and password is provided
         if !authenticated {
             if let Some(pwd) = password {
-                println!("Attempting password auth...");
+                info!("[SSH] Attempting password auth...");
                 if session.authenticate_password(username, &pwd).await.map_err(|e| e.to_string())? {
                     authenticated = true;
-                    println!("Password authentication successful.");
+                    info!("[SSH] Password authentication successful.");
                 } else {
-                    println!("Password authentication failed.");
+                    warn!("[SSH] Password authentication failed.");
                 }
             }
         }
@@ -88,7 +98,7 @@ impl SSHClient {
             return Err("Authentication failed".to_string());
         }
 
-        println!("Authentication successful. Opening channel...");
+        info!("[SSH] Authentication successful. Opening channel...");
 
         // Open channel
         let channel = session
