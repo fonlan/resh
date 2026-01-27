@@ -84,6 +84,8 @@ pub struct GeneralSettings {
     pub confirm_close_tab: bool,
     pub confirm_exit_app: bool,
     #[serde(default)]
+    pub debug_enabled: bool,
+    #[serde(default)]
     pub recent_server_ids: Vec<String>,
 }
 
@@ -120,6 +122,7 @@ impl Config {
                 },
                 confirm_close_tab: true,
                 confirm_exit_app: true,
+                debug_enabled: false,
                 recent_server_ids: vec![],
             },
         }

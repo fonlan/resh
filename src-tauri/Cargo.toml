@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-russh = "0.40"
+russh = "0.45.0"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 aes-gcm = "0.10"
@@ -25,12 +25,14 @@ rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
 reqwest = { version = "0.11", features = ["json"] }
-log = "0.4"
-env_logger = "0.11"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+tracing-log = "0.2"
 argon2 = "0.5"
 lazy_static = "1.5.0"
 async-trait = "0.1.89"
-russh-keys = "0.40.0"
+russh-keys = "0.45.0"
 image = "0.24"
 
 [features]
@@ -47,3 +49,10 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[profile.release]
+codegen-units = 1 # 最大化优化，牺牲编译速度
+lto = true        # 开启链接时优化 (Link Time Optimization)
+opt-level = "z"   # 针对体积进行优化 (如果追求极致性能可改为 3)
+panic = "abort"   # 移除 Panic 回溯信息，减小体积
+strip = true      # 自动剥离符号表

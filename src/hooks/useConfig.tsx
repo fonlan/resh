@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useState, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Config } from '../types/config';
+import { logger } from '../utils/logger';
 
 interface ConfigContextType {
   config: Config | null;
@@ -20,13 +21,13 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const loadConfig = useCallback(async () => {
     try {
       setLoading(true);
-      console.log('[ConfigProvider] Loading config...');
+      logger.info('[ConfigProvider] Loading config...');
       const merged = await invoke<Config>('get_merged_config');
-      console.log('[ConfigProvider] Loaded config:', merged);
+      logger.info('[ConfigProvider] Loaded config', { version: merged.version });
       setConfig(merged);
       setError(null);
     } catch (err) {
-      console.error('[ConfigProvider] Failed to load config:', err);
+      logger.error('[ConfigProvider] Failed to load config', err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -35,15 +36,15 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
   const saveConfig = useCallback(async (syncPart: Config, localPart: Config) => {
     try {
-      console.log('[ConfigProvider] Saving config...');
+      logger.info('[ConfigProvider] Saving config...');
       await invoke('save_config', { syncPart, localPart });
-      console.log('[ConfigProvider] Config saved successfully');
+      logger.info('[ConfigProvider] Config saved successfully');
       
       // Update global state
       setConfig(localPart);
       setError(null);
     } catch (err) {
-      console.error('[ConfigProvider] Failed to save config:', err);
+      logger.error('[ConfigProvider] Failed to save config', err);
       setError(err instanceof Error ? err.message : String(err));
       throw err;
     }

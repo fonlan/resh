@@ -62,6 +62,7 @@ export interface GeneralSettings {
   webdav: WebDAVSettings;
   confirmCloseTab: boolean;
   confirmExitApp: boolean;
+  debugEnabled: boolean;
   recentServerIds: string[];
 }
 

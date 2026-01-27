@@ -28,6 +28,7 @@ export const locales = {
     confirmations: 'Confirmations',
     confirmCloseTab: 'Confirm before closing tabs',
     confirmExitApp: 'Confirm before exiting application',
+    debugEnabled: 'Enable debug logs',
     saveStatus: {
       saving: 'Saving...',
       saved: 'Saved',
@@ -186,6 +187,7 @@ export const locales = {
     confirmations: '确认操作',
     confirmCloseTab: '关闭标签页前确认',
     confirmExitApp: '退出应用前确认',
+    debugEnabled: '启用调试日志',
     saveStatus: {
       saving: '正在保存...',
       saved: '已保存',

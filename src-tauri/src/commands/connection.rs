@@ -59,7 +59,7 @@ pub async fn connect_to_server(
             let text = String::from_utf8_lossy(&data).to_string();
             
             if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
-                log::error!("Failed to emit terminal event: {}", e);
+                tracing::error!("Failed to emit terminal event: {}", e);
             }
         }
     });

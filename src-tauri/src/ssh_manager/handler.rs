@@ -30,17 +30,22 @@ impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
-        self,
+        &mut self,
         _server_public_key: &key::PublicKey,
-    ) -> Result<(Self, bool), Self::Error> {
-        Ok((self, true))  // Accept all keys
+    ) -> Result<bool, Self::Error> {
+        Ok(true)  // Accept all keys
     }
 
-    async fn data(self, _channel: russh::ChannelId, data: &[u8], session: russh::client::Session) -> Result<(Self, russh::client::Session), Self::Error> {
+    async fn data(
+        &mut self,
+        _channel: russh::ChannelId,
+        data: &[u8],
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
         // Forward data from SSH server to frontend
         if let (Some(session_id), Some(tx)) = (&self.session_id, &self.tx) {
             let _ = tx.send((session_id.clone(), data.to_vec())).await;
         }
-        Ok((self, session))
+        Ok(())
     }
 }

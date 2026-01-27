@@ -192,6 +192,16 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             />
             <span className="form-label mb-0">{t.confirmExitApp}</span>
           </label>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={general.debugEnabled}
+              onChange={(e) => handleConfirmationChange('debugEnabled' as any, e.target.checked)}
+              className="checkbox"
+            />
+            <span className="form-label mb-0">{t.debugEnabled}</span>
+          </label>
         </div>
       </div>
     </div>

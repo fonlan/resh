@@ -29,7 +29,22 @@ pub async fn save_config(
     state.config_manager.save_config(&sync_part, &sync_path)?;
     state.config_manager.save_config(&local_part, &local_path)?;
 
+    // Update log level if it changed in local_part
+    crate::logger::set_log_level(local_part.general.debug_enabled);
+
     Ok(())
+}
+
+#[tauri::command]
+pub async fn log_event(level: String, message: String) {
+    match level.as_str() {
+        "trace" => tracing::trace!("{}", message),
+        "debug" => tracing::debug!("{}", message),
+        "info" => tracing::info!("{}", message),
+        "warn" => tracing::warn!("{}", message),
+        "error" => tracing::error!("{}", message),
+        _ => tracing::info!("{}", message),
+    }
 }
 
 #[allow(dead_code)]
@@ -57,6 +72,9 @@ pub async fn save_config_encrypted(
     state
         .config_manager
         .save_encrypted_local_config(&local_part, &password)?;
+
+    // Update log level if it changed in local_part
+    crate::logger::set_log_level(local_part.general.debug_enabled);
 
     Ok(())
 }

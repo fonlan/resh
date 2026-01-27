@@ -8,6 +8,7 @@ mod config;
 mod ssh_manager;
 mod master_password;
 mod webdav;
+mod logger;
 
 use commands::AppState;
 use config::ConfigManager;
@@ -45,6 +46,14 @@ async fn main() {
             let config_manager = ConfigManager::new(app_data_dir.clone());
             let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
 
+            // Load initial config to get debug status
+            let local_config = config_manager.load_local_config().unwrap_or_else(|_| crate::config::Config::empty());
+            let debug_enabled = local_config.general.debug_enabled;
+
+            // Initialize logging
+            logger::init_logging(app_data_dir.clone(), debug_enabled);
+            tracing::info!("Logging initialized. Debug mode: {}", debug_enabled);
+
             let state = Arc::new(AppState {
                 config_manager,
                 password_manager: master_password_manager,
@@ -58,6 +67,7 @@ async fn main() {
             commands::config::get_merged_config,
             commands::config::save_config,
             commands::config::get_app_data_dir,
+            commands::config::log_event,
             commands::connection::connect_to_server,
             commands::connection::send_command,
             commands::connection::resize_terminal,

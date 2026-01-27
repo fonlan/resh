@@ -46,17 +46,28 @@ impl SSHClient {
 
         // Try publickey auth if private key is provided
         if let Some(key_content) = private_key {
-            println!("Attempting publickey auth...");
+            println!("Attempting publickey auth with {}...", username);
             let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())
-                .map_err(|e| format!("Failed to decode private key: {}", e))?;
+                .map_err(|e| {
+                    let err = format!("Failed to decode private key: {}", e);
+                    println!("{}", err);
+                    err
+                })?;
             
+            println!("Decoded key type: {:?}", key.name());
             let key_pair = Arc::new(key);
             
-            if session.authenticate_publickey(username, key_pair).await.map_err(|e| e.to_string())? {
-                authenticated = true;
-                println!("Publickey authentication successful.");
-            } else {
-                println!("Publickey authentication failed.");
+            match session.authenticate_publickey(username, key_pair).await {
+                Ok(true) => {
+                    authenticated = true;
+                    println!("Publickey authentication successful.");
+                },
+                Ok(false) => {
+                    println!("Publickey authentication rejected by server.");
+                },
+                Err(e) => {
+                    println!("Publickey authentication error: {}", e);
+                }
             }
         }
 
