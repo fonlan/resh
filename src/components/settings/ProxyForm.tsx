@@ -124,7 +124,6 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
                 value={type}
                 checked={formData.type === type}
                 onChange={() => handleChange('type', type)}
-                className="w-4 h-4"
               />
               <span className="text-gray-300 uppercase">{type}</span>
             </label>

@@ -371,6 +371,7 @@
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   padding: 1px;
+  pointer-events: none;
 }
 
 .item-card:hover::before {
@@ -423,6 +424,8 @@
 .item-actions {
   display: flex;
   gap: 6px;
+  position: relative;
+  z-index: 2;
 }
 
 .btn-icon {
@@ -671,6 +674,7 @@
   background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
   opacity: 0;
   transition: opacity var(--transition-fast);
+  pointer-events: none;
 }
 
 .settings-tab-btn:hover {

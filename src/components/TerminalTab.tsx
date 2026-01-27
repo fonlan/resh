@@ -58,6 +58,16 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, []);
 
   const { terminal, isReady, write, focus } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
+
+  // Determine container background based on theme
+  const containerBg = React.useMemo(() => {
+    if (theme === 'light') return '#ffffff';
+    if (theme === 'dark') return '#000000';
+    // for system, we could check media query but usually terminal is dark
+    // let's follow useTerminal's logic or just use a sensible default
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? '#000000' : '#ffffff';
+  }, [theme]);
+
   const [showManualAuth, setShowManualAuth] = useState(false);
   const [manualCredentials, setManualCredentials] = useState({ username: server.username, password: '', privateKey: '', passphrase: '' });
   const [connectTrigger, setConnectTrigger] = useState(0);
@@ -185,7 +195,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, [isActive, isReady, focus]);
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full" style={{ padding: '8px', backgroundColor: containerBg }}>
       <div
         id={containerId}
         style={{
@@ -193,7 +203,6 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           width: '100%',
           height: '100%',
           minHeight: '400px',
-          backgroundColor: '#000'
         }}
       />
       

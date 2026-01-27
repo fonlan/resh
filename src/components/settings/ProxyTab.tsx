@@ -162,7 +162,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
                   formRef.current.setSynced(e.target.checked);
                 }
               }}
-              className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
+              className="checkbox"
             />
             <label htmlFor="synced-footer-proxy" className="text-sm font-medium text-gray-300 cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}

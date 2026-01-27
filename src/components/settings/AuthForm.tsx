@@ -156,7 +156,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
                 value={type}
                 checked={formData.type === type}
                 onChange={() => handleTypeChange(type)}
-                className="w-4 h-4"
               />
               <span className="text-gray-300 capitalize">
                 {type === 'key' ? t.authTab.keyType : t.authTab.passwordType}
