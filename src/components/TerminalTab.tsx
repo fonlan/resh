@@ -91,7 +91,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     }
   }, []);
 
-  const { terminal, isReady, write, focus } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
+  const { terminal, isReady, write, focus, getBufferText } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
 
   // Determine container background based on theme
   const containerBg = React.useMemo(() => {
@@ -270,6 +270,26 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       window.removeEventListener('paste-snippet', handlePasteSnippet as EventListener);
     };
   }, [isActive, focus]);
+
+  // Listen for export logs event
+  useEffect(() => {
+    const handleExportLogs = async () => {
+      if (!isReady) return;
+      const content = getBufferText();
+      const defaultPath = `resh-log-${server.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      
+      try {
+        await invoke('export_terminal_log', { content, defaultPath });
+      } catch (err) {
+        console.error('Failed to export logs:', err);
+      }
+    };
+
+    window.addEventListener(`export-terminal-logs:${tabId}`, handleExportLogs as EventListener);
+    return () => {
+      window.removeEventListener(`export-terminal-logs:${tabId}`, handleExportLogs as EventListener);
+    };
+  }, [tabId, isReady, getBufferText, server.name]);
 
   return (
     <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>

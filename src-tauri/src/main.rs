@@ -123,6 +123,7 @@ async fn main() {
             commands::connection::send_command,
             commands::connection::resize_terminal,
             commands::connection::close_session,
+            commands::connection::export_terminal_log,
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,
             commands::master_password::verify_master_password,

@@ -37,6 +37,7 @@ image = "0.24"
 chrono = { version = "0.4.31", features = ["serde"] }
 tokio-socks = "0.5.1"
 base64 = "0.22"
+rfd = "0.14"
 
 [features]
 default = ["custom-protocol"]

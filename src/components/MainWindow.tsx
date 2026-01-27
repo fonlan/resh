@@ -132,6 +132,11 @@ export const MainWindow: React.FC = () => {
     setActiveTabId(tabId);
   }, [tabs]);
 
+  const handleExportLogs = useCallback((tabId: string) => {
+    const event = new CustomEvent(`export-terminal-logs:${tabId}`);
+    window.dispatchEvent(event);
+  }, []);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
     e.preventDefault();
     setContextMenu({
@@ -293,6 +298,7 @@ export const MainWindow: React.FC = () => {
           tabId={contextMenu.tabId}
           onClose={() => setContextMenu(null)}
           onClone={handleCloneTab}
+          onExport={handleExportLogs}
           onCloseTab={handleCloseTab}
           onCloseOthers={handleCloseOthers}
         />

@@ -127,10 +127,24 @@ export const useTerminal = (
     terminalRef.current?.focus();
   }, []);
 
+  const getBufferText = useCallback(() => {
+    if (!terminalRef.current) return '';
+    const buffer = terminalRef.current.buffer.active;
+    let text = '';
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      if (line) {
+        text += line.translateToString(true) + '\n';
+      }
+    }
+    return text;
+  }, []);
+
   return useMemo(() => ({
     terminal: terminalRef.current,
     isReady,
     write,
     focus,
-  }), [isReady, write, focus]);
+    getBufferText,
+  }), [isReady, write, focus, getBufferText]);
 };

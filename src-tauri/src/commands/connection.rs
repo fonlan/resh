@@ -135,3 +135,25 @@ pub async fn close_session(
     SSHClient::disconnect(&session_id).await?;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn export_terminal_log(
+    content: String,
+    default_path: String,
+) -> Result<(), String> {
+    use rfd::FileDialog;
+    use std::fs;
+
+    let path = FileDialog::new()
+        .set_file_name(&default_path)
+        .add_filter("Text", &["txt"])
+        .add_filter("All Files", &["*"])
+        .save_file();
+
+    if let Some(path) = path {
+        fs::write(path, content).map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err("Save cancelled".to_string())
+    }
+}

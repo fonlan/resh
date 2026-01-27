@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Copy, X, XCircle } from 'lucide-react';
+import { Copy, X, XCircle, FileDown } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
 interface TabContextMenuProps {
@@ -8,6 +8,7 @@ interface TabContextMenuProps {
   tabId: string;
   onClose: () => void;
   onClone: (tabId: string) => void;
+  onExport: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onCloseOthers: (tabId: string) => void;
 }
@@ -18,6 +19,7 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
   tabId,
   onClose,
   onClone,
+  onExport,
   onCloseTab,
   onCloseOthers,
 }) => {
@@ -87,7 +89,19 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
         <Copy size={14} />
         <span>{t.mainWindow.cloneTab}</span>
       </button>
-      
+
+      <button
+        type="button"
+        className="tab-context-menu-item"
+        onClick={() => {
+          onExport(tabId);
+          onClose();
+        }}
+      >
+        <FileDown size={14} />
+        <span>{t.mainWindow.exportLogs}</span>
+      </button>
+
       <div className="tab-context-menu-divider" />
       
       <button

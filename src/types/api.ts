@@ -46,3 +46,8 @@ export interface SaveConfigRequest {
 export interface SyncWebDAVRequest {
   // Empty - uses stored WebDAV config
 }
+
+export interface ExportLogRequest {
+  content: string;
+  defaultPath: string;
+}
