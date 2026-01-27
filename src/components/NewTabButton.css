@@ -7,19 +7,18 @@
 }
 
 .new-tab-btn {
-  height: 32px;
-  width: 32px;
+  height: 40px;
+  width: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: none;
+  border-radius: 0;
   color: var(--text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
   flex-shrink: 0;
-  margin-left: 4px;
 }
 
 .new-tab-btn:hover {
