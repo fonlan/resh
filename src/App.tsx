@@ -5,15 +5,14 @@ import { useConfig } from './hooks/useConfig';
 
 function App() {
   const { config } = useConfig();
+  const theme = config?.general.theme;
 
   // Track previous config to detect changes
   const prevThemeRef = useRef<string | null>(null);
 
   // Apply theme based on config
   useEffect(() => {
-    if (!config) return;
-
-    const theme = config.general.theme;
+    if (!theme) return;
 
     // Check if theme actually changed
     if (prevThemeRef.current === theme && prevThemeRef.current !== null) {
@@ -43,7 +42,7 @@ function App() {
     }
 
     prevThemeRef.current = theme;
-  }, [config]);
+  }, [theme]);
 
   return (
     <div className="app-container">

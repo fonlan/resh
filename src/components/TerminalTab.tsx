@@ -20,7 +20,7 @@ interface TerminalTabProps {
   theme?: 'light' | 'dark' | 'system';
 }
 
-export const TerminalTab: React.FC<TerminalTabProps> = ({
+export const TerminalTab = React.memo<TerminalTabProps>(({
   tabId,
   serverId,
   isActive,
@@ -38,7 +38,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const memoizedSettings = React.useMemo(() => {
       if (!terminalSettings) return undefined;
       return { ...terminalSettings };
-  }, [terminalSettings]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(terminalSettings)]);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
@@ -49,7 +50,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     }
   }, []);
 
-  const { terminal, isReady, write, focus } = useTerminal(containerId, memoizedSettings, theme, handleData);
+  const handleResize = React.useCallback((cols: number, rows: number) => {
+    if (sessionIdRef.current) {
+      invoke('resize_terminal', { params: { session_id: sessionIdRef.current, cols, rows } })
+        .catch(err => console.error('Terminal resize failed:', err));
+    }
+  }, []);
+
+  const { terminal, isReady, write, focus } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
   const [showManualAuth, setShowManualAuth] = useState(false);
   const [manualCredentials, setManualCredentials] = useState({ username: server.username, password: '', privateKey: '', passphrase: '' });
   const [connectTrigger, setConnectTrigger] = useState(0);
@@ -176,21 +184,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     if (isActive && isReady) focus();
   }, [isActive, isReady, focus]);
 
-  // Resize handler
-  useEffect(() => {
-    if (!terminal || !isReady || !sessionId) return;
-    let resizeTimeout: ReturnType<typeof setTimeout>;
-    const handleResize = () => {
-      clearTimeout(resizeTimeout);
-      resizeTimeout = setTimeout(() => {
-        invoke('resize_terminal', { params: { session_id: sessionId, cols: terminal.cols || 80, rows: terminal.rows || 24 } })
-          .catch(err => console.error('Terminal resize failed:', err));
-      }, 300);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => { clearTimeout(resizeTimeout); window.removeEventListener('resize', handleResize); };
-  }, [terminal, isReady, sessionId]);
-
   return (
     <div className="relative w-full h-full">
       <div
@@ -272,4 +265,4 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       )}
     </div>
   );
-};
+});

@@ -9,12 +9,24 @@ export const useTerminal = (
   containerId: string, 
   settings?: TerminalSettings, 
   theme?: 'light' | 'dark' | 'system',
-  onData?: (data: string) => void
+  onData?: (data: string) => void,
+  onResize?: (cols: number, rows: number) => void
 ) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const webglAddonRef = useRef<WebglAddon | null>(null);
   const [isReady, setIsReady] = useState(false);
+
+  const onDataRef = useRef(onData);
+  const onResizeRef = useRef(onResize);
+
+  useEffect(() => {
+    onDataRef.current = onData;
+  }, [onData]);
+
+  useEffect(() => {
+    onResizeRef.current = onResize;
+  }, [onResize]);
 
   useEffect(() => {
     const container = document.getElementById(containerId);
@@ -46,7 +58,7 @@ export const useTerminal = (
 
     // Register onData inside the hook to ensure it's always attached to the current term
     const disposable = term.onData((data) => {
-      if (onData) onData(data);
+      onDataRef.current?.(data);
     });
 
     if (container.clientWidth > 0 && container.clientHeight > 0) {
@@ -81,6 +93,7 @@ export const useTerminal = (
           }
         }
         fitAddon.fit();
+        onResizeRef.current?.(term.cols, term.rows);
       }
     });
     resizeObserver.observe(container);
@@ -98,7 +111,7 @@ export const useTerminal = (
       webglAddonRef.current = null;
       setIsReady(false);
     };
-  }, [containerId, settings, theme, onData]); // onData is now a dependency
+  }, [containerId, settings, theme]); // onData and onResize removed from dependencies
 
   const write = useCallback((data: string) => {
     terminalRef.current?.write(data);

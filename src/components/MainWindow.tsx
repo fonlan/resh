@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, Suspense } from 'react';
 import { Settings, X } from 'lucide-react';
-import { SettingsModal } from './settings/SettingsModal';
+// SettingsModal is now lazy loaded
+const SettingsModal = React.lazy(() => 
+  import('./settings/SettingsModal').then(module => ({ default: module.SettingsModal }))
+);
 import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
@@ -25,19 +28,19 @@ export const MainWindow: React.FC = () => {
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
 
-  const handleTabDragStart = (index: number) => {
+  const handleTabDragStart = useCallback((index: number) => {
     if (tabs.length <= 1) return;
     setDraggedTabIndex(index);
-  };
+  }, [tabs.length]);
 
-  const handleTabDragOver = (e: React.DragEvent, index: number) => {
+  const handleTabDragOver = useCallback((e: React.DragEvent, index: number) => {
     e.preventDefault();
     if (draggedTabIndex !== null && draggedTabIndex !== index && dropTargetIndex !== index) {
       setDropTargetIndex(index);
     }
-  };
+  }, [draggedTabIndex, dropTargetIndex]);
 
-  const handleTabDrop = (e: React.DragEvent, dropIndex: number) => {
+  const handleTabDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
     e.preventDefault();
     if (
       draggedTabIndex !== null &&
@@ -54,14 +57,14 @@ export const MainWindow: React.FC = () => {
     }
     setDraggedTabIndex(null);
     setDropTargetIndex(null);
-  };
+  }, [draggedTabIndex, tabs]);
 
-  const handleTabDragEnd = () => {
+  const handleTabDragEnd = useCallback(() => {
     setDraggedTabIndex(null);
     setDropTargetIndex(null);
-  };
+  }, []);
 
-  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
+  const handleTabKeyDown = useCallback((e: React.KeyboardEvent, index: number) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight' && index < tabs.length - 1) {
       e.preventDefault();
       const newTabs = [...tabs];
@@ -73,17 +76,17 @@ export const MainWindow: React.FC = () => {
       [newTabs[index], newTabs[index - 1]] = [newTabs[index - 1], newTabs[index]];
       setTabs(newTabs);
     }
-  };
+  }, [tabs]);
 
-  const handleCloseTab = (tabId: string) => {
+  const handleCloseTab = useCallback((tabId: string) => {
     const newTabs = tabs.filter(t => t.id !== tabId);
     setTabs(newTabs);
     if (activeTabId === tabId) {
       setActiveTabId(newTabs.length > 0 ? newTabs[0].id : null);
     }
-  };
+  }, [tabs, activeTabId]);
 
-  const handleAddTab = async (serverId: string) => {
+  const handleAddTab = useCallback(async (serverId: string) => {
     const server = config?.servers.find(s => s.id === serverId);
     if (!server) return;
 
@@ -100,12 +103,16 @@ export const MainWindow: React.FC = () => {
       const updatedGeneral = addRecentServer(config.general, serverId);
       await saveConfig({ ...config, general: updatedGeneral });
     }
-  };
+  }, [config, saveConfig]);
 
-  const handleConnectServer = (serverId: string) => {
+  const handleConnectServer = useCallback((serverId: string) => {
     handleAddTab(serverId);
     setIsSettingsOpen(false);
-  };
+  }, [handleAddTab]);
+
+  const prefetchSettings = useCallback(() => {
+    import('./settings/SettingsModal');
+  }, []);
 
   const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, 3) : [];
 
@@ -163,6 +170,8 @@ export const MainWindow: React.FC = () => {
             type="button"
             className="settings-btn"
             onClick={() => setIsSettingsOpen(true)}
+            onMouseEnter={prefetchSettings}
+            onFocus={prefetchSettings}
             aria-label={t.mainWindow.settings}
             title={t.mainWindow.settings}
           >
@@ -213,11 +222,15 @@ export const MainWindow: React.FC = () => {
       </div>
 
       {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onConnectServer={handleConnectServer}
-      />
+      <Suspense fallback={null}>
+        {isSettingsOpen && (
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            onConnectServer={handleConnectServer}
+          />
+        )}
+      </Suspense>
     </div>
   );
 };
