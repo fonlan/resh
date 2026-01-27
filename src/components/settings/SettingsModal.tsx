@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle } from 'lucide-react';
-import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings } from '../../types/config';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code } from 'lucide-react';
+import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { ProxyTab } from './ProxyTab';
 import { GeneralTab } from './GeneralTab';
+import { SnippetsTab } from './SnippetsTab';
 import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
 
@@ -15,7 +16,7 @@ export interface SettingsModalProps {
   onConnectServer?: (serverId: string) => void;
 }
 
-type TabType = 'servers' | 'auth' | 'proxies' | 'general';
+type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer }) => {
@@ -151,6 +152,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, proxies } : null));
   };
 
+  const handleSnippetsUpdate = (snippets: Snippet[]) => {
+    setLocalConfig((prev) => (prev ? { ...prev, snippets } : null));
+  };
+
   const handleGeneralUpdate = (general: GeneralSettings) => {
     setLocalConfig((prev) => (prev ? { ...prev, general } : null));
   };
@@ -159,6 +164,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     { id: 'servers', label: t.servers, icon: <Server size={18} /> },
     { id: 'auth', label: t.auth, icon: <Key size={18} /> },
     { id: 'proxies', label: t.proxies, icon: <Globe size={18} /> },
+    { id: 'snippets', label: "Snippets", icon: <Code size={18} /> },
     { id: 'general', label: t.general, icon: <Settings size={18} /> },
   ];
 
@@ -243,6 +249,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 onProxiesUpdate={handleProxiesUpdate}
                 servers={localConfig.servers}
                 onServersUpdate={handleServersUpdate}
+              />
+            )}
+            {activeTab === 'snippets' && (
+              <SnippetsTab
+                snippets={localConfig.snippets || []}
+                onSnippetsUpdate={handleSnippetsUpdate}
               />
             )}
             {activeTab === 'general' && (

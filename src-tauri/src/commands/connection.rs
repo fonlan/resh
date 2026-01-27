@@ -64,7 +64,11 @@ pub async fn connect_to_server(
     // Spawn a task to forward SSH data to frontend events
     let window_clone = window.clone();
     tokio::spawn(async move {
+        let mut current_session_id = None;
         while let Some((session_id, data)) = rx.recv().await {
+            if current_session_id.is_none() {
+                current_session_id = Some(session_id.clone());
+            }
             // Convert bytes to string (lossy) for xterm.js
             // Note: xterm.js handles UTF-8, so we send string.
             // Ideally we'd send bytes, but Tauri event payload is JSON string usually.
@@ -73,6 +77,13 @@ pub async fn connect_to_server(
             
             if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
                 tracing::error!("Failed to emit terminal event: {}", e);
+            }
+        }
+        
+        // Notify frontend that connection is closed
+        if let Some(session_id) = current_session_id {
+            if let Err(e) = window_clone.emit(&format!("connection-closed:{}", session_id), ()) {
+                tracing::error!("Failed to emit connection-closed event: {}", e);
             }
         }
     });

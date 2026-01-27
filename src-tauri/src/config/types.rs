@@ -71,6 +71,18 @@ pub struct Proxy {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Snippet {
+    pub id: String,
+    pub name: String,
+    pub content: String,
+    pub description: Option<String>,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u32,
@@ -138,6 +150,8 @@ pub struct Config {
     pub servers: Vec<Server>,
     pub authentications: Vec<Authentication>,
     pub proxies: Vec<Proxy>,
+    #[serde(default)]
+    pub snippets: Vec<Snippet>,
     pub general: GeneralSettings,
 }
 
@@ -152,6 +166,8 @@ pub struct SyncConfig {
     #[serde(default)]
     pub proxies: Vec<Proxy>,
     #[serde(default)]
+    pub snippets: Vec<Snippet>,
+    #[serde(default)]
     pub removed_ids: Vec<String>,
 }
 
@@ -162,6 +178,7 @@ impl Config {
             servers: vec![],
             authentications: vec![],
             proxies: vec![],
+            snippets: vec![],
             general: GeneralSettings {
                 theme: "dark".to_string(),
                 language: "en".to_string(),

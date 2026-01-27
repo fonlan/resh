@@ -5,6 +5,7 @@ export const locales = {
     auth: 'Authentication',
     proxies: 'Proxies',
     general: 'General',
+    snippets: 'Snippets',
     appearance: 'Appearance',
     theme: 'Theme',
     language: 'Language',
@@ -89,6 +90,15 @@ export const locales = {
       deleteTooltip: 'Delete proxy',
       deleteInUseConfirmation: 'This proxy is currently in use by one or more servers. Are you sure you want to delete it? The affected servers will have their proxy settings cleared.',
     },
+    snippetsTab: {
+      title: 'Code Snippets',
+      addSnippet: 'Add Snippet',
+      editSnippet: 'Edit Snippet',
+      emptyState: 'No snippets configured. Add one to get started.',
+      editTooltip: 'Edit snippet',
+      deleteTooltip: 'Delete snippet',
+      deleteConfirmation: 'Are you sure you want to delete this snippet?',
+    },
     serverForm: {
       nameLabel: 'Server Name',
       namePlaceholder: 'e.g., Production Server, AWS EC2',
@@ -134,6 +144,14 @@ export const locales = {
       usernamePlaceholder: 'Leave empty if no auth required',
       passwordPlaceholder: 'Leave empty if no auth required',
     },
+    snippetForm: {
+      nameLabel: 'Name',
+      namePlaceholder: 'Snippet Name',
+      contentLabel: 'Content (Bash/Command)',
+      contentPlaceholder: '#!/bin/bash...',
+      descriptionLabel: 'Description (Optional)',
+      descriptionPlaceholder: 'Brief description of what this does',
+    },
     welcome: {
       title: 'Welcome to Resh',
       subtitle: 'A professional, high-performance SSH client.',
@@ -147,6 +165,7 @@ export const locales = {
     mainWindow: {
       closeTab: 'Close tab',
       settings: 'Settings',
+      snippets: 'Snippets',
       tabAriaLabel: 'Tab {index} of {total}',
     },
     windowControls: {
@@ -171,6 +190,7 @@ export const locales = {
     auth: '身份验证',
     proxies: '代理设置',
     general: '常规',
+    snippets: '代码段',
     appearance: '外观',
     theme: '主题',
     language: '语言',
@@ -255,6 +275,15 @@ export const locales = {
       deleteTooltip: '删除代理',
       deleteInUseConfirmation: '此代理正被一个或多个服务器使用。确定要删除吗？受影响的服务器的代理设置将被清空。',
     },
+    snippetsTab: {
+      title: '常用代码段',
+      addSnippet: '添加代码段',
+      editSnippet: '编辑代码段',
+      emptyState: '暂无代码段。点击添加开始使用。',
+      editTooltip: '编辑代码段',
+      deleteTooltip: '删除代码段',
+      deleteConfirmation: '确定要删除此代码段吗？',
+    },
     serverForm: {
       nameLabel: '服务器名称',
       namePlaceholder: '例如：生产服务器、AWS 实例',
@@ -300,6 +329,14 @@ export const locales = {
       usernamePlaceholder: '无需验证请留空',
       passwordPlaceholder: '无需验证请留空',
     },
+    snippetForm: {
+      nameLabel: '名称',
+      namePlaceholder: '代码段名称',
+      contentLabel: '内容 (Bash/命令)',
+      contentPlaceholder: '#!/bin/bash...',
+      descriptionLabel: '描述 (可选)',
+      descriptionPlaceholder: '简要描述此代码段的功能',
+    },
     welcome: {
       title: '欢迎使用 Resh',
       subtitle: '一款专业、高性能的 SSH 客户端。',
@@ -313,6 +350,7 @@ export const locales = {
     mainWindow: {
       closeTab: '关闭标签页',
       settings: '设置',
+      snippets: '代码段',
       tabAriaLabel: '第 {index} 个标签页，共 {total} 个',
     },
     windowControls: {

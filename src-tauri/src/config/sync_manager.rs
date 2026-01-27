@@ -1,4 +1,4 @@
-use crate::config::types::{Config, Server, Authentication, Proxy, SyncConfig};
+use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig};
 use crate::webdav::client::WebDAVClient;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -27,6 +27,7 @@ impl SyncManager {
                     servers: vec![],
                     authentications: vec![],
                     proxies: vec![],
+                    snippets: vec![],
                     removed_ids: vec![],
                 }
             }
@@ -64,6 +65,11 @@ impl SyncManager {
         for proxy in &mut local.proxies {
             if remote.removed_ids.contains(&proxy.id) {
                 proxy.synced = false;
+            }
+        }
+        for snippet in &mut local.snippets {
+            if remote.removed_ids.contains(&snippet.id) {
+                snippet.synced = false;
             }
         }
 
@@ -108,6 +114,20 @@ impl SyncManager {
             }
         }
         local.proxies = local_proxies.into_values().collect();
+
+        // Merge Snippets
+        let mut local_snippets: HashMap<String, Snippet> = local.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
+        for remote_snippet in &remote.snippets {
+            if !remote_snippet.synced { continue; }
+            if let Some(local_snippet) = local_snippets.get_mut(&remote_snippet.id) {
+                if is_newer(&remote_snippet.updated_at, &local_snippet.updated_at) {
+                    *local_snippet = remote_snippet.clone();
+                }
+            } else {
+                local_snippets.insert(remote_snippet.id.clone(), remote_snippet.clone());
+            }
+        }
+        local.snippets = local_snippets.into_values().collect();
     }
 
     fn merge_local_to_remote(&self, local: &Config, remote: &mut SyncConfig) {
@@ -116,6 +136,7 @@ impl SyncManager {
         let local_servers: HashMap<String, &Server> = local.servers.iter().map(|s| (s.id.clone(), s)).collect();
         let local_auths: HashMap<String, &Authentication> = local.authentications.iter().map(|a| (a.id.clone(), a)).collect();
         let local_proxies: HashMap<String, &Proxy> = local.proxies.iter().map(|p| (p.id.clone(), p)).collect();
+        let local_snippets: HashMap<String, &Snippet> = local.snippets.iter().map(|s| (s.id.clone(), s)).collect();
 
         let mut remote_servers: HashMap<String, Server> = remote.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         let mut to_remove_servers = Vec::new();
@@ -165,6 +186,22 @@ impl SyncManager {
             }
         }
 
+        let mut remote_snippets: HashMap<String, Snippet> = remote.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut to_remove_snippets = Vec::new();
+        for id in remote_snippets.keys() {
+            match local_snippets.get(id) {
+                None => to_remove_snippets.push(id.clone()),
+                Some(s) if !s.synced => to_remove_snippets.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_snippets {
+            remote_snippets.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
         // 2. Add/Update from local
         for local_server in &local.servers {
             if !local_server.synced { continue; }
@@ -208,6 +245,20 @@ impl SyncManager {
             }
         }
         remote.proxies = remote_proxies.into_values().collect();
+
+        for local_snippet in &local.snippets {
+            if !local_snippet.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_snippet.id);
+
+            if let Some(remote_snippet) = remote_snippets.get_mut(&local_snippet.id) {
+                if is_newer(&local_snippet.updated_at, &remote_snippet.updated_at) {
+                    *remote_snippet = local_snippet.clone();
+                }
+            } else {
+                remote_snippets.insert(local_snippet.id.clone(), local_snippet.clone());
+            }
+        }
+        remote.snippets = remote_snippets.into_values().collect();
     }
 }
 

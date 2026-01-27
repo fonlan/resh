@@ -35,6 +35,15 @@ export interface Authentication {
   updatedAt: string;
 }
 
+export interface Snippet {
+  id: string;
+  name: string;
+  content: string;
+  description?: string;
+  synced: boolean;
+  updatedAt: string;
+}
+
 export interface ProxyConfig {
   id: string;
   name: string;
@@ -78,6 +87,7 @@ export interface Config {
   servers: Server[];
   authentications: Authentication[];
   proxies: ProxyConfig[];
+  snippets: Snippet[];
   general: GeneralSettings;
 }
 

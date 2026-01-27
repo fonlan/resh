@@ -12,7 +12,7 @@ interface TerminalTabProps {
   tabId: string;
   serverId: string;
   isActive: boolean;
-  onClose: () => void;
+  onClose: (tabId: string) => void;
   server: Server;
   servers: Server[];
   authentications: Authentication[];
@@ -43,6 +43,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, [JSON.stringify(terminalSettings)]);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
   
   // Status Bar State
   const [statusText, setStatusText] = useState<string>('');
@@ -199,6 +200,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         sessionIdRef.current = sid;
         setSessionId(sid);
         setShowManualAuth(false);
+        setIsConnected(true);
         const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
         // writeRef.current(connectedMsg + '\r\n');
         updateStatus(connectedMsg);
@@ -210,6 +212,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
           // writeRef.current('\r\n' + t.terminalTab.connectionClosed + '\r\n');
           updateStatus(t.terminalTab.connectionClosed);
+          setIsConnected(false);
         });
 
       } catch (err) {
@@ -217,6 +220,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         writeRef.current('\r\n' + errorMsg + '\r\n');
         updateStatus(`Error: ${String(err)}`);
         connectedRef.current = false;
+        setIsConnected(false);
       }
     };
 
@@ -247,12 +251,33 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     if (isActive && isReady) focus();
   }, [isActive, isReady, focus]);
 
+  // Listen for snippet paste event
+  useEffect(() => {
+    if (!isActive || !sessionIdRef.current) return;
+
+    const handlePasteSnippet = (e: CustomEvent<string>) => {
+      const content = e.detail;
+      if (content) {
+        if (sessionIdRef.current) {
+          invoke('send_command', { params: { session_id: sessionIdRef.current, command: content } });
+        }
+        focus();
+      }
+    };
+
+    window.addEventListener('paste-snippet', handlePasteSnippet as EventListener);
+    return () => {
+      window.removeEventListener('paste-snippet', handlePasteSnippet as EventListener);
+    };
+  }, [isActive, focus]);
+
   return (
     <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>
       <StatusBar 
         leftText={statusText} 
         rightText={`${server.username}@${server.host}`} 
         theme={theme} 
+        connected={isConnected}
       />
       <div className="relative flex-1" style={{ padding: '8px' }}>
         <div

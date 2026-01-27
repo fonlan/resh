@@ -92,8 +92,14 @@ export const useTerminal = (
             }
           }
         }
-        fitAddon.fit();
-        onResizeRef.current?.(term.cols, term.rows);
+        
+        // Fit terminal to container
+        try {
+            fitAddon.fit();
+            onResizeRef.current?.(term.cols, term.rows);
+        } catch (e) {
+            console.warn('Fit failed', e);
+        }
       }
     });
     resizeObserver.observe(container);

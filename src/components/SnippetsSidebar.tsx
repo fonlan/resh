@@ -1,0 +1,136 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Snippet } from '../types/config';
+import { X, Code, Play } from 'lucide-react';
+import { useTranslation } from '../i18n';
+import './SnippetsSidebar.css';
+
+interface SnippetsSidebarProps {
+  snippets: Snippet[];
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
+  snippets,
+  isOpen,
+  onClose,
+}) => {
+  const { t } = useTranslation();
+  const [width, setWidth] = useState(250);
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const handleSnippetClick = (content: string) => {
+    const event = new CustomEvent('paste-snippet', { detail: content });
+    window.dispatchEvent(event);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, content: string) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleSnippetClick(content);
+    }
+  }
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const stopResizing = () => {
+      setIsResizing(false);
+    };
+
+    const resize = (e: MouseEvent) => {
+      if (isResizing) {
+        // Calculate new width based on mouse position from right edge of window
+        // Width = Window Width - Mouse X Position
+        const newWidth = window.innerWidth - e.clientX;
+        
+        // Apply constraints
+        if (newWidth >= 200 && newWidth <= 600) {
+          setWidth(newWidth);
+        }
+      }
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', resize);
+      window.addEventListener('mouseup', stopResizing);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', resize);
+      window.removeEventListener('mouseup', stopResizing);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing]);
+
+  return (
+    <div 
+      ref={sidebarRef}
+      className={`snippets-sidebar-panel ${isOpen ? 'open' : ''} ${isResizing ? 'resizing' : ''}`}
+      aria-hidden={!isOpen}
+      style={{ width: isOpen ? `${width}px` : '0px' }}
+    >
+      <div 
+        className="snippets-resizer" 
+        onMouseDown={startResizing}
+        role="separator"
+        aria-orientation="vertical"
+        aria-valuenow={width}
+        aria-valuemin={200}
+        aria-valuemax={600}
+        aria-label="Resize Sidebar"
+        tabIndex={0}
+      />
+      
+      <div className="snippets-header">
+        <h3 className="snippets-title">
+          <Code size={16} /> {t.snippetsTab.title}
+        </h3>
+        <button 
+            type="button"
+            onClick={onClose} 
+            className="snippets-close-btn"
+            aria-label={t.windowControls.close}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      
+      <div className="snippets-list">
+        {snippets.length === 0 ? (
+           <p className="snippets-empty">{t.snippetsTab.emptyState}</p>
+        ) : (
+          snippets.map(snippet => (
+            <button 
+              key={snippet.id}
+              type="button"
+              className="snippet-item group w-full text-left"
+              onClick={() => handleSnippetClick(snippet.content)}
+              onKeyDown={(e) => handleKeyDown(e, snippet.content)}
+              title={snippet.description}
+              aria-label={t.common.actions}
+            >
+              <div className="snippet-item-header">
+                <span className="snippet-name">{snippet.name}</span>
+                <Play size={10} className="snippet-play-icon" />
+              </div>
+              <div className="snippet-content">
+                {snippet.content}
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};

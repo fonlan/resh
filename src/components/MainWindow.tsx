@@ -1,5 +1,5 @@
 import React, { useState, useCallback, Suspense } from 'react';
-import { Settings, X } from 'lucide-react';
+import { Settings, X, Code } from 'lucide-react';
 // SettingsModal is now lazy loaded
 const SettingsModal = React.lazy(() => 
   import('./settings/SettingsModal').then(module => ({ default: module.SettingsModal }))
@@ -8,6 +8,7 @@ import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
+import { SnippetsSidebar } from './SnippetsSidebar';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
@@ -25,6 +26,7 @@ export const MainWindow: React.FC = () => {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
 
@@ -168,6 +170,15 @@ export const MainWindow: React.FC = () => {
         <div className="title-bar-right">
           <button
             type="button"
+            className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
+            onClick={() => setIsSnippetsOpen(!isSnippetsOpen)}
+            aria-label="Toggle Snippets"
+            title="Snippets"
+          >
+            <Code size={18} />
+          </button>
+          <button
+            type="button"
             className="settings-btn"
             onClick={() => setIsSettingsOpen(true)}
             onMouseEnter={prefetchSettings}
@@ -182,7 +193,8 @@ export const MainWindow: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="content-area">
+      <div className="content-area" style={{ position: 'relative' }}>
+        <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {tabs.length === 0 ? (
           <WelcomeScreen
             servers={recentServers}
@@ -207,7 +219,7 @@ export const MainWindow: React.FC = () => {
                   tabId={tab.id}
                   serverId={tab.serverId}
                   isActive={activeTabId === tab.id}
-                  onClose={() => handleCloseTab(tab.id)}
+                  onClose={handleCloseTab}
                   server={server}
                   servers={config?.servers || []}
                   authentications={config?.authentications || []}
@@ -219,6 +231,12 @@ export const MainWindow: React.FC = () => {
             );
           })
         )}
+        </div>
+        <SnippetsSidebar 
+          isOpen={isSnippetsOpen} 
+          onClose={() => setIsSnippetsOpen(false)} 
+          snippets={config?.snippets || []}
+        />
       </div>
 
       {/* Settings Modal */}

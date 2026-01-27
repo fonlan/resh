@@ -48,4 +48,14 @@ impl client::Handler for ClientHandler {
         }
         Ok(())
     }
+
+    async fn channel_close(
+        &mut self,
+        _channel: russh::ChannelId,
+        _session: &mut russh::client::Session,
+    ) -> Result<(), Self::Error> {
+        // Drop the transmitter to signal the frontend that the connection is closed
+        self.tx = None;
+        Ok(())
+    }
 }

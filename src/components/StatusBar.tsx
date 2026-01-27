@@ -6,9 +6,10 @@ interface StatusBarProps {
   leftText: string;
   rightText: string;
   theme?: 'light' | 'dark' | 'system';
+  connected: boolean;
 }
 
-export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme }) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme, connected }) => {
   const { config } = useConfig();
   // Determine colors based on theme
   const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -26,6 +27,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
         {leftText}
       </div>
       <div className="status-bar-right" title={rightText}>
+        <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
         {rightText}
       </div>
     </div>
