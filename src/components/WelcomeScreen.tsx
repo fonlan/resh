@@ -56,19 +56,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   </div>
                 </button>
               ))}
-              <button
-                type="button"
-                className="server-card add-card"
-                onClick={onOpenSettings}
-              >
-                <div className="server-card-icon">
-                  <Plus size={20} />
-                </div>
-                <div className="server-card-content">
-                  <h3 className="server-card-name">{t.welcome.newConnection}</h3>
-                  <p className="server-card-info">{t.welcome.configureNew}</p>
-                </div>
-              </button>
             </div>
           </div>
         ) : (
