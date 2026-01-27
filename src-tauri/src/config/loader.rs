@@ -5,6 +5,7 @@ use crate::config::types::Config;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[derive(Clone)]
 pub struct ConfigManager {
     app_data_dir: PathBuf,
 }
@@ -21,6 +22,11 @@ impl ConfigManager {
 
     pub fn local_config_encrypted_path(&self) -> PathBuf {
         self.app_data_dir.join("local.enc.json")
+    }
+
+    pub fn save_local_config(&self, config: &Config) -> Result<(), String> {
+        let path = self.local_config_path();
+        self.save_config(config, &path)
     }
 
     pub fn load_local_config(&self) -> Result<Config, String> {

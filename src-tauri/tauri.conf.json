@@ -22,7 +22,8 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
-        "label": "main"
+        "label": "main",
+        "visible": false
       }
     ]
   },

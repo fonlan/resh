@@ -91,6 +91,16 @@ pub struct WebDAVSettings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct WindowState {
+    pub width: f64,
+    pub height: f64,
+    pub is_maximized: bool,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeneralSettings {
     pub theme: String,
     pub language: String,
@@ -102,6 +112,18 @@ pub struct GeneralSettings {
     pub debug_enabled: bool,
     #[serde(default)]
     pub recent_server_ids: Vec<String>,
+    #[serde(default = "default_window_state")]
+    pub window_state: WindowState,
+}
+
+fn default_window_state() -> WindowState {
+    WindowState {
+        width: 1200.0,
+        height: 800.0,
+        is_maximized: false,
+        x: 100.0,
+        y: 100.0,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +176,7 @@ impl Config {
                 confirm_exit_app: true,
                 debug_enabled: false,
                 recent_server_ids: vec![],
+                window_state: default_window_state(),
             },
         }
     }
