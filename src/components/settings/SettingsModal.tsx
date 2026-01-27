@@ -233,12 +233,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <AuthTab
                 authentications={localConfig.authentications}
                 onAuthUpdate={handleAuthUpdate}
+                servers={localConfig.servers}
+                onServersUpdate={handleServersUpdate}
               />
             )}
             {activeTab === 'proxies' && (
               <ProxyTab
                 proxies={localConfig.proxies}
                 onProxiesUpdate={handleProxiesUpdate}
+                servers={localConfig.servers}
+                onServersUpdate={handleServersUpdate}
               />
             )}
             {activeTab === 'general' && (

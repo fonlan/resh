@@ -1,6 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { GeneralSettings } from '../../types/config';
 import { useTranslation } from '../../i18n';
+import { useConfig } from '../../hooks/useConfig';
 
 export interface GeneralTabProps {
   general: GeneralSettings;
@@ -9,6 +11,9 @@ export interface GeneralTabProps {
 
 export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate }) => {
   const { t } = useTranslation();
+  const { triggerSync } = useConfig();
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
     onGeneralUpdate({ ...general, theme });
@@ -34,6 +39,22 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
   const handleConfirmationChange = (field: 'confirmCloseTab' | 'confirmExitApp', value: boolean) => {
     onGeneralUpdate({ ...general, [field]: value });
+  };
+
+  const handleSync = async () => {
+    if (syncStatus === 'syncing') return;
+
+    try {
+      setSyncStatus('syncing');
+      setSyncError(null);
+      await triggerSync();
+      setSyncStatus('success');
+      setTimeout(() => setSyncStatus('idle'), 3000);
+    } catch (err) {
+      setSyncStatus('error');
+      setSyncError(err instanceof Error ? err.message : String(err));
+      setTimeout(() => setSyncStatus('idle'), 5000);
+    }
   };
 
   return (
@@ -132,7 +153,36 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
       {/* WebDAV Settings Section */}
       <div className="section">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="section-title">{t.webdav}</h3>
+          <div className="flex items-center gap-4">
+            <h3 className="section-title mb-0">{t.webdav}</h3>
+            {general.webdav.enabled && (
+              <button
+                type="button"
+                onClick={handleSync}
+                disabled={syncStatus === 'syncing' || !general.webdav.url}
+                className={`sync-btn ${
+                  syncStatus === 'success' ? 'sync-btn-success' : 
+                  syncStatus === 'error' ? 'sync-btn-error' : ''
+                }`}
+                title={t.syncNow}
+              >
+                {syncStatus === 'syncing' ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : syncStatus === 'success' ? (
+                  <Check size={14} />
+                ) : syncStatus === 'error' ? (
+                  <AlertCircle size={14} />
+                ) : (
+                  <RefreshCw size={14} />
+                )}
+                <span>
+                  {syncStatus === 'syncing' ? t.syncing : 
+                   syncStatus === 'success' ? t.syncSuccess : 
+                   syncStatus === 'error' ? t.syncFailed : t.syncNow}
+                </span>
+              </button>
+            )}
+          </div>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
@@ -140,9 +190,16 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleWebDAVUpdate('enabled', e.target.checked)}
               className="checkbox"
             />
-            <span className="text-sm text-gray-400">{(t.common as any).enableSync || 'Enable Sync'}</span>
+            <span className="text-sm text-gray-400">{t.common.enableSync}</span>
           </label>
         </div>
+        
+        {syncStatus === 'error' && syncError && (
+          <div className="sync-error-message">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+            <span>{syncError}</span>
+          </div>
+        )}
         
         <div className={`space-y-4 ${!general.webdav.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="form-group">

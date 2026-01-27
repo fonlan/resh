@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { ProxyConfig as ProxyType } from '../../types/config';
+import { ProxyConfig as ProxyType, Server as ServerType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ProxyForm, ProxyFormHandle } from './ProxyForm';
 import { generateId } from '../../utils/idGenerator';
@@ -9,9 +9,16 @@ import { useTranslation } from '../../i18n';
 interface ProxyTabProps {
   proxies: ProxyType[];
   onProxiesUpdate: (proxies: ProxyType[]) => void;
+  servers: ServerType[];
+  onServersUpdate: (servers: ServerType[]) => void;
 }
 
-export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) => {
+export const ProxyTab: React.FC<ProxyTabProps> = ({ 
+  proxies, 
+  onProxiesUpdate,
+  servers,
+  onServersUpdate
+}) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null);
@@ -32,7 +39,21 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({ proxies, onProxiesUpdate }) 
   };
 
   const handleDeleteProxy = (proxyId: string) => {
-    onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
+    const usingServers = servers.filter((s) => s.proxyId === proxyId);
+    
+    if (usingServers.length > 0) {
+      if (window.confirm(t.proxyTab.deleteInUseConfirmation)) {
+        // Clear proxy from servers
+        const updatedServers = servers.map((s) => 
+          s.proxyId === proxyId ? { ...s, proxyId: null } : s
+        );
+        onServersUpdate(updatedServers);
+        // Delete proxy
+        onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
+      }
+    } else {
+      onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
+    }
   };
 
   const handleSaveProxy = (proxy: ProxyType) => {

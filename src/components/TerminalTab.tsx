@@ -33,7 +33,19 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 }) => {
   const { t } = useTranslation();
   const containerId = `terminal-${tabId}`;
-  const { terminal, write } = useTerminal(containerId, terminalSettings, theme);
+
+  // Memoize settings to prevent re-creating terminal on reference change
+  const memoizedSettings = React.useMemo(() => {
+      if (!terminalSettings) return undefined;
+      return { ...terminalSettings };
+  }, [
+    terminalSettings?.fontFamily,
+    terminalSettings?.fontSize,
+    terminalSettings?.cursorStyle,
+    terminalSettings?.scrollback
+  ]);
+
+  const { terminal, write } = useTerminal(containerId, memoizedSettings, theme);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [showManualAuth, setShowManualAuth] = useState(false);
   const [manualCredentials, setManualCredentials] = useState({ username: server.username, password: '', privateKey: '', passphrase: '' });
@@ -41,11 +53,15 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const connectedRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
   const authenticationsRef = useRef(authentications);
+  const serversRef = useRef(servers);
+  const proxiesRef = useRef(proxies);
 
-  // Update ref when authentications changes (but don't trigger reconnection)
+  // Update refs when props change (but don't trigger reconnection)
   useEffect(() => {
     authenticationsRef.current = authentications;
-  }, [authentications]);
+    serversRef.current = servers;
+    proxiesRef.current = proxies;
+  }, [authentications, servers, proxies]);
 
   useEffect(() => {
     if (!serverId || connectedRef.current) return;
@@ -84,14 +100,14 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         }
 
         // Resolve proxy
-        const proxy = proxies.find(p => p.id === server.proxyId);
+        const proxy = proxiesRef.current.find(p => p.id === server.proxyId);
         
         // Resolve jumphost
         let jumphost = null;
         if (server.jumphostId) {
-          const jhServer = servers.find(s => s.id === server.jumphostId);
+          const jhServer = serversRef.current.find(s => s.id === server.jumphostId);
           if (jhServer) {
-            const jhAuth = authentications.find(a => a.id === jhServer.authId);
+            const jhAuth = authenticationsRef.current.find(a => a.id === jhServer.authId);
             let jhUsername = jhServer.username;
             let jhPassword = undefined;
             let jhPrivateKey = undefined;
@@ -165,7 +181,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         );
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, servers, proxies, authentications, write, t, showManualAuth, connectTrigger, manualCredentials]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, write, t, showManualAuth, connectTrigger, manualCredentials]);
 
   useEffect(() => {
     if (!terminal || !sessionId) return;

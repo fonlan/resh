@@ -127,3 +127,14 @@ html, body {
   color: var(--text-primary);
 }
 
+/* Global Utility Classes */
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.relative { position: relative; }
+.absolute { position: absolute; }
+.flex { display: flex; }
+.flex-1 { flex: 1; }
+.flex-col { flex-direction: column; }
+.hidden { display: none; }
+.block { display: block; }
+

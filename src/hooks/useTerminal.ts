@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback, useMemo } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
@@ -45,39 +45,41 @@ export const useTerminal = (containerId: string, settings?: TerminalSettings, th
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
 
-    term.open(container);
+    fitAddon.fit();
     
-    // Use setTimeout to ensure the terminal is fully rendered and container has dimensions
-    // This fixes "Cannot read properties of undefined (reading 'dimensions')" in RenderService
-    const timer = setTimeout(() => {
+    // Use ResizeObserver to handle container size changes
+    // This is more robust than window 'resize' event as it handles
+    // cases like switching tabs (display: none -> display: block)
+    const resizeObserver = new ResizeObserver(() => {
       if (container.clientWidth > 0 && container.clientHeight > 0) {
-        fitAddon.fit();
+    term.open(container);
+    fitAddon.fit();
       }
-    }, 10);
+    });
+    resizeObserver.observe(container);
 
     term.write('Connected to terminal\r\n');
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Handle resize
-    const handleResize = () => {
-      if (container.clientWidth > 0 && container.clientHeight > 0) {
-        fitAddon.fit();
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
     return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       term.dispose();
     };
   }, [containerId, settings, theme]);
 
-  return {
+  const write = useCallback((data: string) => {
+    terminalRef.current?.write(data);
+  }, []);
+
+  const dispose = useCallback(() => {
+    terminalRef.current?.dispose();
+  }, []);
+
+  return useMemo(() => ({
     terminal: terminalRef.current,
-    write: (data: string) => terminalRef.current?.write(data),
-    dispose: () => terminalRef.current?.dispose(),
-  };
+    write,
+    dispose,
+  }), [write, dispose]);
 };

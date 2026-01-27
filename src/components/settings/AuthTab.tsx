@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { Authentication } from '../../types/config';
+import { Authentication, Server as ServerType } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { AuthForm, AuthFormHandle } from './AuthForm';
 import { generateId } from '../../utils/idGenerator';
@@ -9,9 +9,16 @@ import { useTranslation } from '../../i18n';
 interface AuthTabProps {
   authentications: Authentication[];
   onAuthUpdate: (auths: Authentication[]) => void;
+  servers: ServerType[];
+  onServersUpdate: (servers: ServerType[]) => void;
 }
 
-export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate }) => {
+export const AuthTab: React.FC<AuthTabProps> = ({ 
+  authentications, 
+  onAuthUpdate,
+  servers,
+  onServersUpdate
+}) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAuth, setEditingAuth] = useState<Authentication | null>(null);
@@ -32,7 +39,21 @@ export const AuthTab: React.FC<AuthTabProps> = ({ authentications, onAuthUpdate 
   };
 
   const handleDeleteAuth = (authId: string) => {
-    onAuthUpdate(authentications.filter((a) => a.id !== authId));
+    const usingServers = servers.filter((s) => s.authId === authId);
+    
+    if (usingServers.length > 0) {
+      if (window.confirm(t.authTab.deleteInUseConfirmation)) {
+        // Clear auth from servers
+        const updatedServers = servers.map((s) => 
+          s.authId === authId ? { ...s, authId: null } : s
+        );
+        onServersUpdate(updatedServers);
+        // Delete auth
+        onAuthUpdate(authentications.filter((a) => a.id !== authId));
+      }
+    } else {
+      onAuthUpdate(authentications.filter((a) => a.id !== authId));
+    }
   };
 
   const handleSaveAuth = (auth: Authentication) => {

@@ -41,7 +41,19 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   };
 
   const handleDeleteServer = (serverId: string) => {
-    onServersUpdate(servers.filter((s) => s.id !== serverId));
+    const usingServers = servers.filter((s) => s.jumphostId === serverId);
+
+    if (usingServers.length > 0) {
+      if (window.confirm(t.serverTab.deleteInUseConfirmation)) {
+        // Clear jumphost from servers
+        const updatedServers = servers
+          .filter((s) => s.id !== serverId)
+          .map((s) => (s.jumphostId === serverId ? { ...s, jumphostId: null } : s));
+        onServersUpdate(updatedServers);
+      }
+    } else {
+      onServersUpdate(servers.filter((s) => s.id !== serverId));
+    }
   };
 
   const handleSaveServer = (server: Server) => {

@@ -168,6 +168,9 @@ impl SyncManager {
         // 2. Add/Update from local
         for local_server in &local.servers {
             if !local_server.synced { continue; }
+            // If we are syncing it, ensure it's not in removed_ids
+            remote.removed_ids.retain(|id| id != &local_server.id);
+            
             if let Some(remote_server) = remote_servers.get_mut(&local_server.id) {
                 if is_newer(&local_server.updated_at, &remote_server.updated_at) {
                     *remote_server = local_server.clone();
@@ -180,6 +183,8 @@ impl SyncManager {
 
         for local_auth in &local.authentications {
             if !local_auth.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_auth.id);
+
             if let Some(remote_auth) = remote_auths.get_mut(&local_auth.id) {
                 if is_newer(&local_auth.updated_at, &remote_auth.updated_at) {
                     *remote_auth = local_auth.clone();
@@ -192,6 +197,8 @@ impl SyncManager {
 
         for local_proxy in &local.proxies {
             if !local_proxy.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_proxy.id);
+
             if let Some(remote_proxy) = remote_proxies.get_mut(&local_proxy.id) {
                 if is_newer(&local_proxy.updated_at, &remote_proxy.updated_at) {
                     *remote_proxy = local_proxy.clone();

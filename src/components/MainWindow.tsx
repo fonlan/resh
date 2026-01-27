@@ -189,8 +189,9 @@ export const MainWindow: React.FC = () => {
               <div
                 key={tab.id}
                 style={{
-                  display: activeTabId === tab.id ? 'block' : 'none',
-                  height: '100%',
+                  display: activeTabId === tab.id ? 'flex' : 'none',
+                  flex: 1,
+                  minHeight: 0,
                 }}
               >
                 <TerminalTab
