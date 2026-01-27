@@ -8,7 +8,8 @@ interface ConfigContextType {
   loading: boolean;
   error: string | null;
   loadConfig: () => Promise<void>;
-  saveConfig: (syncPart: Config, localPart: Config) => Promise<void>;
+  saveConfig: (config: Config) => Promise<void>;
+  triggerSync: () => Promise<Config>;
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined);
@@ -22,9 +23,9 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     try {
       setLoading(true);
       logger.info('[ConfigProvider] Loading config...');
-      const merged = await invoke<Config>('get_merged_config');
-      logger.info('[ConfigProvider] Loaded config', { version: merged.version });
-      setConfig(merged);
+      const cfg = await invoke<Config>('get_config');
+      logger.info('[ConfigProvider] Loaded config', { version: cfg.version });
+      setConfig(cfg);
       setError(null);
     } catch (err) {
       logger.error('[ConfigProvider] Failed to load config', err);
@@ -34,18 +35,33 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   }, []);
 
-  const saveConfig = useCallback(async (syncPart: Config, localPart: Config) => {
+  const saveConfig = useCallback(async (newConfig: Config) => {
     try {
       logger.info('[ConfigProvider] Saving config...');
-      await invoke('save_config', { syncPart, localPart });
+      await invoke('save_config', { config: newConfig });
       logger.info('[ConfigProvider] Config saved successfully');
       
-      // Update global state
-      setConfig(localPart);
+      // The backend might have modified the config (e.g., after a sync)
+      // So we reload it
+      const cfg = await invoke<Config>('get_config');
+      setConfig(cfg);
       setError(null);
     } catch (err) {
       logger.error('[ConfigProvider] Failed to save config', err);
       setError(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  }, []);
+
+  const triggerSync = useCallback(async () => {
+    try {
+      logger.info('[ConfigProvider] Triggering sync...');
+      const cfg = await invoke<Config>('trigger_sync');
+      logger.info('[ConfigProvider] Sync successful');
+      setConfig(cfg);
+      return cfg;
+    } catch (err) {
+      logger.error('[ConfigProvider] Sync failed', err);
       throw err;
     }
   }, []);
@@ -55,7 +71,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   }, [loadConfig]);
 
   return (
-    <ConfigContext.Provider value={{ config, loading, error, loadConfig, saveConfig }}>
+    <ConfigContext.Provider value={{ config, loading, error, loadConfig, saveConfig, triggerSync }}>
       {children}
     </ConfigContext.Provider>
   );

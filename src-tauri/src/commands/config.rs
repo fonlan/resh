@@ -1,38 +1,81 @@
 // src-tauri/src/commands/config.rs
 
-use crate::config::{Config, ConfigManager};
+use crate::config::{Config, ConfigManager, SyncManager};
 use crate::master_password::MasterPasswordManager;
 use std::sync::Arc;
 use tauri::State;
+use tokio::sync::Mutex;
 
 pub struct AppState {
     pub config_manager: ConfigManager,
     pub password_manager: MasterPasswordManager,
+    pub config: Mutex<Config>,
 }
 
 #[tauri::command]
-pub async fn get_merged_config(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
-    let sync_config = state.config_manager.load_sync_config()?;
-    let local_config = state.config_manager.load_local_config()?;
-    Ok(state.config_manager.merge_configs(sync_config, local_config))
+pub async fn get_config(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
+    let config = state.config.lock().await;
+    Ok(config.clone())
 }
 
 #[tauri::command]
 pub async fn save_config(
-    sync_part: Config,
-    local_part: Config,
+    config: Config,
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
-    let sync_path = state.config_manager.sync_config_path();
+    let mut current_config = state.config.lock().await;
+    *current_config = config.clone();
+    
     let local_path = state.config_manager.local_config_path();
+    state.config_manager.save_config(&config, &local_path)?;
 
-    state.config_manager.save_config(&sync_part, &sync_path)?;
-    state.config_manager.save_config(&local_part, &local_path)?;
+    // Update log level
+    crate::logger::set_log_level(config.general.debug_enabled);
 
-    // Update log level if it changed in local_part
-    crate::logger::set_log_level(local_part.general.debug_enabled);
+    // If sync is enabled, we could trigger sync here or wait for user to click sync
+    // Given the "automatic trigger" recommendation accepted by user:
+    if config.general.webdav.enabled && !config.general.webdav.url.is_empty() {
+        let sync_manager = SyncManager::new(
+            config.general.webdav.url.clone(),
+            config.general.webdav.username.clone(),
+            config.general.webdav.password.clone(),
+        );
+        // Run sync in background or await? 
+        // Better to await to ensure sync completes before returning success if it's "save and sync"
+        let mut local_copy = config.clone();
+        if let Err(e) = sync_manager.sync(&mut local_copy).await {
+            tracing::error!("Sync failed: {}", e);
+            // We don't necessarily want to fail the save if sync fails, 
+            // but maybe return a specific error or warning?
+            // For now, let's just log and continue.
+        } else {
+            *current_config = local_copy;
+            state.config_manager.save_config(&current_config, &local_path)?;
+        }
+    }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
+    let mut config = state.config.lock().await;
+    if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
+        return Err("WebDAV sync is not enabled or configured".to_string());
+    }
+
+    let sync_manager = SyncManager::new(
+        config.general.webdav.url.clone(),
+        config.general.webdav.username.clone(),
+        config.general.webdav.password.clone(),
+    );
+
+    sync_manager.sync(&mut config).await?;
+    
+    let local_path = state.config_manager.local_config_path();
+    state.config_manager.save_config(&config, &local_path)?;
+    
+    Ok(config.clone())
 }
 
 #[tauri::command]
@@ -47,43 +90,11 @@ pub async fn log_event(level: String, message: String) {
     }
 }
 
-#[allow(dead_code)]
-#[tauri::command]
-pub async fn get_merged_config_encrypted(
-    password: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<Config, String> {
-    let sync_config = state.config_manager.load_encrypted_sync_config(&password)?;
-    let local_config = state.config_manager.load_encrypted_local_config(&password)?;
-    Ok(state.config_manager.merge_configs(sync_config, local_config))
-}
-
-#[allow(dead_code)]
-#[tauri::command]
-pub async fn save_config_encrypted(
-    sync_part: Config,
-    local_part: Config,
-    password: String,
-    state: State<'_, Arc<AppState>>,
-) -> Result<(), String> {
-    state
-        .config_manager
-        .save_encrypted_sync_config(&sync_part, &password)?;
-    state
-        .config_manager
-        .save_encrypted_local_config(&local_part, &password)?;
-
-    // Update log level if it changed in local_part
-    crate::logger::set_log_level(local_part.general.debug_enabled);
-
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn get_app_data_dir(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state
         .config_manager
-        .sync_config_path()
+        .local_config_path()
         .parent()
         .unwrap()
         .to_string_lossy()

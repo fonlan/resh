@@ -1,4 +1,5 @@
 use crate::ssh_manager::ssh::SSHClient;
+use crate::config::types::Proxy;
 use serde::{Deserialize, Serialize};
 use tauri::{State, Window, Emitter};
 use std::sync::Arc;
@@ -8,6 +9,18 @@ use super::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct ConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
+    pub proxy: Option<Proxy>,
+    pub jumphost: Option<JumphostConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct JumphostConfig {
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -71,6 +84,8 @@ pub async fn connect_to_server(
         params.password,
         params.private_key,
         params.passphrase,
+        params.proxy,
+        params.jumphost,
         tx,
     )
     .await?;

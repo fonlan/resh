@@ -13,6 +13,8 @@ export interface Server {
   keepAlive: number;
   autoExecCommands: string[];
   envVars: Record<string, string>;
+  synced: boolean;
+  updatedAt: string;
 }
 
 export interface PortForward {
@@ -30,6 +32,8 @@ export interface Authentication {
   // For password
   username?: string;
   password?: string;
+  synced: boolean;
+  updatedAt: string;
 }
 
 export interface ProxyConfig {
@@ -40,6 +44,8 @@ export interface ProxyConfig {
   port: number;
   username?: string;
   password?: string;
+  synced: boolean;
+  updatedAt: string;
 }
 
 export interface TerminalSettings {
@@ -53,6 +59,7 @@ export interface WebDAVSettings {
   url: string;
   username: string;
   password: string;
+  enabled: boolean;
 }
 
 export interface GeneralSettings {

@@ -3,19 +3,14 @@
     windows_subsystem = "windows"
 )]
 
-mod commands;
-mod config;
-mod ssh_manager;
-mod master_password;
-mod webdav;
-mod logger;
-
-use commands::AppState;
-use config::ConfigManager;
-use master_password::MasterPasswordManager;
+use resh::commands;
+use resh::config::ConfigManager;
+use resh::master_password::MasterPasswordManager;
+use resh::logger;
 use std::sync::Arc;
 use tauri::Manager;
 use tauri::image::Image;
+use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() {
@@ -46,17 +41,18 @@ async fn main() {
             let config_manager = ConfigManager::new(app_data_dir.clone());
             let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
 
-            // Load initial config to get debug status
-            let local_config = config_manager.load_local_config().unwrap_or_else(|_| crate::config::Config::empty());
+            // Load initial config
+            let local_config = config_manager.load_local_config().unwrap_or_else(|_| resh::config::Config::empty());
             let debug_enabled = local_config.general.debug_enabled;
 
             // Initialize logging
             logger::init_logging(app_data_dir.clone(), debug_enabled);
             tracing::info!("Logging initialized. Debug mode: {}", debug_enabled);
 
-            let state = Arc::new(AppState {
+            let state = Arc::new(commands::AppState {
                 config_manager,
                 password_manager: master_password_manager,
+                config: Mutex::new(local_config),
             });
 
             app.manage(state);
@@ -64,8 +60,9 @@ async fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::config::get_merged_config,
+            commands::config::get_config,
             commands::config::save_config,
+            commands::config::trigger_sync,
             commands::config::get_app_data_dir,
             commands::config::log_event,
             commands::connection::connect_to_server,
@@ -75,7 +72,6 @@ async fn main() {
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,
             commands::master_password::verify_master_password,
-            commands::sync::sync_webdav,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

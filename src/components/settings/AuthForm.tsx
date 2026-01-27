@@ -17,15 +17,24 @@ export interface AuthFormHandle {
 export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   ({ auth, existingNames, onSave }, ref) => {
   const { t } = useTranslation();
-  const [formData, setFormData] = useState<Authentication>(
-    auth || {
+  const [formData, setFormData] = useState<Authentication>(() => {
+    if (auth) {
+      return {
+        ...auth,
+        synced: auth.synced !== undefined ? auth.synced : true,
+        updatedAt: auth.updatedAt || new Date().toISOString(),
+      };
+    }
+    return {
       id: '',
       name: '',
       type: 'password',
       username: '',
       password: '',
-    }
-  );
+      synced: true,
+      updatedAt: new Date().toISOString(),
+    };
+  });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -56,7 +65,10 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
 
   const handleSave = () => {
     if (validateForm()) {
-      onSave(formData);
+      onSave({
+        ...formData,
+        updatedAt: new Date().toISOString()
+      });
     }
   };
 
@@ -114,6 +126,20 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
 
   return (
     <div className="space-y-4">
+      {/* Sync Toggle */}
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="synced"
+          checked={formData.synced}
+          onChange={(e) => handleChange('synced', e.target.checked)}
+          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
+        />
+        <label htmlFor="synced" className="text-sm font-medium text-gray-300">
+          {t.common.syncThisItem || 'Sync this item'}
+        </label>
+      </div>
+
       {/* Name */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">

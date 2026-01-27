@@ -98,7 +98,7 @@ export const MainWindow: React.FC = () => {
 
     if (config) {
       const updatedGeneral = addRecentServer(config.general, serverId);
-      await saveConfig(config, { ...config, general: updatedGeneral });
+      await saveConfig({ ...config, general: updatedGeneral });
     }
   };
 
@@ -199,6 +199,7 @@ export const MainWindow: React.FC = () => {
                   isActive={activeTabId === tab.id}
                   onClose={() => handleCloseTab(tab.id)}
                   server={server}
+                  servers={config?.servers || []}
                   authentications={config?.authentications || []}
                   proxies={config?.proxies || []}
                   terminalSettings={config?.general.terminal}

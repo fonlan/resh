@@ -50,6 +50,8 @@ export const locales = {
       connect: 'Connect',
       actions: 'Actions',
       optional: 'Optional',
+      syncThisItem: 'Sync this item',
+      enableSync: 'Enable Sync',
     },
     serverTab: {
       title: 'SSH Servers',
@@ -209,6 +211,8 @@ export const locales = {
       connect: '连接',
       actions: '操作',
       optional: '可选',
+      syncThisItem: '同步此项',
+      enableSync: '开启同步',
     },
     serverTab: {
       title: 'SSH 服务器',

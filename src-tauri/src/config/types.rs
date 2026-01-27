@@ -3,6 +3,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Server {
@@ -22,6 +26,9 @@ pub struct Server {
     pub auto_exec_commands: Vec<String>,
     #[serde(default)]
     pub env_vars: HashMap<String, String>,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,6 +49,9 @@ pub struct Authentication {
     pub passphrase: Option<String>,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +65,9 @@ pub struct Proxy {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +85,8 @@ pub struct WebDAVSettings {
     pub url: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +114,18 @@ pub struct Config {
     pub general: GeneralSettings,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConfig {
+    pub version: String,
+    #[serde(default)]
+    pub servers: Vec<Server>,
+    #[serde(default)]
+    pub authentications: Vec<Authentication>,
+    #[serde(default)]
+    pub proxies: Vec<Proxy>,
+}
+
 impl Config {
     pub fn empty() -> Self {
         Self {
@@ -119,6 +146,7 @@ impl Config {
                     url: String::new(),
                     username: String::new(),
                     password: String::new(),
+                    enabled: false,
                 },
                 confirm_close_tab: true,
                 confirm_exit_app: true,

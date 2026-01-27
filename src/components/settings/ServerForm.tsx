@@ -41,6 +41,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         keepAlive: server.keepAlive || 0,
         autoExecCommands: server.autoExecCommands || [],
         envVars: server.envVars || {},
+        synced: server.synced !== undefined ? server.synced : true,
+        updatedAt: server.updatedAt || new Date().toISOString(),
       };
     }
     return {
@@ -56,6 +58,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       keepAlive: 0,
       autoExecCommands: [],
       envVars: {},
+      synced: true,
+      updatedAt: new Date().toISOString(),
     };
   });
 
@@ -99,7 +103,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   const handleSave = () => {
     if (validateForm()) {
       // If password authentication is selected, use the username from authentication
-      const serverToSave = { ...formData };
+      const serverToSave = { 
+        ...formData,
+        updatedAt: new Date().toISOString()
+      };
       if (formData.authId) {
         const selectedAuth = availableAuths.find((a) => a.id === formData.authId);
         if (selectedAuth?.type === 'password' && selectedAuth.username) {
@@ -221,12 +228,27 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
   return (
     <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+      {/* Sync Toggle */}
+      <div className="flex items-center gap-2 mb-4">
+        <input
+          type="checkbox"
+          id="synced"
+          checked={formData.synced}
+          onChange={(e) => handleChange('synced', e.target.checked)}
+          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
+        />
+        <label htmlFor="synced" className="text-sm font-medium text-gray-300">
+          {t.common.syncThisItem || 'Sync this item'}
+        </label>
+      </div>
+
       {/* Name */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
+        <label htmlFor="server-name" className="block text-sm font-medium text-gray-300 mb-1">
           {t.serverForm.nameLabel}
         </label>
         <input
+          id="server-name"
           type="text"
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
@@ -240,10 +262,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
       {/* Host */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
+        <label htmlFor="server-host" className="block text-sm font-medium text-gray-300 mb-1">
           {t.common.host}
         </label>
         <input
+          id="server-host"
           type="text"
           value={formData.host}
           onChange={(e) => handleChange('host', e.target.value)}
@@ -258,10 +281,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       {/* Port and Username (Side by Side) */}
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label htmlFor="server-port" className="block text-sm font-medium text-gray-300 mb-1">
             {t.common.port}
           </label>
           <input
+            id="server-port"
             type="number"
             value={formData.port}
             onChange={(e) => handleChange('port', parseInt(e.target.value, 10))}
@@ -276,12 +300,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
         {/* Username - show different UI based on authentication selection */}
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-1">
+          <label htmlFor="server-username" className="block text-sm font-medium text-gray-300 mb-1">
             {t.serverForm.usernameLabel}
           </label>
           {formData.authId && availableAuths.find((a) => a.id === formData.authId)?.type === 'password' ? (
             <>
-              <div className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400">
+              <div id="server-username" className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400">
                 {availableAuths.find((a) => a.id === formData.authId)?.username || 'N/A'}
               </div>
               <p className="text-xs text-gray-500 mt-1">
@@ -291,6 +315,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           ) : (
             <>
               <input
+                id="server-username"
                 type="text"
                 value={formData.username}
                 onChange={(e) => handleChange('username', e.target.value)}
@@ -307,10 +332,11 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
       {/* Authentication Selection */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
+        <label htmlFor="server-auth" className="block text-sm font-medium text-gray-300 mb-1">
           {t.serverForm.authLabel}
         </label>
         <select
+          id="server-auth"
           value={formData.authId || ''}
           onChange={(e) => handleChange('authId', e.target.value || null)}
           className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${

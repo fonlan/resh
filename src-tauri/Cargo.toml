@@ -34,6 +34,9 @@ lazy_static = "1.5.0"
 async-trait = "0.1.89"
 russh-keys = "0.45.0"
 image = "0.24"
+chrono = { version = "0.4.31", features = ["serde"] }
+tokio-socks = "0.5.1"
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

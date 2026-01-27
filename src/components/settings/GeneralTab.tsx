@@ -25,10 +25,10 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
     });
   };
 
-  const handleWebDAVUpdate = (field: keyof typeof general.webdav, value: string) => {
+  const handleWebDAVUpdate = (field: keyof typeof general.webdav, value: string | boolean) => {
     onGeneralUpdate({
       ...general,
-      webdav: { ...general.webdav, [field]: value }
+      webdav: { ...general.webdav, [field]: value } as any
     });
   };
 
@@ -131,8 +131,20 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
       {/* WebDAV Settings Section */}
       <div className="section">
-        <h3 className="section-title mb-4">{t.webdav}</h3>
-        <div className="space-y-4">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="section-title">{t.webdav}</h3>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={general.webdav.enabled}
+              onChange={(e) => handleWebDAVUpdate('enabled', e.target.checked)}
+              className="checkbox"
+            />
+            <span className="text-sm text-gray-400">{(t.common as any).enableSync || 'Enable Sync'}</span>
+          </label>
+        </div>
+        
+        <div className={`space-y-4 ${!general.webdav.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="form-group">
             <label htmlFor="webdav-url" className="form-label">{t.webdavUrl}</label>
             <input

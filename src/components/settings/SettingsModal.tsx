@@ -91,17 +91,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     saveTimeoutRef.current = window.setTimeout(async () => {
       isSavingRef.current = true;
       try {
-        // For general settings (theme, language), they should ONLY be saved to local config
-        // The sync part should NOT include updated general settings
-        // So we use the original general for sync (from when modal opened)
-        const syncPart = originalConfigRef.current
-          ? { ...localConfig, general: originalConfigRef.current.general }
-          : localConfig;
-        const localPart = localConfig;
+        await saveConfig(localConfig);
 
-        await saveConfig(syncPart, localPart);
-
-        lastSavedConfigRef.current = JSON.stringify(localPart);
+        lastSavedConfigRef.current = JSON.stringify(localConfig);
 
         setSaveStatus('saved');
 
