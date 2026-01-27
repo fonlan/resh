@@ -20,18 +20,32 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [error, setError] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
+    let loadedConfig: Config | null = null;
     try {
       setLoading(true);
       logger.info('[ConfigProvider] Loading config...');
-      const cfg = await invoke<Config>('get_config');
-      logger.info('[ConfigProvider] Loaded config', { version: cfg.version });
-      setConfig(cfg);
+      loadedConfig = await invoke<Config>('get_config');
+      logger.info('[ConfigProvider] Loaded config', { version: loadedConfig.version });
+      setConfig(loadedConfig);
       setError(null);
     } catch (err) {
       logger.error('[ConfigProvider] Failed to load config', err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+
+    // Trigger background sync if enabled
+    if (loadedConfig?.general?.webdav?.enabled && loadedConfig?.general?.webdav?.url) {
+      logger.info('[ConfigProvider] Initiating background startup sync...');
+      invoke<Config>('trigger_sync')
+        .then((syncedConfig) => {
+          logger.info('[ConfigProvider] Startup sync completed');
+          setConfig(syncedConfig);
+        })
+        .catch((err) => {
+          logger.warn('[ConfigProvider] Startup sync failed', err);
+        });
     }
   }, []);
 
