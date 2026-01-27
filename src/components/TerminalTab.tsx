@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
 import { Server, Authentication, ProxyConfig, TerminalSettings } from '../types/config';
 import { useTranslation } from '../i18n';
+import { StatusBar } from './StatusBar';
 
 type UnlistenFn = () => void;
 
@@ -43,8 +44,40 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   
+  // Status Bar State
+  const [statusText, setStatusText] = useState<string>('');
+  const inputBufferRef = useRef<string>('');
+  const isInputModeRef = useRef<boolean>(false);
+
   // Define handleData before useTerminal
   const handleData = React.useCallback((data: string) => {
+    // Update input buffer logic
+    let currentBuffer = inputBufferRef.current;
+    let commandExecuted: string | null = null;
+    
+    for (let i = 0; i < data.length; i++) {
+      const char = data[i];
+      const code = char.charCodeAt(0);
+      
+      if (char === '\r' || char === '\n') {
+        if (currentBuffer.trim().length > 0) {
+            commandExecuted = currentBuffer;
+        }
+        currentBuffer = '';
+      } else if (code === 127) { // Backspace
+        currentBuffer = currentBuffer.slice(0, -1);
+      } else if (code >= 32) {
+        currentBuffer += char;
+      }
+    }
+    
+    inputBufferRef.current = currentBuffer;
+    isInputModeRef.current = true;
+    
+    if (commandExecuted !== null) {
+      setStatusText(commandExecuted);
+    }
+
     if (sessionIdRef.current) {
       invoke('send_command', { params: { session_id: sessionIdRef.current, command: data } });
     }
@@ -97,10 +130,23 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     let outputUnlistener: UnlistenFn | null = null;
     let closedUnlistener: UnlistenFn | null = null;
 
+    // Helper to update status only if not in input mode
+    const updateStatus = (text: string) => {
+      if (!isInputModeRef.current) {
+        setStatusText(text);
+      }
+    };
+
     const connect = async (manualCreds?: typeof manualCredentials) => {
       try {
         connectedRef.current = true;
-        writeRef.current(t.terminalTab.connecting.replace('{name}', server.name) + '\r\n');
+        // Reset input mode on new connection attempt
+        isInputModeRef.current = false;
+        inputBufferRef.current = '';
+        
+        const connectingMsg = t.terminalTab.connecting.replace('{name}', server.name);
+        // writeRef.current(connectingMsg + '\r\n');
+        updateStatus(connectingMsg);
 
         let password = manualCreds?.password;
         let private_key = manualCreds?.privateKey;
@@ -110,7 +156,9 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         if (!manualCreds) {
           const auth = authenticationsRef.current.find(a => a.id === server.authId);
           if (!auth && server.authId) {
-            writeRef.current('\r\n' + t.terminalTab.error.replace('{error}', 'Authentication not found.') + '\r\n');
+            const errorMsg = t.terminalTab.error.replace('{error}', 'Authentication not found.');
+            writeRef.current('\r\n' + errorMsg + '\r\n');
+            updateStatus('Authentication not found');
             setShowManualAuth(true);
             connectedRef.current = false;
             return;
@@ -151,18 +199,23 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         sessionIdRef.current = sid;
         setSessionId(sid);
         setShowManualAuth(false);
-        writeRef.current(t.terminalTab.connected.replace('{id}', sid) + '\r\n');
+        const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
+        // writeRef.current(connectedMsg + '\r\n');
+        updateStatus(connectedMsg);
 
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
           writeRef.current(event.payload);
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-          writeRef.current('\r\n' + t.terminalTab.connectionClosed + '\r\n');
+          // writeRef.current('\r\n' + t.terminalTab.connectionClosed + '\r\n');
+          updateStatus(t.terminalTab.connectionClosed);
         });
 
       } catch (err) {
-        writeRef.current('\r\n' + t.terminalTab.error.replace('{error}', String(err)) + '\r\n');
+        const errorMsg = t.terminalTab.error.replace('{error}', String(err));
+        writeRef.current('\r\n' + errorMsg + '\r\n');
+        updateStatus(`Error: ${String(err)}`);
         connectedRef.current = false;
       }
     };
@@ -195,83 +248,90 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, [isActive, isReady, focus]);
 
   return (
-    <div className="relative w-full h-full" style={{ padding: '8px', backgroundColor: containerBg }}>
-      <div
-        id={containerId}
-        style={{
-          display: isActive ? 'block' : 'none',
-          width: '100%',
-          height: '100%',
-          minHeight: '400px',
-        }}
+    <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>
+      <StatusBar 
+        leftText={statusText} 
+        rightText={`${server.username}@${server.host}`} 
+        theme={theme} 
       />
-      
-      {showManualAuth && isActive && (
-        <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-10">
-          <div className="bg-gray-900 p-6 rounded-lg border border-gray-700 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-semibold text-white mb-4">Manual Authentication</h3>
-            <p className="text-sm text-gray-400 mb-4">Credentials for {server.host} not found in config. Please enter manually:</p>
-            
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="manual-username" className="block text-xs text-gray-500 mb-1">Username</label>
-                <input 
-                  id="manual-username"
-                  type="text" 
-                  value={manualCredentials.username}
-                  onChange={e => setManualCredentials(prev => ({ ...prev, username: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-                />
-              </div>
+      <div className="relative flex-1" style={{ padding: '8px' }}>
+        <div
+          id={containerId}
+          style={{
+            display: isActive ? 'block' : 'none',
+            width: '100%',
+            height: '100%',
+            minHeight: '400px',
+          }}
+        />
+        
+        {showManualAuth && isActive && (
+          <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-10">
+            <div className="bg-gray-900 p-6 rounded-lg border border-gray-700 w-full max-w-md shadow-2xl">
+              <h3 className="text-lg font-semibold text-white mb-4">Manual Authentication</h3>
+              <p className="text-sm text-gray-400 mb-4">Credentials for {server.host} not found in config. Please enter manually:</p>
               
-              <div>
-                <label htmlFor="manual-password" className="block text-xs text-gray-500 mb-1">Password</label>
-                <input 
-                  id="manual-password"
-                  type="password" 
-                  value={manualCredentials.password}
-                  onChange={e => setManualCredentials(prev => ({ ...prev, password: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-                  placeholder="Leave empty if using key"
-                />
-              </div>
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="manual-username" className="block text-xs text-gray-500 mb-1">Username</label>
+                  <input 
+                    id="manual-username"
+                    type="text" 
+                    value={manualCredentials.username}
+                    onChange={e => setManualCredentials(prev => ({ ...prev, username: e.target.value }))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="manual-password" className="block text-xs text-gray-500 mb-1">Password</label>
+                  <input 
+                    id="manual-password"
+                    type="password" 
+                    value={manualCredentials.password}
+                    onChange={e => setManualCredentials(prev => ({ ...prev, password: e.target.value }))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                    placeholder="Leave empty if using key"
+                  />
+                </div>
 
-              <div className="text-center text-xs text-gray-600 my-2">— OR —</div>
+                <div className="text-center text-xs text-gray-600 my-2">— OR —</div>
 
-              <div>
-                <label htmlFor="manual-key" className="block text-xs text-gray-500 mb-1">Private Key (PEM)</label>
-                <textarea 
-                  id="manual-key"
-                  value={manualCredentials.privateKey}
-                  onChange={e => setManualCredentials(prev => ({ ...prev, privateKey: e.target.value }))}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono text-[10px]"
-                  rows={4}
-                />
-              </div>
-              
-              <div className="flex gap-3 mt-6">
-                <button 
-                  type="button"
-                  onClick={() => setShowManualAuth(false)}
-                  className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded transition-colors"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => {
-                    connectedRef.current = false;
-                    setConnectTrigger(prev => prev + 1);
-                  }}
-                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded transition-colors"
-                >
-                  Connect
-                </button>
+                <div>
+                  <label htmlFor="manual-key" className="block text-xs text-gray-500 mb-1">Private Key (PEM)</label>
+                  <textarea 
+                    id="manual-key"
+                    value={manualCredentials.privateKey}
+                    onChange={e => setManualCredentials(prev => ({ ...prev, privateKey: e.target.value }))}
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono text-[10px]"
+                    rows={4}
+                  />
+                </div>
+                
+                <div className="flex gap-3 mt-6">
+                  <button 
+                    type="button"
+                    onClick={() => setShowManualAuth(false)}
+                    className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => {
+                      connectedRef.current = false;
+                      setConnectTrigger(prev => prev + 1);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded transition-colors"
+                  >
+                    Connect
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 });

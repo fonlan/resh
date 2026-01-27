@@ -1,0 +1,32 @@
+.status-bar {
+  display: flex;
+  flex-direction: row;
+  height: 24px;
+  line-height: 24px;
+  width: 100%;
+  font-size: 12px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  user-select: none;
+  padding: 0 8px;
+  box-sizing: border-box;
+}
+
+.status-bar-left {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+  padding-right: 10px;
+}
+
+.status-bar-right {
+  flex: 0 0 auto; /* Allow it to shrink if needed, but prefer auto width based on content */
+  max-width: 200px; /* Cap it just in case */
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

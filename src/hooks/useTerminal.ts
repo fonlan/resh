@@ -70,10 +70,10 @@ export const useTerminal = (
         const webglAddon = new WebglAddon();
         term.loadAddon(webglAddon);
         webglAddonRef.current = webglAddon;
-        term.write('Connected to terminal (WebGL Enabled)\r\n');
+        // term.write('Connected to terminal (WebGL Enabled)\r\n');
       } catch (e) {
         console.warn('WebGL renderer could not be loaded, falling back to canvas', e);
-        term.write('Connected to terminal (Canvas Fallback)\r\n');
+        // term.write('Connected to terminal (Canvas Fallback)\r\n');
       }
     }
     
