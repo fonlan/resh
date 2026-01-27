@@ -124,6 +124,8 @@ pub struct SyncConfig {
     pub authentications: Vec<Authentication>,
     #[serde(default)]
     pub proxies: Vec<Proxy>,
+    #[serde(default)]
+    pub removed_ids: Vec<String>,
 }
 
 impl Config {

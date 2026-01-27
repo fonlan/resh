@@ -15,19 +15,19 @@ impl SyncManager {
     }
 
     pub async fn sync(&self, local_config: &mut Config) -> Result<(), String> {
-        // 1. Download sync.json from WebDAV (using SyncConfig instead of Config)
+        // 1. Download sync.json from WebDAV
         let remote_sync_config = match self.client.download("sync.json").await {
             Ok(content) => {
                 serde_json::from_slice::<SyncConfig>(&content)
                     .map_err(|e| format!("Failed to parse remote sync.json: {}", e))?
             }
             Err(_) => {
-                // If download fails (e.g., file doesn't exist), start with an empty SyncConfig
                 SyncConfig {
                     version: local_config.version.clone(),
                     servers: vec![],
                     authentications: vec![],
                     proxies: vec![],
+                    removed_ids: vec![],
                 }
             }
         };
@@ -37,7 +37,7 @@ impl SyncManager {
 
         // 3. Merge logic: Local -> Remote (only synced items)
         let mut new_remote_sync_config = remote_sync_config.clone();
-        self.merge_local_to_remote(&local_config, &mut new_remote_sync_config);
+        self.merge_local_to_remote(local_config, &mut new_remote_sync_config);
 
         // 4. Upload new sync.json to WebDAV
         let sync_json = serde_json::to_vec_pretty(&new_remote_sync_config)
@@ -50,6 +50,23 @@ impl SyncManager {
     }
 
     fn merge_remote_to_local(&self, local: &mut Config, remote: &SyncConfig) {
+        // Handle removals first: if an ID is in removed_ids, disable sync locally
+        for server in &mut local.servers {
+            if remote.removed_ids.contains(&server.id) {
+                server.synced = false;
+            }
+        }
+        for auth in &mut local.authentications {
+            if remote.removed_ids.contains(&auth.id) {
+                auth.synced = false;
+            }
+        }
+        for proxy in &mut local.proxies {
+            if remote.removed_ids.contains(&proxy.id) {
+                proxy.synced = false;
+            }
+        }
+
         // Merge Servers
         let mut local_servers: HashMap<String, Server> = local.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_server in &remote.servers {
@@ -94,8 +111,61 @@ impl SyncManager {
     }
 
     fn merge_local_to_remote(&self, local: &Config, remote: &mut SyncConfig) {
-        // Merge Servers
+        // 1. Identify what should be removed from remote
+        // If an item exists in remote but is missing in local or has synced=false in local
+        let local_servers: HashMap<String, &Server> = local.servers.iter().map(|s| (s.id.clone(), s)).collect();
+        let local_auths: HashMap<String, &Authentication> = local.authentications.iter().map(|a| (a.id.clone(), a)).collect();
+        let local_proxies: HashMap<String, &Proxy> = local.proxies.iter().map(|p| (p.id.clone(), p)).collect();
+
         let mut remote_servers: HashMap<String, Server> = remote.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut to_remove_servers = Vec::new();
+        for id in remote_servers.keys() {
+            match local_servers.get(id) {
+                None => to_remove_servers.push(id.clone()), // Deleted locally
+                Some(s) if !s.synced => to_remove_servers.push(id.clone()), // Disabled sync locally
+                _ => {}
+            }
+        }
+        for id in to_remove_servers {
+            remote_servers.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
+        let mut remote_auths: HashMap<String, Authentication> = remote.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
+        let mut to_remove_auths = Vec::new();
+        for id in remote_auths.keys() {
+            match local_auths.get(id) {
+                None => to_remove_auths.push(id.clone()),
+                Some(a) if !a.synced => to_remove_auths.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_auths {
+            remote_auths.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
+        let mut remote_proxies: HashMap<String, Proxy> = remote.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
+        let mut to_remove_proxies = Vec::new();
+        for id in remote_proxies.keys() {
+            match local_proxies.get(id) {
+                None => to_remove_proxies.push(id.clone()),
+                Some(p) if !p.synced => to_remove_proxies.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_proxies {
+            remote_proxies.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
+        // 2. Add/Update from local
         for local_server in &local.servers {
             if !local_server.synced { continue; }
             if let Some(remote_server) = remote_servers.get_mut(&local_server.id) {
@@ -108,8 +178,6 @@ impl SyncManager {
         }
         remote.servers = remote_servers.into_values().collect();
 
-        // Merge Authentications
-        let mut remote_auths: HashMap<String, Authentication> = remote.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
         for local_auth in &local.authentications {
             if !local_auth.synced { continue; }
             if let Some(remote_auth) = remote_auths.get_mut(&local_auth.id) {
@@ -122,8 +190,6 @@ impl SyncManager {
         }
         remote.authentications = remote_auths.into_values().collect();
 
-        // Merge Proxies
-        let mut remote_proxies: HashMap<String, Proxy> = remote.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
         for local_proxy in &local.proxies {
             if !local_proxy.synced { continue; }
             if let Some(remote_proxy) = remote_proxies.get_mut(&local_proxy.id) {
