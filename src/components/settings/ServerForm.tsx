@@ -14,6 +14,8 @@ interface ServerFormProps {
 
 export interface ServerFormHandle {
   submit: () => void;
+  synced: boolean;
+  setSynced: (synced: boolean) => void;
 }
 
 export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
@@ -108,6 +110,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   // Expose submit method to parent via ref
   useImperativeHandle(ref, () => ({
     submit: handleSave,
+    synced: formData.synced,
+    setSynced: (synced: boolean) => handleChange('synced', synced),
   }));
 
   const handleChange = (field: keyof Server, value: any) => {
@@ -216,20 +220,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
   return (
     <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-      {/* Sync Toggle */}
-      <div className="flex items-center gap-2 mb-4">
-        <input
-          type="checkbox"
-          id="synced"
-          checked={formData.synced}
-          onChange={(e) => handleChange('synced', e.target.checked)}
-          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
-        />
-        <label htmlFor="synced" className="text-sm font-medium text-gray-300">
-          {t.common.syncThisItem || 'Sync this item'}
-        </label>
-      </div>
-
       {/* Name */}
       <div>
         <label htmlFor="server-name" className="block text-sm font-medium text-gray-300 mb-1">

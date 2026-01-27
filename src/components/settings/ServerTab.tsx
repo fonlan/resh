@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
 import { Server, Authentication, ProxyConfig as ProxyType } from '../../types/config';
 import { FormModal } from '../FormModal';
@@ -24,7 +24,15 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
+  const [isSynced, setIsSynced] = useState(true);
   const formRef = useRef<ServerFormHandle>(null);
+
+  // Sync state with formref
+  useEffect(() => {
+    if (formRef.current) {
+      setIsSynced(formRef.current.synced);
+    }
+  }, [isFormOpen]);
 
   const existingNames = servers
     .filter((s) => s.id !== editingServer?.id)
@@ -32,11 +40,13 @@ export const ServerTab: React.FC<ServerTabProps> = ({
 
   const handleAddServer = () => {
     setEditingServer(null);
+    setIsSynced(true);
     setIsFormOpen(true);
   };
 
   const handleEditServer = (server: Server) => {
     setEditingServer(server);
+    setIsSynced(server.synced !== undefined ? server.synced : true);
     setIsFormOpen(true);
   };
 
@@ -162,6 +172,25 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
+        extraFooterContent={
+          <div className="flex items-center gap-2 mr-auto">
+            <input
+              type="checkbox"
+              id="synced-footer"
+              checked={isSynced}
+              onChange={(e) => {
+                setIsSynced(e.target.checked);
+                if (formRef.current) {
+                  formRef.current.setSynced(e.target.checked);
+                }
+              }}
+              className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
+            />
+            <label htmlFor="synced-footer" className="text-sm font-medium text-gray-300 cursor-pointer">
+              {t.common.syncThisItem || 'Sync this item'}
+            </label>
+          </div>
+        }
       >
         <ServerForm
           ref={formRef}

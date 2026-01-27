@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { ProxyConfig as ProxyType, Server as ServerType } from '../../types/config';
 import { FormModal } from '../FormModal';
@@ -22,7 +22,15 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null);
+  const [isSynced, setIsSynced] = useState(true);
   const formRef = useRef<ProxyFormHandle>(null);
+
+  // Sync state with formref
+  useEffect(() => {
+    if (formRef.current) {
+      setIsSynced(formRef.current.synced);
+    }
+  }, [isFormOpen]);
 
   const existingNames = proxies
     .filter((p) => p.id !== editingProxy?.id)
@@ -30,11 +38,13 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
 
   const handleAddProxy = () => {
     setEditingProxy(null);
+    setIsSynced(true);
     setIsFormOpen(true);
   };
 
   const handleEditProxy = (proxy: ProxyType) => {
     setEditingProxy(proxy);
+    setIsSynced(proxy.synced !== undefined ? proxy.synced : true);
     setIsFormOpen(true);
   };
 
@@ -140,6 +150,25 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
+        extraFooterContent={
+          <div className="flex items-center gap-2 mr-auto">
+            <input
+              type="checkbox"
+              id="synced-footer-proxy"
+              checked={isSynced}
+              onChange={(e) => {
+                setIsSynced(e.target.checked);
+                if (formRef.current) {
+                  formRef.current.setSynced(e.target.checked);
+                }
+              }}
+              className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
+            />
+            <label htmlFor="synced-footer-proxy" className="text-sm font-medium text-gray-300 cursor-pointer">
+              {t.common.syncThisItem || 'Sync this item'}
+            </label>
+          </div>
+        }
       >
         <ProxyForm
           ref={formRef}

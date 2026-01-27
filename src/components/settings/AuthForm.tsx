@@ -12,6 +12,8 @@ interface AuthFormProps {
 
 export interface AuthFormHandle {
   submit: () => void;
+  synced: boolean;
+  setSynced: (synced: boolean) => void;
 }
 
 export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
@@ -71,6 +73,8 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   // Expose submit method to parent via ref
   useImperativeHandle(ref, () => ({
     submit: handleSave,
+    synced: formData.synced,
+    setSynced: (synced: boolean) => handleChange('synced', synced),
   }));
 
   const handleChange = (field: keyof Authentication, value: any) => {
@@ -121,20 +125,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
 
   return (
     <div className="space-y-4">
-      {/* Sync Toggle */}
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          id="synced"
-          checked={formData.synced}
-          onChange={(e) => handleChange('synced', e.target.checked)}
-          className="w-4 h-4 rounded bg-gray-800 border-gray-600 text-blue-500 focus:ring-blue-500"
-        />
-        <label htmlFor="synced" className="text-sm font-medium text-gray-300">
-          {t.common.syncThisItem || 'Sync this item'}
-        </label>
-      </div>
-
       {/* Name */}
       <div>
         <label className="block text-sm font-medium text-gray-300 mb-1">
