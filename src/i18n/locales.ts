@@ -167,6 +167,8 @@ export const locales = {
     },
     mainWindow: {
       closeTab: 'Close tab',
+      cloneTab: 'Clone tab',
+      closeOthers: 'Close other tabs',
       settings: 'Settings',
       snippets: 'Snippets',
       tabAriaLabel: 'Tab {index} of {total}',
@@ -355,6 +357,8 @@ export const locales = {
     },
     mainWindow: {
       closeTab: '关闭标签页',
+      cloneTab: '克隆标签页',
+      closeOthers: '关闭其他标签页',
       settings: '设置',
       snippets: '代码段',
       tabAriaLabel: '第 {index} 个标签页，共 {total} 个',

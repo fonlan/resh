@@ -9,6 +9,7 @@ import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
 import { SnippetsSidebar } from './SnippetsSidebar';
+import { TabContextMenu } from './TabContextMenu';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
@@ -29,6 +30,7 @@ export const MainWindow: React.FC = () => {
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
   const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
 
   const handleTabDragStart = useCallback((index: number) => {
     if (tabs.length <= 1) return;
@@ -107,6 +109,38 @@ export const MainWindow: React.FC = () => {
     }
   }, [config, saveConfig]);
 
+  const handleCloneTab = useCallback((tabId: string) => {
+    const sourceTab = tabs.find(t => t.id === tabId);
+    if (!sourceTab) return;
+
+    const sourceIndex = tabs.findIndex(t => t.id === tabId);
+    const newTab: Tab = {
+      id: generateId(),
+      label: sourceTab.label,
+      serverId: sourceTab.serverId
+    };
+
+    const newTabs = [...tabs];
+    newTabs.splice(sourceIndex + 1, 0, newTab);
+    setTabs(newTabs);
+    setActiveTabId(newTab.id);
+  }, [tabs]);
+
+  const handleCloseOthers = useCallback((tabId: string) => {
+    const newTabs = tabs.filter(t => t.id === tabId);
+    setTabs(newTabs);
+    setActiveTabId(tabId);
+  }, [tabs]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
+    e.preventDefault();
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      tabId
+    });
+  }, []);
+
   const handleConnectServer = useCallback((serverId: string) => {
     handleAddTab(serverId);
     setIsSettingsOpen(false);
@@ -141,6 +175,7 @@ export const MainWindow: React.FC = () => {
                 draggedTabIndex === index ? 'dragging' : ''
               } ${dropTargetIndex === index ? 'drop-target' : ''}`}
               onClick={() => setActiveTabId(tab.id)}
+              onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
               <span className="tab-label">{tab.label}</span>
               <button
@@ -249,6 +284,19 @@ export const MainWindow: React.FC = () => {
           />
         )}
       </Suspense>
+
+      {/* Tab Context Menu */}
+      {contextMenu && (
+        <TabContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          tabId={contextMenu.tabId}
+          onClose={() => setContextMenu(null)}
+          onClone={handleCloneTab}
+          onCloseTab={handleCloseTab}
+          onCloseOthers={handleCloseOthers}
+        />
+      )}
     </div>
   );
 };
