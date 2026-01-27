@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
+import { WebglAddon } from 'xterm-addon-webgl';
 import 'xterm/css/xterm.css';
 import { TerminalSettings } from '../types/config';
 
@@ -12,13 +13,14 @@ export const useTerminal = (
 ) => {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const webglAddonRef = useRef<WebglAddon | null>(null);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // ... (theme logic remains the same)
+    // Determine actual theme
     let actualTheme: 'light' | 'dark' = 'dark';
     if (theme === 'system') {
       actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -50,11 +52,34 @@ export const useTerminal = (
     if (container.clientWidth > 0 && container.clientHeight > 0) {
       term.open(container);
       fitAddon.fit();
+      
+      // Initialize WebGL Addon after opening
+      try {
+        const webglAddon = new WebglAddon();
+        term.loadAddon(webglAddon);
+        webglAddonRef.current = webglAddon;
+        term.write('Connected to terminal (WebGL Enabled)\r\n');
+      } catch (e) {
+        console.warn('WebGL renderer could not be loaded, falling back to canvas', e);
+        term.write('Connected to terminal (Canvas Fallback)\r\n');
+      }
     }
     
     const resizeObserver = new ResizeObserver(() => {
       if (container.clientWidth > 0 && container.clientHeight > 0) {
-        if (!term.element) term.open(container);
+        if (!term.element) {
+          term.open(container);
+          // Try loading webgl if not already loaded
+          if (!webglAddonRef.current) {
+            try {
+              const webglAddon = new WebglAddon();
+              term.loadAddon(webglAddon);
+              webglAddonRef.current = webglAddon;
+            } catch (e) {
+              console.warn('WebGL renderer could not be loaded', e);
+            }
+          }
+        }
         fitAddon.fit();
       }
     });
@@ -67,8 +92,10 @@ export const useTerminal = (
     return () => {
       disposable.dispose();
       resizeObserver.disconnect();
+      webglAddonRef.current?.dispose();
       term.dispose();
       terminalRef.current = null;
+      webglAddonRef.current = null;
       setIsReady(false);
     };
   }, [containerId, settings, theme, onData]); // onData is now a dependency
