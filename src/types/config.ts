@@ -30,7 +30,6 @@ export interface Authentication {
   keyContent?: string;
   passphrase?: string;
   // For password
-  username?: string;
   password?: string;
   synced: boolean;
   updatedAt: string;

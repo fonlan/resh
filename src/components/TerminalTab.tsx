@@ -99,7 +99,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
           }
           if (auth?.type === 'password') {
             password = auth.password;
-            username = auth.username || server.username;
           } else if (auth?.type === 'key') {
             private_key = auth.keyContent;
             passphrase = auth.passphrase;
@@ -118,7 +117,6 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             let jhPassphrase: string | undefined = undefined;
             if (jhAuth?.type === 'password') {
               jhPassword = jhAuth.password;
-              jhUsername = jhAuth.username || jhServer.username;
             } else if (jhAuth?.type === 'key') {
               jhPrivateKey = jhAuth.keyContent;
               jhPassphrase = jhAuth.passphrase;

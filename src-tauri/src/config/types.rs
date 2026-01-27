@@ -47,7 +47,6 @@ pub struct Authentication {
     pub auth_type: String, // "key" or "password"
     pub key_content: Option<String>,
     pub passphrase: Option<String>,
-    pub username: Option<String>,
     pub password: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,

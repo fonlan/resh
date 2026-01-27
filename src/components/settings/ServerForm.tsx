@@ -83,14 +83,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     const portError = validatePort(formData.port, t.common.port);
     if (portError) newErrors.port = portError;
 
-    // Only validate username if no authentication is selected OR if authentication is key type
-    const selectedAuth = formData.authId ? availableAuths.find((a) => a.id === formData.authId) : null;
-    const shouldValidateUsername = !formData.authId || selectedAuth?.type === 'key';
-
-    if (shouldValidateUsername) {
-      const usernameError = validateRequired(formData.username, t.serverForm.usernameLabel);
-      if (usernameError) newErrors.username = usernameError;
-    }
+    // Always validate username
+    const usernameError = validateRequired(formData.username, t.serverForm.usernameLabel);
+    if (usernameError) newErrors.username = usernameError;
 
     // Authentication is required
     const authError = validateRequired(formData.authId || '', t.serverForm.authLabel);
@@ -102,17 +97,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
   const handleSave = () => {
     if (validateForm()) {
-      // If password authentication is selected, use the username from authentication
       const serverToSave = { 
         ...formData,
         updatedAt: new Date().toISOString()
       };
-      if (formData.authId) {
-        const selectedAuth = availableAuths.find((a) => a.id === formData.authId);
-        if (selectedAuth?.type === 'password' && selectedAuth.username) {
-          serverToSave.username = selectedAuth.username;
-        }
-      }
       onSave(serverToSave);
     }
   };
@@ -298,35 +286,22 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           {errors.port && <p className="text-red-400 text-xs mt-1">{errors.port}</p>}
         </div>
 
-        {/* Username - show different UI based on authentication selection */}
+        {/* Username */}
         <div>
           <label htmlFor="server-username" className="block text-sm font-medium text-gray-300 mb-1">
             {t.serverForm.usernameLabel}
           </label>
-          {formData.authId && availableAuths.find((a) => a.id === formData.authId)?.type === 'password' ? (
-            <>
-              <div id="server-username" className="w-full px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400">
-                {availableAuths.find((a) => a.id === formData.authId)?.username || 'N/A'}
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {t.serverForm.fromAuth}
-              </p>
-            </>
-          ) : (
-            <>
-              <input
-                id="server-username"
-                type="text"
-                value={formData.username}
-                onChange={(e) => handleChange('username', e.target.value)}
-                placeholder={t.serverForm.usernamePlaceholder}
-                className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                  errors.username ? 'border-red-500' : 'border-gray-600'
-                } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
-              />
-              {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
-            </>
-          )}
+          <input
+            id="server-username"
+            type="text"
+            value={formData.username}
+            onChange={(e) => handleChange('username', e.target.value)}
+            placeholder={t.serverForm.usernamePlaceholder}
+            className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+              errors.username ? 'border-red-500' : 'border-gray-600'
+            } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+          />
+          {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
         </div>
       </div>
 

@@ -105,7 +105,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({
               <div className="item-info">
                 <p className="item-name">{auth.name}</p>
                 <p className="item-detail">
-                  {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType} • {auth.username}
+                  {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType}
                 </p>
               </div>
               <div className="item-actions">

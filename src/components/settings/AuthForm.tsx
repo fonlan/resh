@@ -29,7 +29,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       id: '',
       name: '',
       type: 'password',
-      username: '',
       password: '',
       synced: true,
       updatedAt: new Date().toISOString(),
@@ -49,9 +48,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
     if (uniqueError) newErrors.name = uniqueError;
 
     if (formData.type === 'password') {
-      const usernameError = validateRequired(formData.username, t.authForm.usernameLabel);
-      if (usernameError) newErrors.username = usernameError;
-
       const passwordError = validateRequired(formData.password, t.authForm.passwordLabel);
       if (passwordError) newErrors.password = passwordError;
     } else {
@@ -101,7 +97,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
         delete newErrors.keyContent;
         delete newErrors.passphrase;
       } else {
-        delete newErrors.username;
         delete newErrors.password;
       }
       return newErrors;
@@ -184,22 +179,6 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       {/* Password Authentication Fields */}
       {formData.type === 'password' && (
         <>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              {t.authForm.usernameLabel}
-            </label>
-            <input
-              type="text"
-              value={formData.username || ''}
-              onChange={(e) => handleChange('username', e.target.value)}
-              placeholder={t.authForm.usernamePlaceholder}
-              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                errors.username ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
-            />
-            {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
-          </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">
               {t.authForm.passwordLabel}
