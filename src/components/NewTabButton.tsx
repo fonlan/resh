@@ -49,6 +49,8 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
     setIsOpen(false);
   };
 
+  const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="new-tab-container">
       <button
@@ -69,7 +71,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
             <span>{t.newTabButton.connectTo}</span>
           </div>
 
-          {servers.length === 0 ? (
+          {sortedServers.length === 0 ? (
             <div className="dropdown-empty">
               <ServerIcon size={32} />
               <span>{t.welcome.noServers}</span>
@@ -84,7 +86,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
             </div>
           ) : (
             <div className="dropdown-list">
-              {servers.map((server) => (
+              {sortedServers.map((server) => (
                 <button
                   type="button"
                   key={server.id}

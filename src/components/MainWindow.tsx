@@ -14,6 +14,7 @@ import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
 import { useTranslation } from '../i18n';
+import { useTabDragDrop } from '../hooks/useTabDragDrop';
 
 interface Tab {
   id: string;
@@ -28,57 +29,30 @@ export const MainWindow: React.FC = () => {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
-  const [draggedTabIndex, setDraggedTabIndex] = useState<number | null>(null);
-  const [dropTargetIndex, setDropTargetIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
 
-  const handleTabDragStart = useCallback((index: number) => {
-    if (tabs.length <= 1) return;
-    setDraggedTabIndex(index);
-  }, [tabs.length]);
-
-  const handleTabDragOver = useCallback((e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedTabIndex !== null && draggedTabIndex !== index && dropTargetIndex !== index) {
-      setDropTargetIndex(index);
-    }
-  }, [draggedTabIndex, dropTargetIndex]);
-
-  const handleTabDrop = useCallback((e: React.DragEvent, dropIndex: number) => {
-    e.preventDefault();
-    if (
-      draggedTabIndex !== null &&
-      draggedTabIndex !== dropIndex &&
-      draggedTabIndex >= 0 &&
-      draggedTabIndex < tabs.length &&
-      dropIndex >= 0 &&
-      dropIndex < tabs.length
-    ) {
-      const newTabs = [...tabs];
-      const [draggedTab] = newTabs.splice(draggedTabIndex, 1);
-      newTabs.splice(dropIndex, 0, draggedTab);
-      setTabs(newTabs);
-    }
-    setDraggedTabIndex(null);
-    setDropTargetIndex(null);
-  }, [draggedTabIndex, tabs]);
-
-  const handleTabDragEnd = useCallback(() => {
-    setDraggedTabIndex(null);
-    setDropTargetIndex(null);
-  }, []);
+  const {
+    draggedIndex: draggedTabIndex,
+    dropTargetIndex,
+    handleDragStart: handleTabDragStart,
+    handleDragOver: handleTabDragOver,
+    handleDrop: handleTabDrop,
+    handleDragEnd: handleTabDragEnd
+  } = useTabDragDrop(tabs, setTabs);
 
   const handleTabKeyDown = useCallback((e: React.KeyboardEvent, index: number) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowRight' && index < tabs.length - 1) {
-      e.preventDefault();
-      const newTabs = [...tabs];
-      [newTabs[index], newTabs[index + 1]] = [newTabs[index + 1], newTabs[index]];
-      setTabs(newTabs);
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'ArrowLeft' && index > 0) {
-      e.preventDefault();
-      const newTabs = [...tabs];
-      [newTabs[index], newTabs[index - 1]] = [newTabs[index - 1], newTabs[index]];
-      setTabs(newTabs);
+    if ((e.ctrlKey || e.metaKey)) {
+        if (e.key === 'ArrowRight' && index < tabs.length - 1) {
+            e.preventDefault();
+            const newTabs = [...tabs];
+            [newTabs[index], newTabs[index + 1]] = [newTabs[index + 1], newTabs[index]];
+            setTabs(newTabs);
+        } else if (e.key === 'ArrowLeft' && index > 0) {
+            e.preventDefault();
+            const newTabs = [...tabs];
+            [newTabs[index], newTabs[index - 1]] = [newTabs[index - 1], newTabs[index]];
+            setTabs(newTabs);
+        }
     }
   }, [tabs]);
 

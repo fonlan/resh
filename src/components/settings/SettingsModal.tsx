@@ -44,6 +44,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   // Ref to track if a save is in progress to prevent race conditions
   const isSavingRef = useRef(false);
 
+  // Ref for the modal container to detect clicks outside
+  const modalRef = useRef<HTMLDivElement>(null);
+  // Track if mouse down was inside the modal
+  const mouseDownInsideRef = useRef(false);
+
   // Initialize local config when config loads
   useEffect(() => {
     if (config) {
@@ -121,14 +126,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     };
   }, [localConfig, saveConfig]);
 
+  const handleOverlayMouseDown = (e: React.MouseEvent) => {
+    if (modalRef.current && modalRef.current.contains(e.target as Node)) {
+      mouseDownInsideRef.current = true;
+    } else {
+      mouseDownInsideRef.current = false;
+    }
+  };
+
+  const handleOverlayMouseUp = (e: React.MouseEvent) => {
+    // Only close if mouse down and mouse up were both outside the modal
+    if (!mouseDownInsideRef.current && modalRef.current && !modalRef.current.contains(e.target as Node)) {
+      onClose();
+    }
+    mouseDownInsideRef.current = false;
+  };
+
   if (!isOpen) {
     return null;
   }
 
   if (loading) {
     return (
-      <div className="settings-overlay">
-        <div className="settings-modal loading-modal">
+      <div 
+        className="settings-overlay"
+        onMouseDown={handleOverlayMouseDown}
+        onMouseUp={handleOverlayMouseUp}
+      >
+        <div className="settings-modal loading-modal" ref={modalRef}>
           <Loader2 className="spinner" size={32} />
           <p>{t.common.loading}</p>
         </div>
@@ -169,8 +194,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   ];
 
   return (
-    <div className="settings-overlay">
-      <div className="settings-modal">
+    <div 
+      className="settings-overlay"
+      onMouseDown={handleOverlayMouseDown}
+      onMouseUp={handleOverlayMouseUp}
+    >
+      <div className="settings-modal" ref={modalRef}>
         {/* Header */}
         <div className="settings-header">
           <div className="settings-header-left">

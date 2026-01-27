@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
-import { Server, Authentication, ProxyConfig, TerminalSettings } from '../types/config';
+import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types/config';
 import { useTranslation } from '../i18n';
 import { StatusBar } from './StatusBar';
+import { ManualAuthModal } from './ManualAuthModal';
+import { processInputBuffer } from '../utils/terminalUtils';
 
 type UnlistenFn = () => void;
 
@@ -36,10 +38,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const containerId = `terminal-${tabId}`;
 
   // Memoize settings to prevent re-creating terminal on reference change
-  const memoizedSettings = React.useMemo(() => {
-      if (!terminalSettings) return undefined;
-      return { ...terminalSettings };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const memoizedSettings = useMemo(() => {
+    if (!terminalSettings) return undefined;
+    return { ...terminalSettings };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(terminalSettings)]);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -49,30 +51,13 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const [statusText, setStatusText] = useState<string>('');
   const inputBufferRef = useRef<string>('');
   const isInputModeRef = useRef<boolean>(false);
+  const sessionIdRef = useRef<string | null>(null);
 
   // Define handleData before useTerminal
-  const handleData = React.useCallback((data: string) => {
-    // Update input buffer logic
-    let currentBuffer = inputBufferRef.current;
-    let commandExecuted: string | null = null;
+  const handleData = useCallback((data: string) => {
+    const { newBuffer, commandExecuted } = processInputBuffer(data, inputBufferRef.current);
     
-    for (let i = 0; i < data.length; i++) {
-      const char = data[i];
-      const code = char.charCodeAt(0);
-      
-      if (char === '\r' || char === '\n') {
-        if (currentBuffer.trim().length > 0) {
-            commandExecuted = currentBuffer;
-        }
-        currentBuffer = '';
-      } else if (code === 127) { // Backspace
-        currentBuffer = currentBuffer.slice(0, -1);
-      } else if (code >= 32) {
-        currentBuffer += char;
-      }
-    }
-    
-    inputBufferRef.current = currentBuffer;
+    inputBufferRef.current = newBuffer;
     isInputModeRef.current = true;
     
     if (commandExecuted !== null) {
@@ -84,7 +69,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     }
   }, []);
 
-  const handleResize = React.useCallback((cols: number, rows: number) => {
+  const handleResize = useCallback((cols: number, rows: number) => {
     if (sessionIdRef.current) {
       invoke('resize_terminal', { params: { session_id: sessionIdRef.current, cols, rows } })
         .catch(err => console.error('Terminal resize failed:', err));
@@ -94,19 +79,21 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const { terminal, isReady, write, focus, getBufferText } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
 
   // Determine container background based on theme
-  const containerBg = React.useMemo(() => {
+  const containerBg = useMemo(() => {
     if (theme === 'light') return '#ffffff';
     if (theme === 'dark') return '#000000';
-    // for system, we could check media query but usually terminal is dark
-    // let's follow useTerminal's logic or just use a sensible default
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? '#000000' : '#ffffff';
   }, [theme]);
 
   const [showManualAuth, setShowManualAuth] = useState(false);
-  const [manualCredentials, setManualCredentials] = useState({ username: server.username, password: '', privateKey: '', passphrase: '' });
+  const [manualCredentials, setManualCredentials] = useState<ManualAuthCredentials>({ 
+    username: server.username, 
+    password: '', 
+    privateKey: '', 
+    passphrase: '' 
+  });
   const [connectTrigger, setConnectTrigger] = useState(0);
   const connectedRef = useRef(false);
-  const sessionIdRef = useRef<string | null>(null);
   const authenticationsRef = useRef(authentications);
   const serversRef = useRef(servers);
   const proxiesRef = useRef(proxies);
@@ -124,21 +111,20 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     proxiesRef.current = proxies;
   }, [authentications, servers, proxies]);
 
-  // Connection effect - now stabilized
+  // Connection effect
   useEffect(() => {
     if (!serverId || connectedRef.current) return;
 
     let outputUnlistener: UnlistenFn | null = null;
     let closedUnlistener: UnlistenFn | null = null;
 
-    // Helper to update status only if not in input mode
     const updateStatus = (text: string) => {
       if (!isInputModeRef.current) {
         setStatusText(text);
       }
     };
 
-    const connect = async (manualCreds?: typeof manualCredentials) => {
+    const connect = async (manualCreds?: ManualAuthCredentials) => {
       try {
         connectedRef.current = true;
         // Reset input mode on new connection attempt
@@ -146,7 +132,6 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         inputBufferRef.current = '';
         
         const connectingMsg = t.terminalTab.connecting.replace('{name}', server.name);
-        // writeRef.current(connectingMsg + '\r\n');
         updateStatus(connectingMsg);
 
         let password = manualCreds?.password;
@@ -202,7 +187,6 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         setShowManualAuth(false);
         setIsConnected(true);
         const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
-        // writeRef.current(connectedMsg + '\r\n');
         updateStatus(connectedMsg);
 
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
@@ -210,7 +194,6 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-          // writeRef.current('\r\n' + t.terminalTab.connectionClosed + '\r\n');
           updateStatus(t.terminalTab.connectionClosed);
           setIsConnected(false);
         });
@@ -240,7 +223,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
   }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, connectTrigger, manualCredentials]);
 
-  // Terminal focus effect (input is now handled inside useTerminal)
+  // Terminal focus effect
   useEffect(() => {
     if (!terminal || !isReady || !sessionId) return;
     if (isActive) focus();
@@ -253,7 +236,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   // Listen for snippet paste event
   useEffect(() => {
-    if (!isActive || !sessionIdRef.current) return;
+    if (!isActive) return;
 
     const handlePasteSnippet = (e: CustomEvent<string>) => {
       const content = e.detail;
@@ -311,70 +294,16 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         />
         
         {showManualAuth && isActive && (
-          <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-10">
-            <div className="bg-gray-900 p-6 rounded-lg border border-gray-700 w-full max-w-md shadow-2xl">
-              <h3 className="text-lg font-semibold text-white mb-4">Manual Authentication</h3>
-              <p className="text-sm text-gray-400 mb-4">Credentials for {server.host} not found in config. Please enter manually:</p>
-              
-              <div className="space-y-4">
-                <div>
-                  <label htmlFor="manual-username" className="block text-xs text-gray-500 mb-1">Username</label>
-                  <input 
-                    id="manual-username"
-                    type="text" 
-                    value={manualCredentials.username}
-                    onChange={e => setManualCredentials(prev => ({ ...prev, username: e.target.value }))}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-                  />
-                </div>
-                
-                <div>
-                  <label htmlFor="manual-password" className="block text-xs text-gray-500 mb-1">Password</label>
-                  <input 
-                    id="manual-password"
-                    type="password" 
-                    value={manualCredentials.password}
-                    onChange={e => setManualCredentials(prev => ({ ...prev, password: e.target.value }))}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-                    placeholder="Leave empty if using key"
-                  />
-                </div>
-
-                <div className="text-center text-xs text-gray-600 my-2">— OR —</div>
-
-                <div>
-                  <label htmlFor="manual-key" className="block text-xs text-gray-500 mb-1">Private Key (PEM)</label>
-                  <textarea 
-                    id="manual-key"
-                    value={manualCredentials.privateKey}
-                    onChange={e => setManualCredentials(prev => ({ ...prev, privateKey: e.target.value }))}
-                    className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono text-[10px]"
-                    rows={4}
-                  />
-                </div>
-                
-                <div className="flex gap-3 mt-6">
-                  <button 
-                    type="button"
-                    onClick={() => setShowManualAuth(false)}
-                    className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => {
-                      connectedRef.current = false;
-                      setConnectTrigger(prev => prev + 1);
-                    }}
-                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded transition-colors"
-                  >
-                    Connect
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <ManualAuthModal
+            serverName={server.host}
+            credentials={manualCredentials}
+            onCredentialsChange={setManualCredentials}
+            onConnect={() => {
+              connectedRef.current = false;
+              setConnectTrigger(prev => prev + 1);
+            }}
+            onCancel={() => setShowManualAuth(false)}
+          />
         )}
       </div>
     </div>

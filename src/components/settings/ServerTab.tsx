@@ -86,6 +86,8 @@ export const ServerTab: React.FC<ServerTabProps> = ({
     }
   };
 
+  const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="tab-container">
       <div className="flex justify-between items-center mb-4">
@@ -100,13 +102,13 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         </button>
       </div>
 
-      {servers.length === 0 ? (
+      {sortedServers.length === 0 ? (
         <div className="empty-state-mini">
           <p>{t.serverTab.emptyState}</p>
         </div>
       ) : (
         <div className="item-list">
-          {servers.map((server) => {
+          {sortedServers.map((server) => {
             const auth = authentications.find((a) => a.id === server.authId);
             const proxy = proxies.find((p) => p.id === server.proxyId);
             const jumphost = servers.find((s) => s.id === server.jumphostId);

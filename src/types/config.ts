@@ -98,3 +98,10 @@ export interface AppState {
   mergedConfig: Config;
   masterPasswordSet: boolean;
 }
+
+export interface ManualAuthCredentials {
+  username: string;
+  password?: string;
+  privateKey?: string;
+  passphrase?: string;
+}
