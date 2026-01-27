@@ -45,10 +45,11 @@ impl SSHClient {
 
         info!("[SSH] Connecting to {}:{} as {}", host, port, username);
 
-        let jh_handle_to_store = None;
+        let mut jh_handle_to_store = None;
 
         let mut session = if let Some(p) = &proxy {
             info!("[SSH] Using {} proxy: {}:{}", p.proxy_type, p.host, p.port);
+            let _ = tx.send((session_id.clone(), format!("Connecting via {} proxy {}:{}...\r\n", p.proxy_type, p.host, p.port).as_bytes().to_vec())).await;
             if p.proxy_type == "socks5" {
                 use tokio_socks::tcp::Socks5Stream;
                 let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
@@ -98,7 +99,32 @@ impl SSHClient {
             }
         } else if let Some(j) = &jumphost {
             info!("[SSH] Using jumphost: {}:{} as {}", j.host, j.port, j.username);
-            return Err("Jumphost support is not yet fully implemented".to_string());
+            let _ = tx.send((session_id.clone(), format!("Connecting to jump host {}:{}...\r\n", j.host, j.port).as_bytes().to_vec())).await;
+            
+            // 1. Connect to jumphost
+            let jh_handler = ClientHandler::new();
+            let mut jh_session = client::connect(config.clone(), (j.host.as_str(), j.port), jh_handler).await
+                .map_err(|e| format!("Failed to connect to jumphost: {}", e))?;
+            
+            // 2. Authenticate jumphost
+            let _ = tx.send((session_id.clone(), "Authenticating jump host...\r\n".as_bytes().to_vec())).await;
+            Self::authenticate_session(
+                &mut jh_session,
+                &j.username,
+                j.password.clone(),
+                j.private_key.clone(),
+                j.passphrase.clone(),
+            ).await.map_err(|e| format!("Jumphost authentication failed: {}", e))?;
+            
+            // 3. Open direct-tcpip channel to target
+            let _ = tx.send((session_id.clone(), format!("Tunneling to {}:{}...\r\n", host, port).as_bytes().to_vec())).await;
+            let channel = jh_session.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 22222).await
+                .map_err(|e| format!("Failed to open direct-tcpip through jumphost: {}", e))?;
+            
+            jh_handle_to_store = Some(jh_session);
+
+            // 4. Connect to target through channel
+            client::connect_stream(config, channel.into_stream(), handler).await
         } else {
             client::connect(config, (host, port), handler).await
         }
@@ -107,6 +133,41 @@ impl SSHClient {
             e.to_string()
         })?;
 
+        let _ = tx.send((session_id.clone(), format!("Authenticating as {}...\r\n", username).as_bytes().to_vec())).await;
+        Self::authenticate_session(
+            &mut session,
+            username,
+            password,
+            private_key,
+            passphrase,
+        ).await?;
+
+        info!("[SSH] Authentication successful. Opening channel...");
+
+        let channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
+        
+        // Request PTY and wait for reply to ensure it's granted
+        channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
+        
+        // Request shell and wait for reply
+        channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
+
+        let channel_id = channel.id();
+        {
+            let mut sessions = SESSIONS.lock().await;
+            sessions.insert(session_id.clone(), (session, channel_id, jh_handle_to_store));
+        }
+        
+        Ok(session_id)
+    }
+
+    async fn authenticate_session<H: client::Handler>(
+        session: &mut client::Handle<H>,
+        username: &str,
+        password: Option<String>,
+        private_key: Option<String>,
+        passphrase: Option<String>,
+    ) -> Result<(), String> {
         let mut authenticated = false;
 
         if let Some(key_content) = private_key {
@@ -141,23 +202,7 @@ impl SSHClient {
             return Err("Authentication failed".to_string());
         }
 
-        info!("[SSH] Authentication successful. Opening channel...");
-
-        let channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
-        
-        // Request PTY and wait for reply to ensure it's granted
-        channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
-        
-        // Request shell and wait for reply
-        channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
-
-        let channel_id = channel.id();
-        {
-            let mut sessions = SESSIONS.lock().await;
-            sessions.insert(session_id.clone(), (session, channel_id, jh_handle_to_store));
-        }
-        
-        Ok(session_id)
+        Ok(())
     }
 
     pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
