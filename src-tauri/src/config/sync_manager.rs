@@ -8,20 +8,23 @@ pub struct SyncManager {
 }
 
 impl SyncManager {
-    pub fn new(url: String, username: String, password: String) -> Self {
+    pub fn new(url: String, username: String, password: String, proxy: Option<Proxy>) -> Self {
         Self {
-            client: WebDAVClient::new(url, username, password),
+            client: WebDAVClient::new(url, username, password, proxy),
         }
     }
 
     pub async fn sync(&self, local_config: &mut Config) -> Result<(), String> {
         // 1. Download sync.json from WebDAV
         let remote_sync_config = match self.client.download("sync.json").await {
-            Ok(content) => {
-                serde_json::from_slice::<SyncConfig>(&content)
-                    .map_err(|e| format!("Failed to parse remote sync.json: {}", e))?
+            Ok(Some(content)) => {
+                let config = serde_json::from_slice::<SyncConfig>(&content)
+                    .map_err(|e| format!("Failed to parse remote sync.json: {}", e))?;
+                tracing::info!("Downloaded remote sync.json: {} servers, {} snippets", config.servers.len(), config.snippets.len());
+                config
             }
-            Err(_) => {
+            Ok(None) => {
+                tracing::info!("Remote sync.json not found (first sync)");
                 SyncConfig {
                     version: local_config.version.clone(),
                     servers: vec![],
@@ -31,14 +34,30 @@ impl SyncManager {
                     removed_ids: vec![],
                 }
             }
+            Err(e) => {
+                tracing::error!("Failed to download sync.json: {}", e);
+                return Err(format!("Sync failed: {}", e));
+            }
         };
 
         // 2. Merge logic: Remote -> Local
         self.merge_remote_to_local(local_config, &remote_sync_config);
 
+        // Safety Check: If remote had items but local is empty after merge, something is wrong.
+        // This prevents a "fresh" client from wiping remote if merge fails silently.
+        if !remote_sync_config.snippets.is_empty() && local_config.snippets.is_empty() {
+            tracing::error!("CRITICAL: Remote has {} snippets but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.snippets.len());
+            return Err("Merge integrity check failed: Snippets missing after merge".to_string());
+        }
+        if !remote_sync_config.servers.is_empty() && local_config.servers.is_empty() {
+            tracing::error!("CRITICAL: Remote has {} servers but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.servers.len());
+            return Err("Merge integrity check failed: Servers missing after merge".to_string());
+        }
+
         // 3. Merge logic: Local -> Remote (only synced items)
         let mut new_remote_sync_config = remote_sync_config.clone();
         self.merge_local_to_remote(local_config, &mut new_remote_sync_config);
+        tracing::debug!("After merge_local_to_remote: New Remote has {} snippets", new_remote_sync_config.snippets.len());
 
         // 4. Upload new sync.json to WebDAV
         let sync_json = serde_json::to_vec_pretty(&new_remote_sync_config)
@@ -46,6 +65,8 @@ impl SyncManager {
         
         self.client.upload("sync.json", &sync_json).await
             .map_err(|e| format!("Failed to upload sync.json: {}", e))?;
+        
+        tracing::info!("Uploaded updated sync.json: {} servers, {} snippets", new_remote_sync_config.servers.len(), new_remote_sync_config.snippets.len());
 
         Ok(())
     }
@@ -76,13 +97,17 @@ impl SyncManager {
         // Merge Servers
         let mut local_servers: HashMap<String, Server> = local.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_server in &remote.servers {
-            if !remote_server.synced { continue; }
+            // If it's in remote sync.json, it SHOULD be synced to local, regardless of its own synced flag.
+            // The flag is primarily for local-to-remote control.
             if let Some(local_server) = local_servers.get_mut(&remote_server.id) {
                 if is_newer(&remote_server.updated_at, &local_server.updated_at) {
                     *local_server = remote_server.clone();
+                    local_server.synced = true; // Ensure it stays synced
                 }
             } else {
-                local_servers.insert(remote_server.id.clone(), remote_server.clone());
+                let mut s = remote_server.clone();
+                s.synced = true;
+                local_servers.insert(s.id.clone(), s);
             }
         }
         local.servers = local_servers.into_values().collect();
@@ -90,13 +115,15 @@ impl SyncManager {
         // Merge Authentications
         let mut local_auths: HashMap<String, Authentication> = local.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
         for remote_auth in &remote.authentications {
-            if !remote_auth.synced { continue; }
             if let Some(local_auth) = local_auths.get_mut(&remote_auth.id) {
                 if is_newer(&remote_auth.updated_at, &local_auth.updated_at) {
                     *local_auth = remote_auth.clone();
+                    local_auth.synced = true;
                 }
             } else {
-                local_auths.insert(remote_auth.id.clone(), remote_auth.clone());
+                let mut a = remote_auth.clone();
+                a.synced = true;
+                local_auths.insert(a.id.clone(), a);
             }
         }
         local.authentications = local_auths.into_values().collect();
@@ -104,13 +131,15 @@ impl SyncManager {
         // Merge Proxies
         let mut local_proxies: HashMap<String, Proxy> = local.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
         for remote_proxy in &remote.proxies {
-            if !remote_proxy.synced { continue; }
             if let Some(local_proxy) = local_proxies.get_mut(&remote_proxy.id) {
                 if is_newer(&remote_proxy.updated_at, &local_proxy.updated_at) {
                     *local_proxy = remote_proxy.clone();
+                    local_proxy.synced = true;
                 }
             } else {
-                local_proxies.insert(remote_proxy.id.clone(), remote_proxy.clone());
+                let mut p = remote_proxy.clone();
+                p.synced = true;
+                local_proxies.insert(p.id.clone(), p);
             }
         }
         local.proxies = local_proxies.into_values().collect();
@@ -118,13 +147,15 @@ impl SyncManager {
         // Merge Snippets
         let mut local_snippets: HashMap<String, Snippet> = local.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_snippet in &remote.snippets {
-            if !remote_snippet.synced { continue; }
             if let Some(local_snippet) = local_snippets.get_mut(&remote_snippet.id) {
                 if is_newer(&remote_snippet.updated_at, &local_snippet.updated_at) {
                     *local_snippet = remote_snippet.clone();
+                    local_snippet.synced = true;
                 }
             } else {
-                local_snippets.insert(remote_snippet.id.clone(), remote_snippet.clone());
+                let mut s = remote_snippet.clone();
+                s.synced = true;
+                local_snippets.insert(s.id.clone(), s);
             }
         }
         local.snippets = local_snippets.into_values().collect();
@@ -263,7 +294,47 @@ impl SyncManager {
 }
 
 fn is_newer(a: &str, b: &str) -> bool {
+    if a == b { return false; }
     let dt_a = DateTime::parse_from_rfc3339(a).map(|dt| dt.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now());
     let dt_b = DateTime::parse_from_rfc3339(b).map(|dt| dt.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now() - chrono::Duration::days(365 * 10)); // Very old date
     dt_a > dt_b
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::types::*;
+
+    #[test]
+    fn test_deserialize_sync_config_robustness() {
+        // Test missing updatedAt (should use default)
+        let json_no_date = r#"{
+            "version": "1.0",
+            "snippets": [
+                {
+                    "id": "s4",
+                    "name": "Test No Date",
+                    "content": "echo no date"
+                }
+            ]
+        }"#;
+        
+        let config_no_date = serde_json::from_str::<SyncConfig>(json_no_date).expect("Failed to parse no date JSON");
+        assert_eq!(config_no_date.snippets.len(), 1);
+        // We can't easily check the value of date since it's "now", but we know it parsed.
+
+        // Test body alias
+        let json_body = r#"{
+            "version": "1.0",
+            "snippets": [
+                {
+                    "id": "s5",
+                    "name": "Test Body",
+                    "body": "echo body"
+                }
+            ]
+        }"#;
+        let config_body: SyncConfig = serde_json::from_str(json_body).expect("Failed to parse body JSON");
+        assert_eq!(config_body.snippets[0].content, "echo body");
+    }
 }

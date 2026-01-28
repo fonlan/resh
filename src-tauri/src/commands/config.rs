@@ -35,10 +35,14 @@ pub async fn save_config(
     // If sync is enabled, we could trigger sync here or wait for user to click sync
     // Given the "automatic trigger" recommendation accepted by user:
     if config.general.webdav.enabled && !config.general.webdav.url.is_empty() {
+        let proxy = config.general.webdav.proxy_id.as_ref()
+            .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+
         let sync_manager = SyncManager::new(
             config.general.webdav.url.clone(),
             config.general.webdav.username.clone(),
             config.general.webdav.password.clone(),
+            proxy,
         );
         // Run sync in background or await? 
         // Better to await to ensure sync completes before returning success if it's "save and sync"
@@ -64,10 +68,14 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         return Err("WebDAV sync is not enabled or configured".to_string());
     }
 
+    let proxy = config.general.webdav.proxy_id.as_ref()
+        .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+
     let sync_manager = SyncManager::new(
         config.general.webdav.url.clone(),
         config.general.webdav.username.clone(),
         config.general.webdav.password.clone(),
+        proxy,
     );
 
     sync_manager.sync(&mut config).await?;

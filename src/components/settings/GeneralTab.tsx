@@ -11,7 +11,7 @@ export interface GeneralTabProps {
 
 export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate }) => {
   const { t } = useTranslation();
-  const { triggerSync } = useConfig();
+  const { triggerSync, config } = useConfig();
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -30,7 +30,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
     });
   };
 
-  const handleWebDAVUpdate = (field: keyof typeof general.webdav, value: string | boolean) => {
+  const handleWebDAVUpdate = (field: keyof typeof general.webdav, value: string | boolean | null) => {
     onGeneralUpdate({
       ...general,
       webdav: { ...general.webdav, [field]: value } as any
@@ -225,6 +225,21 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               className="form-input"
               placeholder="https://example.com/webdav"
             />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="webdav-proxy" className="form-label">{t.webdavProxy}</label>
+            <select
+              id="webdav-proxy"
+              value={general.webdav.proxyId || ''}
+              onChange={(e) => handleWebDAVUpdate('proxyId', e.target.value || null)}
+              className="form-input form-select"
+            >
+              <option value="">{t.common.none}</option>
+              {config?.proxies.map(proxy => (
+                <option key={proxy.id} value={proxy.id}>{proxy.name}</option>
+              ))}
+            </select>
           </div>
 
           <div className="form-group">

@@ -1,10 +1,15 @@
 // src-tauri/src/config/types.rs
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 fn default_true() -> bool {
     true
+}
+
+fn default_updated_at() -> String {
+    Utc::now().to_rfc3339()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,9 +32,12 @@ pub struct Server {
     #[serde(default)]
     pub env_vars: HashMap<String, String>,
     #[serde(default)]
+    #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
     #[serde(default = "default_true")]
     pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
 
@@ -52,6 +60,8 @@ pub struct Authentication {
     pub password: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
 
@@ -68,6 +78,8 @@ pub struct Proxy {
     pub password: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
 
@@ -76,11 +88,14 @@ pub struct Proxy {
 pub struct Snippet {
     pub id: String,
     pub name: String,
+    #[serde(alias = "code", alias = "value", alias = "body", alias = "text")]
     pub content: String,
     pub description: Option<String>,
     pub group: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
     pub updated_at: String,
 }
 
@@ -101,6 +116,7 @@ pub struct WebDAVSettings {
     pub password: String,
     #[serde(default)]
     pub enabled: bool,
+    pub proxy_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -154,6 +170,7 @@ pub struct Config {
     pub authentications: Vec<Authentication>,
     pub proxies: Vec<Proxy>,
     #[serde(default)]
+    #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
     pub general: GeneralSettings,
 }
@@ -169,6 +186,7 @@ pub struct SyncConfig {
     #[serde(default)]
     pub proxies: Vec<Proxy>,
     #[serde(default)]
+    #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
     #[serde(default)]
     pub removed_ids: Vec<String>,
@@ -196,6 +214,7 @@ impl Config {
                     username: String::new(),
                     password: String::new(),
                     enabled: false,
+                    proxy_id: None,
                 },
                 confirm_close_tab: true,
                 confirm_exit_app: true,

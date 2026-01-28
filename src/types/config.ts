@@ -70,6 +70,7 @@ export interface WebDAVSettings {
   username: string;
   password: string;
   enabled: boolean;
+  proxyId?: string | null;
 }
 
 export interface GeneralSettings {

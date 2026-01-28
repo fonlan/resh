@@ -1,5 +1,6 @@
 use reqwest::Client;
 use std::error::Error;
+use crate::config::types::Proxy;
 
 pub struct WebDAVClient {
     base_url: String,
@@ -9,12 +10,33 @@ pub struct WebDAVClient {
 }
 
 impl WebDAVClient {
-    pub fn new(base_url: String, username: String, password: String) -> Self {
+    pub fn new(base_url: String, username: String, password: String, proxy: Option<Proxy>) -> Self {
+        let mut client_builder = Client::builder();
+
+        if let Some(proxy_config) = proxy {
+            let scheme = match proxy_config.proxy_type.as_str() {
+                "socks5" => "socks5",
+                _ => "http",
+            };
+            let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
+            
+            if let Ok(mut p) = reqwest::Proxy::all(&proxy_url) {
+                if let (Some(u), Some(pass)) = (proxy_config.username, proxy_config.password) {
+                    if !u.is_empty() {
+                        p = p.basic_auth(&u, &pass);
+                    }
+                }
+                client_builder = client_builder.proxy(p);
+            } else {
+                eprintln!("Invalid proxy configuration: {}", proxy_url);
+            }
+        }
+
         WebDAVClient {
             base_url,
             username,
             password,
-            client: Client::new(),
+            client: client_builder.build().unwrap_or_else(|_| Client::new()),
         }
     }
 
@@ -35,21 +57,27 @@ impl WebDAVClient {
         Ok(())
     }
 
-    pub async fn download(&self, filename: &str) -> Result<Vec<u8>, Box<dyn Error>> {
+    pub async fn download(&self, filename: &str) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
         
         let response = self.client
             .get(&url)
             .basic_auth(&self.username, Some(&self.password))
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
             .send()
             .await?;
+
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
 
         if !response.status().is_success() {
             return Err(format!("Download failed: HTTP {}", response.status()).into());
         }
 
         let content = response.bytes().await?;
-        Ok(content.to_vec())
+        Ok(Some(content.to_vec()))
     }
 
     pub async fn exists(&self, filename: &str) -> Result<bool, Box<dyn Error>> {
@@ -58,6 +86,8 @@ impl WebDAVClient {
         let response = self.client
             .head(&url)
             .basic_auth(&self.username, Some(&self.password))
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
             .send()
             .await?;
 
@@ -80,6 +110,7 @@ mod tests {
             "https://example.com/webdav".to_string(),
             "user".to_string(),
             "pass".to_string(),
+            None,
         );
         
         assert_eq!(client.base_url, "https://example.com/webdav");
