@@ -1,5 +1,7 @@
 import React, { useState, useCallback, Suspense } from 'react';
 import { Settings, X, Code } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Config } from '../types/config';
 // SettingsModal is now lazy loaded
 const SettingsModal = React.lazy(() => 
   import('./settings/SettingsModal').then(module => ({ default: module.SettingsModal }))
@@ -66,8 +68,15 @@ export const MainWindow: React.FC = () => {
   }, [tabs, activeTabId]);
 
   const handleAddTab = useCallback(async (serverId: string) => {
-    const server = config?.servers.find(s => s.id === serverId);
-    if (!server) return;
+    // Reload config to ensure we have the latest (especially if coming from SettingsModal)
+    // and to avoid using a stale 'config' object from the hook's state.
+    const currentConfig = await invoke<Config>('get_config');
+    const server = currentConfig.servers.find(s => s.id === serverId);
+    
+    if (!server) {
+      console.error('[MainWindow] Server not found for ID:', serverId);
+      return;
+    }
 
     const newTab: Tab = {
       id: generateId(),
@@ -78,11 +87,10 @@ export const MainWindow: React.FC = () => {
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newTab.id);
 
-    if (config) {
-      const updatedGeneral = addRecentServer(config.general, serverId);
-      await saveConfig({ ...config, general: updatedGeneral });
-    }
-  }, [config, saveConfig]);
+    // Update recent servers using the latest config
+    const updatedGeneral = addRecentServer(currentConfig.general, serverId);
+    await saveConfig({ ...currentConfig, general: updatedGeneral });
+  }, [saveConfig]);
 
   const handleCloneTab = useCallback((tabId: string) => {
     const sourceTab = tabs.find(t => t.id === tabId);

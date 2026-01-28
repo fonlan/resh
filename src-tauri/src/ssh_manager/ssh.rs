@@ -2,7 +2,6 @@ use crate::ssh_manager::handler::ClientHandler;
 use crate::config::types::Proxy;
 use crate::commands::connection::JumphostConfig;
 use russh::client;
-use russh::ChannelId;
 use russh_keys;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -11,8 +10,15 @@ use tokio::sync::Mutex;
 use lazy_static::lazy_static;
 use tracing::{info, error, warn};
 
+// In russh 0.45, channels opened from a client use russh::client::Msg
+type SavedSession = (
+    russh::Channel<russh::client::Msg>, 
+    russh::client::Handle<ClientHandler>, 
+    Option<russh::client::Handle<ClientHandler>>
+);
+
 lazy_static! {
-    static ref SESSIONS: Mutex<HashMap<String, (client::Handle<ClientHandler>, ChannelId, Option<client::Handle<ClientHandler>>)>> = Mutex::new(HashMap::new());
+    static ref SESSIONS: Mutex<HashMap<String, SavedSession>> = Mutex::new(HashMap::new());
 }
 
 pub struct SSHClient;
@@ -27,11 +33,10 @@ impl SSHClient {
         passphrase: Option<String>,
         proxy: Option<Proxy>,
         jumphost: Option<JumphostConfig>,
-        tx: mpsc::Sender<(String, Vec<u8>)>, // Event channel for forwarding SSH data
+        tx: mpsc::Sender<(String, Vec<u8>)>,
     ) -> Result<String, String> {
         let mut config = client::Config::default();
         
-        // Enhance RSA compatibility for modern OpenSSH servers
         config.preferred.key = std::borrow::Cow::Owned(vec![
             russh::keys::key::Name("ssh-ed25519"),
             russh::keys::key::Name("rsa-sha2-256"), 
@@ -64,7 +69,6 @@ impl SSHClient {
                 };
                 client::connect_stream(config, stream, handler).await
             } else if p.proxy_type == "http" {
-                // Basic HTTP CONNECT implementation
                 use tokio::io::{AsyncWriteExt, AsyncReadExt};
                 use base64::prelude::*;
                 let mut stream = tokio::net::TcpStream::connect((p.host.as_str(), p.port)).await
@@ -79,7 +83,6 @@ impl SSHClient {
                         auth_header = format!("\r\nProxy-Authorization: Basic {}", encoded);
                     }
                 }
-
 
                 let connect_req = format!(
                     "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{} {}\r\n\r\n",
@@ -99,14 +102,12 @@ impl SSHClient {
             }
         } else if let Some(j) = &jumphost {
             info!("[SSH] Using jumphost: {}:{} as {}", j.host, j.port, j.username);
-            let _ = tx.send((session_id.clone(), format!("Connecting to jump host {}:{}...\r\n", j.host, j.port).as_bytes().to_vec())).await;
+            let _ = tx.send((session_id.clone(), "Connecting to jump host...\r\n".as_bytes().to_vec())).await;
             
-            // 1. Connect to jumphost
             let jh_handler = ClientHandler::new();
             let mut jh_session = client::connect(config.clone(), (j.host.as_str(), j.port), jh_handler).await
                 .map_err(|e| format!("Failed to connect to jumphost: {}", e))?;
             
-            // 2. Authenticate jumphost
             let _ = tx.send((session_id.clone(), "Authenticating jump host...\r\n".as_bytes().to_vec())).await;
             Self::authenticate_session(
                 &mut jh_session,
@@ -116,14 +117,12 @@ impl SSHClient {
                 j.passphrase.clone(),
             ).await.map_err(|e| format!("Jumphost authentication failed: {}", e))?;
             
-            // 3. Open direct-tcpip channel to target
             let _ = tx.send((session_id.clone(), format!("Tunneling to {}:{}...\r\n", host, port).as_bytes().to_vec())).await;
             let channel = jh_session.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 22222).await
                 .map_err(|e| format!("Failed to open direct-tcpip through jumphost: {}", e))?;
             
             jh_handle_to_store = Some(jh_session);
 
-            // 4. Connect to target through channel
             client::connect_stream(config, channel.into_stream(), handler).await
         } else {
             client::connect(config, (host, port), handler).await
@@ -146,16 +145,12 @@ impl SSHClient {
 
         let channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
         
-        // Request PTY and wait for reply to ensure it's granted
         channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
-        
-        // Request shell and wait for reply
         channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
 
-        let channel_id = channel.id();
         {
             let mut sessions = SESSIONS.lock().await;
-            sessions.insert(session_id.clone(), (session, channel_id, jh_handle_to_store));
+            sessions.insert(session_id.clone(), (channel, session, jh_handle_to_store));
         }
         
         Ok(session_id)
@@ -207,16 +202,22 @@ impl SSHClient {
 
     pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
         let mut sessions = SESSIONS.lock().await;
-        if let Some((session, channel_id, _)) = sessions.get_mut(session_id) {
-            session.data(*channel_id, data.to_vec().into()).await.map_err(|_| "Failed to send data".to_string())?;
+        if let Some((channel, _, _)) = sessions.get_mut(session_id) {
+            channel.data(data).await.map_err(|e| format!("Failed to send data: {}", e))?;
             Ok(())
         } else {
             Err("Session not found".to_string())
         }
     }
 
-    pub async fn resize(_session_id: &str, _cols: u32, _rows: u32) -> Result<(), String> {
-        Ok(())
+    pub async fn resize(session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some((channel, _, _)) = sessions.get_mut(session_id) {
+            channel.window_change(cols, rows, 0, 0).await.map_err(|e| format!("Failed to resize: {}", e))?;
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
     }
     
     pub async fn disconnect(session_id: &str) -> Result<(), String> {

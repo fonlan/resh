@@ -274,6 +274,19 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
   }, [tabId, isReady, getBufferText, server.name]);
 
+  // Sync terminal size with backend upon connection
+  useEffect(() => {
+    if (isConnected && terminal && sessionId) {
+      invoke('resize_terminal', {
+        params: {
+          session_id: sessionId,
+          cols: terminal.cols,
+          rows: terminal.rows,
+        },
+      }).catch((err) => console.error('Initial terminal resize failed:', err));
+    }
+  }, [isConnected, terminal, sessionId]);
+
   return (
     <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>
       <StatusBar 

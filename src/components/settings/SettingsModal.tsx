@@ -186,6 +186,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, general } : null));
   };
 
+  const handleConnectServer = async (serverId: string) => {
+    // If there's a pending save, flush it immediately
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+      
+      if (localConfig) {
+        setSaveStatus('saving');
+        try {
+          await saveConfig(localConfig);
+          setSaveStatus('saved');
+          // Short delay to show "saved" status before closing/connecting
+          await new Promise(resolve => setTimeout(resolve, 300));
+        } catch (err) {
+          setSaveStatus('error');
+          // If save failed, we probably shouldn't proceed with connection
+          // as the server might not exist in the backend yet
+          return;
+        }
+      }
+    } else if (isSavingRef.current) {
+      // If currently saving, wait for it to complete
+      let checks = 0;
+      while (isSavingRef.current && checks < 20) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        checks++;
+      }
+    }
+
+    onConnectServer?.(serverId);
+  };
+
   const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
     { id: 'servers', label: t.servers, icon: <Server size={18} /> },
     { id: 'auth', label: t.auth, icon: <Key size={18} /> },
@@ -263,7 +295,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 proxies={localConfig.proxies}
                 snippets={localConfig.snippets}
                 onServersUpdate={handleServersUpdate}
-                onConnectServer={onConnectServer}
+                onConnectServer={handleConnectServer}
               />
             )}
             {activeTab === 'auth' && (
