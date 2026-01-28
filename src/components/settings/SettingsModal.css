@@ -1,3 +1,20 @@
+/* ==================== Server Form Overrides ==================== */
+/* Make the ServerForm sidebar narrower */
+.server-form-container .settings-sidebar {
+  width: 150px;
+}
+
+/* Make the ServerForm content fill the rest */
+.server-form-container .settings-tab-content {
+  flex: 1;
+}
+
+/* Compact Sidebar Buttons in Server Form */
+.server-form-container .settings-tab-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
 /* ==================== Settings Modal ==================== */
 .settings-overlay {
   position: fixed;
@@ -946,18 +963,6 @@ button.border.border-gray-600:hover:not(:disabled) {
 .focus\:ring-2:focus,
 .focus\:ring-blue-500:focus {
   box-shadow: var(--glow-cyan);
-}
-
-/* ==================== FormModal Styles ==================== */
-.p-6.max-h-96 {
-  padding: 24px;
-  max-height: 70vh !important;
-  overflow-y: auto;
-}
-
-.max-h-\[600px\] {
-  max-height: none !important;
-  overflow-y: visible !important;
 }
 
 /* ==================== Sync Button ==================== */

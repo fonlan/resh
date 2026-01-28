@@ -174,6 +174,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
+        noPadding={true}
         extraFooterContent={
           <div className="flex items-center gap-2 mr-auto">
             <input

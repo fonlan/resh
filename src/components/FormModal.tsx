@@ -11,6 +11,7 @@ interface FormModalProps {
   isLoading?: boolean;
   submitText?: string;
   extraFooterContent?: React.ReactNode;
+  noPadding?: boolean;
 }
 
 export const FormModal: React.FC<FormModalProps> = ({
@@ -22,6 +23,7 @@ export const FormModal: React.FC<FormModalProps> = ({
   isLoading = false,
   submitText,
   extraFooterContent,
+  noPadding = false,
 }) => {
   const { t } = useTranslation();
   const [loading, setLoading] = React.useState(false);
@@ -50,7 +52,7 @@ export const FormModal: React.FC<FormModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="form-modal-content">
+        <div className={`form-modal-content ${!noPadding ? 'with-padding' : ''}`}>
           {children}
         </div>
 

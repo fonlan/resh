@@ -26,7 +26,7 @@
     0 25px 50px -12px rgba(0, 0, 0, 0.6),
     0 0 0 1px var(--glass-border),
     inset 0 1px 1px rgba(255, 255, 255, 0.05);
-  max-width: 600px;
+  max-width: 700px;
   width: calc(100% - 32px);
   position: relative;
   overflow: hidden;
@@ -50,13 +50,13 @@
 }
 
 .form-modal-header {
-  padding: 24px 32px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--glass-border);
   background: rgba(255, 255, 255, 0.02);
 }
 
 .form-modal-header h2 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
@@ -64,13 +64,20 @@
 }
 
 .form-modal-content {
-  padding: 32px;
+  padding: 0;
   max-height: 70vh;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-modal-content.with-padding {
+  padding: 24px;
   overflow-y: auto;
 }
 
 .form-modal-footer {
-  padding: 24px 32px;
+  padding: 16px 24px;
   border-top: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
