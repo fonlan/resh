@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code } from 'lucide-react';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw } from 'lucide-react';
 import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
 import { ProxyTab } from './ProxyTab';
 import { GeneralTab } from './GeneralTab';
+import { SyncTab } from './SyncTab';
 import { SnippetsTab } from './SnippetsTab';
 import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
@@ -17,7 +18,7 @@ export interface SettingsModalProps {
   initialTab?: TabType;
 }
 
-type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general';
+type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers' }) => {
@@ -223,6 +224,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     { id: 'auth', label: t.auth, icon: <Key size={18} /> },
     { id: 'proxies', label: t.proxies, icon: <Globe size={18} /> },
     { id: 'snippets', label: "Snippets", icon: <Code size={18} /> },
+    { id: 'sync', label: t.sync, icon: <RefreshCw size={18} /> },
     { id: 'general', label: t.general, icon: <Settings size={18} /> },
   ];
 
@@ -322,6 +324,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
             )}
             {activeTab === 'general' && (
               <GeneralTab
+                general={localConfig.general}
+                onGeneralUpdate={handleGeneralUpdate}
+              />
+            )}
+            {activeTab === 'sync' && (
+              <SyncTab
                 general={localConfig.general}
                 onGeneralUpdate={handleGeneralUpdate}
               />

@@ -1,6 +1,7 @@
 export const locales = {
   en: {
     settings: 'Settings',
+    sync: 'Sync',
     servers: 'Servers',
     auth: 'Authentication',
     proxies: 'Proxies',
@@ -195,6 +196,7 @@ export const locales = {
   },
   'zh-CN': {
     settings: '设置',
+    sync: '同步',
     servers: '服务器',
     auth: '身份验证',
     proxies: '代理设置',
