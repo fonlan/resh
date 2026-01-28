@@ -282,14 +282,14 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         theme={theme} 
         connected={isConnected}
       />
-      <div className="relative flex-1" style={{ padding: '8px' }}>
+      <div className="relative flex-1" style={{ padding: '8px', minHeight: 0, overflow: 'hidden' }}>
         <div
           id={containerId}
           style={{
             display: isActive ? 'block' : 'none',
             width: '100%',
             height: '100%',
-            minHeight: '400px',
+            overflow: 'hidden',
           }}
         />
         
