@@ -13,6 +13,7 @@ export interface Server {
   keepAlive: number;
   autoExecCommands: string[];
   envVars: Record<string, string>;
+  snippets?: Snippet[];
   synced: boolean;
   updatedAt: string;
 }

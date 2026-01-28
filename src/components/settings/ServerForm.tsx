@@ -1,8 +1,9 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Settings, Network, Terminal } from 'lucide-react';
+import { Settings, Network, Terminal, Code } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
+import { SnippetsTab } from './SnippetsTab';
 import './SettingsModal.css';
 
 interface ServerFormProps {
@@ -11,6 +12,7 @@ interface ServerFormProps {
   availableAuths: Authentication[];
   availableProxies: ProxyConfig[];
   availableServers: Server[]; // For jumphost selection
+  globalSnippetGroups?: string[];
   onSave: (server: Server) => void;
 }
 
@@ -20,7 +22,7 @@ export interface ServerFormHandle {
   setSynced: (synced: boolean) => void;
 }
 
-type TabId = 'general' | 'routing' | 'advanced';
+type TabId = 'general' | 'routing' | 'advanced' | 'snippets';
 
 export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   server,
@@ -28,6 +30,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   availableAuths,
   availableProxies,
   availableServers,
+  globalSnippetGroups = [],
   onSave,
 }, ref) => {
   const { t } = useTranslation();
@@ -48,6 +51,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         keepAlive: server.keepAlive || 0,
         autoExecCommands: server.autoExecCommands || [],
         envVars: server.envVars || {},
+        snippets: server.snippets || [],
         synced: server.synced !== undefined ? server.synced : true,
         updatedAt: server.updatedAt || new Date().toISOString(),
       };
@@ -65,6 +69,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       keepAlive: 0,
       autoExecCommands: [],
       envVars: {},
+      snippets: [],
       synced: true,
       updatedAt: new Date().toISOString(),
     };
@@ -228,6 +233,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       general: ['name', 'host', 'port', 'username', 'authId'],
       routing: ['proxyId', 'jumphostId', 'keepAlive'],
       advanced: ['portForwards', 'autoExecCommands', 'envVars'],
+      snippets: [],
     };
     return fieldsByTab[tab].some(field => errors[field]);
   };
@@ -236,6 +242,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     { id: 'general' as TabId, label: t.general, icon: <Settings size={18} /> },
     { id: 'routing' as TabId, label: t.routing, icon: <Network size={18} /> },
     { id: 'advanced' as TabId, label: t.advanced, icon: <Terminal size={18} /> },
+    { id: 'snippets' as TabId, label: t.snippetsTab.title, icon: <Code size={18} /> },
   ];
 
   return (
@@ -610,6 +617,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 </div>
               </div>
             </div>
+          )}
+          
+          {activeTab === 'snippets' && (
+            <SnippetsTab
+              snippets={formData.snippets || []}
+              onSnippetsUpdate={(newSnippets) => handleChange('snippets', newSnippets)}
+              availableGroups={globalSnippetGroups}
+            />
           )}
         </div>
       </div>

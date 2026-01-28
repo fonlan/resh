@@ -131,6 +131,14 @@ export const MainWindow: React.FC = () => {
 
   const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, config.general.maxRecentServers) : [];
 
+  const displayedSnippets = React.useMemo(() => {
+    const globalSnippets = config?.snippets || [];
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    const activeServer = activeTab ? config?.servers.find(s => s.id === activeTab.serverId) : null;
+    const serverSnippets = activeServer?.snippets || [];
+    return [...globalSnippets, ...serverSnippets];
+  }, [config?.snippets, config?.servers, tabs, activeTabId]);
+
   return (
     <div className="main-window">
       {/* Title Bar with drag region */}
@@ -249,7 +257,7 @@ export const MainWindow: React.FC = () => {
         <SnippetsSidebar 
           isOpen={isSnippetsOpen} 
           onClose={() => setIsSnippetsOpen(false)} 
-          snippets={config?.snippets || []}
+          snippets={displayedSnippets}
         />
       </div>
 

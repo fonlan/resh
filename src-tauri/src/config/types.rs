@@ -26,6 +26,8 @@ pub struct Server {
     pub auto_exec_commands: Vec<String>,
     #[serde(default)]
     pub env_vars: HashMap<String, String>,
+    #[serde(default)]
+    pub snippets: Vec<Snippet>,
     #[serde(default = "default_true")]
     pub synced: bool,
     pub updated_at: String,

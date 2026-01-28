@@ -260,6 +260,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 servers={localConfig.servers}
                 authentications={localConfig.authentications}
                 proxies={localConfig.proxies}
+                snippets={localConfig.snippets}
                 onServersUpdate={handleServersUpdate}
                 onConnectServer={onConnectServer}
               />

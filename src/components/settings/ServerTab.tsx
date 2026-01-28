@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
-import { Server, Authentication, ProxyConfig as ProxyType } from '../../types/config';
+import { Server, Authentication, ProxyConfig as ProxyType, Snippet } from '../../types/config';
 import { FormModal } from '../FormModal';
 import { ServerForm, ServerFormHandle } from './ServerForm';
 import { generateId } from '../../utils/idGenerator';
@@ -10,6 +10,7 @@ interface ServerTabProps {
   servers: Server[];
   authentications: Authentication[];
   proxies: ProxyType[];
+  snippets?: Snippet[];
   onServersUpdate: (servers: Server[]) => void;
   onConnectServer?: (serverId: string) => void;
 }
@@ -18,6 +19,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   servers,
   authentications,
   proxies,
+  snippets = [],
   onServersUpdate,
   onConnectServer,
 }) => {
@@ -37,6 +39,10 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   const existingNames = servers
     .filter((s) => s.id !== editingServer?.id)
     .map((s) => s.name);
+
+  const globalSnippetGroups = Array.from(new Set(
+    snippets.map(s => s.group || t.snippetForm.defaultGroup)
+  ));
 
   const handleAddServer = () => {
     setEditingServer(null);
@@ -202,6 +208,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
           availableAuths={authentications}
           availableProxies={proxies}
           availableServers={servers}
+          globalSnippetGroups={globalSnippetGroups}
           onSave={handleSaveServer}
         />
       </FormModal>

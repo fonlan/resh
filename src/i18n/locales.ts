@@ -286,7 +286,7 @@ export const locales = {
       deleteInUseConfirmation: '此代理正被一个或多个服务器使用。确定要删除吗？受影响的服务器的代理设置将被清空。',
     },
     snippetsTab: {
-      title: '常用代码段',
+      title: 'Snippets',
       addSnippet: '添加代码段',
       editSnippet: '编辑代码段',
       emptyState: '暂无代码段。点击添加开始使用。',

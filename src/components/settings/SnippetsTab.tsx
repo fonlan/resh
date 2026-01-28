@@ -9,11 +9,13 @@ import { useTranslation } from '../../i18n';
 interface SnippetsTabProps {
   snippets: Snippet[];
   onSnippetsUpdate: (snippets: Snippet[]) => void;
+  availableGroups?: string[];
 }
 
 export const SnippetsTab: React.FC<SnippetsTabProps> = ({ 
   snippets, 
-  onSnippetsUpdate
+  onSnippetsUpdate,
+  availableGroups = []
 }) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -21,9 +23,10 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
   const [isSynced, setIsSynced] = useState(true);
   const formRef = useRef<SnippetFormHandle>(null);
 
-  const existingGroups = Array.from(new Set(
-    snippets.map(s => s.group || t.snippetForm.defaultGroup)
-  ));
+  const existingGroups = Array.from(new Set([
+    ...snippets.map(s => s.group || t.snippetForm.defaultGroup),
+    ...availableGroups
+  ]));
 
   useEffect(() => {
     if (formRef.current) {
