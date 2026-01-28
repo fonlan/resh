@@ -28,6 +28,7 @@ export const MainWindow: React.FC = () => {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
 
@@ -125,6 +126,11 @@ export const MainWindow: React.FC = () => {
     setIsSettingsOpen(false);
   }, [handleAddTab]);
 
+  const handleOpenSettings = useCallback((tab: 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' = 'servers') => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  }, []);
+
   const prefetchSettings = useCallback(() => {
     import('./settings/SettingsModal');
   }, []);
@@ -182,7 +188,7 @@ export const MainWindow: React.FC = () => {
         <NewTabButton
           servers={config?.servers || []}
           onServerSelect={handleAddTab}
-          onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenSettings={() => handleOpenSettings('servers')}
         />
 
         {/* Drag region spacer - empty area for dragging */}
@@ -202,7 +208,7 @@ export const MainWindow: React.FC = () => {
           <button
             type="button"
             className="settings-btn"
-            onClick={() => setIsSettingsOpen(true)}
+            onClick={() => handleOpenSettings('servers')}
             onMouseEnter={prefetchSettings}
             onFocus={prefetchSettings}
             aria-label={t.mainWindow.settings}
@@ -221,7 +227,7 @@ export const MainWindow: React.FC = () => {
           <WelcomeScreen
             servers={recentServers}
             onServerClick={handleAddTab}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => handleOpenSettings('servers')}
           />
         ) : (
           tabs.map((tab) => {
@@ -258,6 +264,7 @@ export const MainWindow: React.FC = () => {
           isOpen={isSnippetsOpen} 
           onClose={() => setIsSnippetsOpen(false)} 
           snippets={displayedSnippets}
+          onOpenSettings={() => handleOpenSettings('snippets')}
         />
       </div>
 
@@ -268,6 +275,7 @@ export const MainWindow: React.FC = () => {
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
             onConnectServer={handleConnectServer}
+            initialTab={settingsInitialTab}
           />
         )}
       </Suspense>

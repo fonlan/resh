@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Snippet } from '../types/config';
-import { X, Code, Play, ChevronRight, ChevronDown } from 'lucide-react';
+import { X, Code, Play, ChevronRight, ChevronDown, Plus } from 'lucide-react';
 import { useTranslation } from '../i18n';
 import './SnippetsSidebar.css';
 
@@ -8,12 +8,14 @@ interface SnippetsSidebarProps {
   snippets: Snippet[];
   isOpen: boolean;
   onClose: () => void;
+  onOpenSettings?: () => void;
 }
 
 export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   snippets,
   isOpen,
   onClose,
+  onOpenSettings,
 }) => {
   const { t } = useTranslation();
   const [width, setWidth] = useState(250);
@@ -128,14 +130,27 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
         <h3 className="snippets-title">
           <Code size={16} /> {t.snippetsTab.title}
         </h3>
-        <button 
-            type="button"
-            onClick={onClose} 
-            className="snippets-close-btn"
-            aria-label={t.windowControls.close}
-        >
-          <X size={16} />
-        </button>
+        <div className="snippets-actions">
+          {onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="snippets-close-btn"
+              aria-label={t.mainWindow.settings}
+              title={t.mainWindow.settings}
+            >
+              <Plus size={16} />
+            </button>
+          )}
+          <button 
+              type="button"
+              onClick={onClose} 
+              className="snippets-close-btn"
+              aria-label={t.windowControls.close}
+          >
+            <X size={16} />
+          </button>
+        </div>
       </div>
       
       <div className="snippets-list">

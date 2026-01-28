@@ -55,6 +55,12 @@
   flex-shrink: 0;
 }
 
+.snippets-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .snippets-title {
   font-size: 13px;
   font-weight: 600;

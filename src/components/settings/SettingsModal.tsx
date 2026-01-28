@@ -14,15 +14,16 @@ export interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onConnectServer?: (serverId: string) => void;
+  initialTab?: TabType;
 }
 
 type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers' }) => {
   const { config, loading, error, saveConfig } = useConfig();
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<TabType>('servers');
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
 
