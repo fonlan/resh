@@ -149,6 +149,13 @@ pub struct GeneralSettings {
     pub recent_server_ids: Vec<String>,
     #[serde(default = "default_window_state")]
     pub window_state: WindowState,
+    #[serde(default = "default_recording_mode")]
+    #[serde(alias = "recordingMode", alias = "recording_mode")]
+    pub recording_mode: String,
+}
+
+fn default_recording_mode() -> String {
+    "raw".to_string()
 }
 
 fn default_max_recent_servers() -> u32 {
@@ -226,6 +233,7 @@ impl Config {
                 max_recent_servers: 3,
                 recent_server_ids: vec![],
                 window_state: default_window_state(),
+                recording_mode: default_recording_mode(),
             },
         }
     }

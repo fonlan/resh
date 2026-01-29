@@ -84,6 +84,7 @@ export interface GeneralSettings {
   snippetsSidebarLocked: boolean;
   maxRecentServers: number;
   recentServerIds: string[];
+  recordingMode: 'raw' | 'text';
 }
 
 export interface Config {

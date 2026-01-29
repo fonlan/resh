@@ -18,6 +18,10 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
     onGeneralUpdate({ ...general, language });
   };
 
+  const handleRecordingModeChange = (recordingMode: 'raw' | 'text') => {
+    onGeneralUpdate({ ...general, recordingMode });
+  };
+
   const handleTerminalUpdate = (field: keyof typeof general.terminal, value: string | number) => {
     onGeneralUpdate({
       ...general,
@@ -59,6 +63,19 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             >
               <option value="en">English</option>
               <option value="zh-CN">简体中文</option>
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="recording-mode-select" className="form-label">{t.recordingMode}</label>
+            <select
+              id="recording-mode-select"
+              value={general.recordingMode || 'raw'}
+              onChange={(e) => handleRecordingModeChange(e.target.value as 'raw' | 'text')}
+              className="form-input form-select"
+            >
+              <option value="raw">{t.recordingModes.raw}</option>
+              <option value="text">{t.recordingModes.text}</option>
             </select>
           </div>
 

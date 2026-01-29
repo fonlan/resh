@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
+import { useConfig } from '../hooks/useConfig'; // Import useConfig
 import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types/config';
 import { useTranslation } from '../i18n';
 import { StatusBar } from './StatusBar';
@@ -35,6 +36,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   theme,
 }) => {
   const { t } = useTranslation();
+  const { config } = useConfig(); // Use config
   const containerId = `terminal-${tabId}`;
 
   // Memoize settings to prevent re-creating terminal on reference change
@@ -278,9 +280,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   useEffect(() => {
     const handleStartRecording = async (e: CustomEvent<{ path: string }>) => {
       const { path } = e.detail;
+      const mode = config?.general.recordingMode || 'raw';
       if (sessionIdRef.current) {
         try {
-          await invoke('start_recording', { sessionId: sessionIdRef.current, filePath: path });
+          await invoke('start_recording', { sessionId: sessionIdRef.current, filePath: path, mode });
         } catch (err) {
           console.error('Failed to start recording:', err);
         }
@@ -304,7 +307,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       window.removeEventListener(`start-recording:${tabId}`, handleStartRecording as unknown as EventListener);
       window.removeEventListener(`stop-recording:${tabId}`, handleStopRecording as unknown as EventListener);
     };
-  }, [tabId]);
+  }, [tabId, config?.general.recordingMode]);
 
   // Sync terminal size with backend upon connection
   useEffect(() => {

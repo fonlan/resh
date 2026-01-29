@@ -11,7 +11,7 @@ use tokio::io::{BufWriter, AsyncWriteExt};
 use super::AppState;
 
 lazy_static! {
-    static ref RECORDING_SESSIONS: Mutex<HashMap<String, Arc<Mutex<BufWriter<File>>>>> = Mutex::new(HashMap::new());
+    static ref RECORDING_SESSIONS: Mutex<HashMap<String, (Arc<Mutex<BufWriter<File>>>, String)>> = Mutex::new(HashMap::new());
 }
 
 #[derive(Debug, Serialize)]
@@ -58,9 +58,16 @@ pub async fn connect_to_server(
             // Handle recording if active
             {
                 let sessions = RECORDING_SESSIONS.lock().await;
-                if let Some(writer_mutex) = sessions.get(&session_id) {
+                if let Some((writer_mutex, mode)) = sessions.get(&session_id) {
                     let mut writer = writer_mutex.lock().await;
-                    if let Err(e) = writer.write_all(&data).await {
+                    
+                    let data_to_write = if mode == "text" {
+                        strip_ansi_escapes::strip(&data)
+                    } else {
+                        data.clone()
+                    };
+
+                    if let Err(e) = writer.write_all(&data_to_write).await {
                         tracing::error!("Failed to write to recording file for session {}: {}", session_id, e);
                     } else if let Err(e) = writer.flush().await {
                          tracing::error!("Failed to flush recording file for session {}: {}", session_id, e);
@@ -102,12 +109,13 @@ pub async fn connect_to_server(
 pub async fn start_recording(
     session_id: String,
     file_path: String,
+    mode: String,
 ) -> Result<(), String> {
     let file = File::create(&file_path).await.map_err(|e| format!("Failed to create file: {}", e))?;
     let writer = BufWriter::new(file);
     
     let mut sessions = RECORDING_SESSIONS.lock().await;
-    sessions.insert(session_id, Arc::new(Mutex::new(writer)));
+    sessions.insert(session_id, (Arc::new(Mutex::new(writer)), mode));
     
     Ok(())
 }
@@ -117,7 +125,7 @@ pub async fn stop_recording(
     session_id: String,
 ) -> Result<(), String> {
     let mut sessions = RECORDING_SESSIONS.lock().await;
-    if let Some(writer_mutex) = sessions.remove(&session_id) {
+    if let Some((writer_mutex, _)) = sessions.remove(&session_id) {
         let mut writer = writer_mutex.lock().await;
         writer.flush().await.map_err(|e| format!("Failed to flush file: {}", e))?;
         // File closes when dropped

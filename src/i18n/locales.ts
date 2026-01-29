@@ -34,6 +34,11 @@ export const locales = {
     syncFailed: 'Sync failed',
     username: 'Username',
     password: 'Password',
+    recordingMode: 'Recording Mode',
+    recordingModes: {
+      raw: 'Raw (Includes ANSI codes)',
+      text: 'Text (Strip ANSI codes)',
+    },
     confirmations: 'Confirmations',
     confirmCloseTab: 'Confirm before closing tabs',
     confirmExitApp: 'Confirm before exiting application',
@@ -231,6 +236,11 @@ export const locales = {
     syncFailed: '同步失败',
     username: '用户名',
     password: '密码',
+    recordingMode: '录制模式',
+    recordingModes: {
+      raw: '原始数据 (包含颜色代码)',
+      text: '纯文本 (去除颜色代码)',
+    },
     confirmations: '确认操作',
     confirmCloseTab: '关闭标签页前确认',
     confirmExitApp: '退出应用前确认',
