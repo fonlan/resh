@@ -1,5 +1,5 @@
 import React, { useState, useCallback, Suspense } from 'react';
-import { Settings, X, Code, Circle } from 'lucide-react';
+import { Settings, X, Code, Circle, MessageSquare } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Config } from '../types/config';
 // SettingsModal is now lazy loaded
@@ -11,6 +11,7 @@ import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
 import { SnippetsSidebar } from './SnippetsSidebar';
+import { AISidebar } from './AISidebar';
 import { TabContextMenu } from './TabContextMenu';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
@@ -32,6 +33,8 @@ export const MainWindow: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
+  const [isAIOpen, setIsAIOpen] = useState(false);
+  const [isAILocked, setIsAILocked] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
 
@@ -276,6 +279,15 @@ export const MainWindow: React.FC = () => {
         <div className="title-bar-right">
           <button
             type="button"
+            className={`settings-btn ${isAIOpen ? 'bg-gray-700 text-white' : ''}`}
+            onClick={() => setIsAIOpen(!isAIOpen)}
+            aria-label="Toggle AI Chat"
+            title="AI Chat"
+          >
+            <MessageSquare size={18} />
+          </button>
+          <button
+            type="button"
             className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
             onClick={() => setIsSnippetsOpen(!isSnippetsOpen)}
             aria-label="Toggle Snippets"
@@ -338,7 +350,15 @@ export const MainWindow: React.FC = () => {
           })
         )}
         </div>
-        <SnippetsSidebar 
+        <AISidebar
+          isOpen={isAIOpen}
+          onClose={() => setIsAIOpen(false)}
+          isLocked={isAILocked}
+          onToggleLock={() => setIsAILocked(!isAILocked)}
+          currentServerId={tabs.find(t => t.id === activeTabId)?.serverId}
+          currentTabId={activeTabId || undefined}
+        />
+        <SnippetsSidebar  
           isOpen={isSnippetsOpen} 
           onClose={() => setIsSnippetsOpen(false)} 
           snippets={displayedSnippets}
