@@ -139,6 +139,19 @@ export const MainWindow: React.FC = () => {
     setIsSettingsOpen(true);
   }, []);
 
+  const handleToggleSnippetsLock = useCallback(async () => {
+    if (!config) return;
+    const currentLocked = config.general.snippetsSidebarLocked;
+    const newConfig = {
+      ...config,
+      general: {
+        ...config.general,
+        snippetsSidebarLocked: !currentLocked
+      }
+    };
+    await saveConfig(newConfig);
+  }, [config, saveConfig]);
+
   const prefetchSettings = useCallback(() => {
     import('./settings/SettingsModal');
   }, []);
@@ -229,7 +242,7 @@ export const MainWindow: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="content-area" style={{ position: 'relative' }}>
+      <div className="content-area" style={{ position: 'relative', display: 'flex', flexDirection: 'row' }}>
         <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {tabs.length === 0 ? (
           <WelcomeScreen
@@ -273,6 +286,8 @@ export const MainWindow: React.FC = () => {
           onClose={() => setIsSnippetsOpen(false)} 
           snippets={displayedSnippets}
           onOpenSettings={() => handleOpenSettings('snippets')}
+          isLocked={config?.general.snippetsSidebarLocked || false}
+          onToggleLock={handleToggleSnippetsLock}
         />
       </div>
 

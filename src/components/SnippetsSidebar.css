@@ -16,6 +16,16 @@
   box-shadow: -2px 0 8px rgba(0, 0, 0, 0.2);
 }
 
+.snippets-sidebar-panel.locked {
+  position: relative;
+  box-shadow: none;
+  z-index: 10;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  height: 100%;
+}
+
 .snippets-sidebar-panel.open {
   /* Width is now handled by inline styles in JS */
   opacity: 1;
@@ -88,6 +98,10 @@
 .snippets-close-btn:hover {
   background: var(--bg-tertiary);
   color: var(--text-primary);
+}
+
+.snippets-close-btn.text-accent-primary {
+  color: var(--accent-primary);
 }
 
 .snippets-list {

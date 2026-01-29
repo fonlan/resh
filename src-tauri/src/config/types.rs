@@ -140,6 +140,9 @@ pub struct GeneralSettings {
     pub confirm_exit_app: bool,
     #[serde(default)]
     pub debug_enabled: bool,
+    #[serde(default)]
+    #[serde(alias = "snippetsSidebarLocked", alias = "snippets_sidebar_locked")]
+    pub snippets_sidebar_locked: bool,
     #[serde(default = "default_max_recent_servers")]
     pub max_recent_servers: u32,
     #[serde(default)]
@@ -219,6 +222,7 @@ impl Config {
                 confirm_close_tab: true,
                 confirm_exit_app: true,
                 debug_enabled: false,
+                snippets_sidebar_locked: false,
                 max_recent_servers: 3,
                 recent_server_ids: vec![],
                 window_state: default_window_state(),

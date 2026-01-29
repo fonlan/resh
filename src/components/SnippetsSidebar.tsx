@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Snippet } from '../types/config';
-import { X, Code, Play, ChevronRight, ChevronDown, Plus } from 'lucide-react';
+import { X, Code, Play, ChevronRight, ChevronDown, Plus, Lock, LockOpen } from 'lucide-react';
 import { useTranslation } from '../i18n';
 import './SnippetsSidebar.css';
 
@@ -9,6 +9,8 @@ interface SnippetsSidebarProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenSettings?: () => void;
+  isLocked: boolean;
+  onToggleLock: () => void;
 }
 
 export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
@@ -16,6 +18,8 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   isOpen,
   onClose,
   onOpenSettings,
+  isLocked,
+  onToggleLock,
 }) => {
   const { t } = useTranslation();
   const [width, setWidth] = useState(250);
@@ -110,7 +114,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   return (
     <div 
       ref={sidebarRef}
-      className={`snippets-sidebar-panel ${isOpen ? 'open' : ''} ${isResizing ? 'resizing' : ''}`}
+      className={`snippets-sidebar-panel ${isOpen ? 'open' : ''} ${isResizing ? 'resizing' : ''} ${isLocked ? 'locked' : ''}`}
       aria-hidden={!isOpen}
       style={{ width: isOpen ? `${width}px` : '0px' }}
     >
@@ -131,6 +135,15 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
           <Code size={16} /> {t.snippetsTab.title}
         </h3>
         <div className="snippets-actions">
+          <button
+            type="button"
+            onClick={onToggleLock}
+            className={`snippets-close-btn ${isLocked ? 'text-accent-primary' : ''}`}
+            aria-label={isLocked ? "Unlock Sidebar" : "Lock Sidebar"}
+            title={isLocked ? "Unlock Sidebar" : "Lock Sidebar"}
+          >
+            {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
+          </button>
           {onOpenSettings && (
             <button
               type="button"
