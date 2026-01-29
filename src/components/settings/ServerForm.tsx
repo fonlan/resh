@@ -394,7 +394,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="">{t.common.none}</option>
-                    {availableProxies.map((proxy) => (
+                    {[...availableProxies]
+                      .sort((a, b) => a.name.localeCompare(b.name))
+                      .map((proxy) => (
                       <option key={proxy.id} value={proxy.id}>
                         {proxy.name} ({proxy.type.toUpperCase()})
                       </option>
@@ -416,6 +418,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     <option value="">{t.common.none}</option>
                     {availableServers
                       .filter((s) => s.id !== server?.id) // Don't allow self as jumphost
+                      .sort((a, b) => a.name.localeCompare(b.name))
                       .map((srv) => (
                         <option key={srv.id} value={srv.id}>
                           {srv.name}
