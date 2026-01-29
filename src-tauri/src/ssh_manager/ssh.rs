@@ -1,6 +1,5 @@
 use crate::ssh_manager::handler::ClientHandler;
 use crate::config::types::Proxy;
-use crate::commands::connection::JumphostConfig;
 use russh::client;
 use russh_keys;
 use std::sync::Arc;
@@ -9,32 +8,77 @@ use std::collections::HashMap;
 use tokio::sync::Mutex;
 use lazy_static::lazy_static;
 use tracing::{info, error, warn};
+use serde::{Deserialize, Serialize};
+use base64::prelude::*;
 
-// In russh 0.45, channels opened from a client use russh::client::Msg
-type SavedSession = (
-    russh::Channel<russh::client::Msg>, 
-    russh::client::Handle<ClientHandler>, 
-    Option<russh::client::Handle<ClientHandler>>
-);
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectParams {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
+    pub proxy: Option<Proxy>,
+    pub jumphost: Option<JumphostConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct JumphostConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub passphrase: Option<String>,
+}
+
+struct SessionData {
+    channel: russh::Channel<russh::client::Msg>,
+    session: russh::client::Handle<ClientHandler>,
+    jumphost_session: Option<russh::client::Handle<ClientHandler>>,
+    config: ConnectParams,
+    tx: mpsc::Sender<(String, Vec<u8>)>,
+}
 
 lazy_static! {
-    static ref SESSIONS: Mutex<HashMap<String, SavedSession>> = Mutex::new(HashMap::new());
+    static ref SESSIONS: Mutex<HashMap<String, SessionData>> = Mutex::new(HashMap::new());
 }
 
 pub struct SSHClient;
 
 impl SSHClient {
     pub async fn connect(
-        host: &str,
-        port: u16,
-        username: &str,
-        password: Option<String>,
-        private_key: Option<String>,
-        passphrase: Option<String>,
-        proxy: Option<Proxy>,
-        jumphost: Option<JumphostConfig>,
+        params: ConnectParams,
         tx: mpsc::Sender<(String, Vec<u8>)>,
     ) -> Result<String, String> {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        
+        let (channel, session, jh_session) = Self::establish_connection(
+            session_id.clone(),
+            &params,
+            tx.clone()
+        ).await?;
+
+        {
+            let mut sessions = SESSIONS.lock().await;
+            sessions.insert(session_id.clone(), SessionData {
+                channel,
+                session,
+                jumphost_session: jh_session,
+                config: params,
+                tx,
+            });
+        }
+        
+        Ok(session_id)
+    }
+
+    async fn establish_connection(
+        session_id: String,
+        params: &ConnectParams,
+        tx: mpsc::Sender<(String, Vec<u8>)>,
+    ) -> Result<(russh::Channel<russh::client::Msg>, russh::client::Handle<ClientHandler>, Option<russh::client::Handle<ClientHandler>>), String> {
         let mut config = client::Config::default();
         
         config.preferred.key = std::borrow::Cow::Owned(vec![
@@ -45,14 +89,13 @@ impl SSHClient {
         ]);
 
         let config = Arc::new(config);
-        let session_id = uuid::Uuid::new_v4().to_string();
         let handler = ClientHandler::with_channel(session_id.clone(), tx.clone());
 
-        info!("[SSH] Connecting to {}:{} as {}", host, port, username);
+        info!("[SSH] Connecting to {}:{} as {}", params.host, params.port, params.username);
 
         let mut jh_handle_to_store = None;
 
-        let mut session = if let Some(p) = &proxy {
+        let mut session = if let Some(p) = &params.proxy {
             info!("[SSH] Using {} proxy: {}:{}", p.proxy_type, p.host, p.port);
             let _ = tx.send((session_id.clone(), format!("Connecting via {} proxy {}:{}...\r\n", p.proxy_type, p.host, p.port).as_bytes().to_vec())).await;
             if p.proxy_type == "socks5" {
@@ -61,16 +104,15 @@ impl SSHClient {
                 let stream = if has_auth {
                     let u = p.username.as_ref().unwrap();
                     let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
-                    Socks5Stream::connect_with_password((p.host.as_str(), p.port), (host, port), u, p_auth).await
+                    Socks5Stream::connect_with_password((p.host.as_str(), p.port), (&params.host[..], params.port), u, p_auth).await
                         .map_err(|e| format!("SOCKS5 proxy error: {}", e))?
                 } else {
-                    Socks5Stream::connect((p.host.as_str(), p.port), (host, port)).await
+                    Socks5Stream::connect((p.host.as_str(), p.port), (&params.host[..], params.port)).await
                         .map_err(|e| format!("SOCKS5 proxy error: {}", e))?
                 };
                 client::connect_stream(config, stream, handler).await
             } else if p.proxy_type == "http" {
                 use tokio::io::{AsyncWriteExt, AsyncReadExt};
-                use base64::prelude::*;
                 let mut stream = tokio::net::TcpStream::connect((p.host.as_str(), p.port)).await
                     .map_err(|e| format!("Failed to connect to HTTP proxy: {}", e))?;
                 
@@ -86,7 +128,7 @@ impl SSHClient {
 
                 let connect_req = format!(
                     "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{} {}\r\n\r\n",
-                    host, port, host, port, auth_header
+                    params.host, params.port, params.host, params.port, auth_header
                 );
                 stream.write_all(connect_req.as_bytes()).await.map_err(|e| e.to_string())?;
                 
@@ -100,7 +142,7 @@ impl SSHClient {
             } else {
                 return Err(format!("Unsupported proxy type: {}", p.proxy_type));
             }
-        } else if let Some(j) = &jumphost {
+        } else if let Some(j) = &params.jumphost {
             info!("[SSH] Using jumphost: {}:{} as {}", j.host, j.port, j.username);
             let _ = tx.send((session_id.clone(), "Connecting to jump host...\r\n".as_bytes().to_vec())).await;
             
@@ -117,28 +159,28 @@ impl SSHClient {
                 j.passphrase.clone(),
             ).await.map_err(|e| format!("Jumphost authentication failed: {}", e))?;
             
-            let _ = tx.send((session_id.clone(), format!("Tunneling to {}:{}...\r\n", host, port).as_bytes().to_vec())).await;
-            let channel = jh_session.channel_open_direct_tcpip(host, port as u32, "127.0.0.1", 22222).await
+            let _ = tx.send((session_id.clone(), format!("Tunneling to {}:{}...\r\n", params.host, params.port).as_bytes().to_vec())).await;
+            let channel = jh_session.channel_open_direct_tcpip(&params.host, params.port as u32, "127.0.0.1", 22222).await
                 .map_err(|e| format!("Failed to open direct-tcpip through jumphost: {}", e))?;
             
             jh_handle_to_store = Some(jh_session);
 
             client::connect_stream(config, channel.into_stream(), handler).await
         } else {
-            client::connect(config, (host, port), handler).await
+            client::connect(config, (&params.host[..], params.port), handler).await
         }
         .map_err(|e| {
             error!("[SSH] Connection error: {}", e);
             e.to_string()
         })?;
 
-        let _ = tx.send((session_id.clone(), format!("Authenticating as {}...\r\n", username).as_bytes().to_vec())).await;
+        let _ = tx.send((session_id.clone(), format!("Authenticating as {}...\r\n", params.username).as_bytes().to_vec())).await;
         Self::authenticate_session(
             &mut session,
-            username,
-            password,
-            private_key,
-            passphrase,
+            &params.username,
+            params.password.clone(),
+            params.private_key.clone(),
+            params.passphrase.clone(),
         ).await?;
 
         info!("[SSH] Authentication successful. Opening channel...");
@@ -148,12 +190,7 @@ impl SSHClient {
         channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
         channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
 
-        {
-            let mut sessions = SESSIONS.lock().await;
-            sessions.insert(session_id.clone(), (channel, session, jh_handle_to_store));
-        }
-        
-        Ok(session_id)
+        Ok((channel, session, jh_handle_to_store))
     }
 
     async fn authenticate_session<H: client::Handler>(
@@ -201,19 +238,71 @@ impl SSHClient {
     }
 
     pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some((channel, _, _)) = sessions.get_mut(session_id) {
-            channel.data(data).await.map_err(|e| format!("Failed to send data: {}", e))?;
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
+        let result = {
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(data).await
+            } else {
+                return Err("Session not found".to_string());
+            }
+        };
+
+        if result.is_err() {
+            info!("[SSH] Send failed, attempting to reconnect session {}...", session_id);
+            if let Err(e) = Self::reconnect(session_id).await {
+                error!("[SSH] Reconnection failed: {}", e);
+                return Err(format!("Connection lost and reconnection failed: {}", e));
+            }
+
+            // Retry sending
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(data).await.map_err(|e| format!("Failed to send data after reconnect: {}", e))?;
+            } else {
+                return Err("Session lost during reconnect".to_string());
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub async fn reconnect(session_id: &str) -> Result<(), String> {
+        let (config, tx) = {
+            let sessions = SESSIONS.lock().await;
+            if let Some(data) = sessions.get(session_id) {
+                (data.config.clone(), data.tx.clone())
+            } else {
+                return Err("Session not found".to_string());
+            }
+        };
+
+        // Notify user about reconnection attempt
+        let _ = tx.send((session_id.to_string(), "\r\n[Resh] Connection lost. Reconnecting...\r\n".as_bytes().to_vec())).await;
+
+        match Self::establish_connection(session_id.to_string(), &config, tx.clone()).await {
+            Ok((channel, session, jh_session)) => {
+                let mut sessions = SESSIONS.lock().await;
+                if let Some(data) = sessions.get_mut(session_id) {
+                    data.channel = channel;
+                    data.session = session;
+                    data.jumphost_session = jh_session;
+                    info!("[SSH] Reconnection successful for {}", session_id);
+                    Ok(())
+                } else {
+                    Err("Session removed during reconnection".to_string())
+                }
+            },
+            Err(e) => {
+                let _ = tx.send((session_id.to_string(), format!("\r\n[Resh] Reconnection failed: {}\r\n", e).as_bytes().to_vec())).await;
+                Err(e)
+            }
         }
     }
 
     pub async fn resize(session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
         let mut sessions = SESSIONS.lock().await;
-        if let Some((channel, _, _)) = sessions.get_mut(session_id) {
-            channel.window_change(cols, rows, 0, 0).await.map_err(|e| format!("Failed to resize: {}", e))?;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.channel.window_change(cols, rows, 0, 0).await.map_err(|e| format!("Failed to resize: {}", e))?;
             Ok(())
         } else {
             Err("Session not found".to_string())
