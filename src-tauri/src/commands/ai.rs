@@ -92,16 +92,32 @@ pub async fn send_chat_message(
     mode: Option<String>, // "ask" or "agent"
     _ssh_session_id: Option<String>, // For agent mode tool access (not yet used)
 ) -> Result<(), String> {
+    tracing::info!("[AI] send_chat_message called: session_id={}, model_id={}, channel_id={}, mode={:?}", 
+        session_id, model_id, channel_id, mode);
+    
+    // Send immediate acknowledgment
+    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
+    
     // 1. Get Channel Config
     let (endpoint, api_key) = {
         let config = state.config.lock().await;
         let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
-            .ok_or("Channel not found")?;
+            .ok_or_else(|| {
+                tracing::error!("[AI] Channel not found: {}", channel_id);
+                "Channel not found".to_string()
+            })?;
         (
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
         )
     };
+    
+    if api_key.is_empty() {
+        tracing::error!("[AI] API key is empty for channel: {}", channel_id);
+        return Err("API key is not configured".to_string());
+    }
+    
+    tracing::info!("[AI] Using endpoint: {}, API key length: {}", endpoint, api_key.len());
 
     // 2. Save User Message to DB
     let user_msg_id = Uuid::new_v4().to_string();
@@ -144,6 +160,8 @@ pub async fn send_chat_message(
         None
     };
 
+    tracing::info!("[AI] Calling OpenAI API with {} messages, agent_mode={}", history.len(), is_agent_mode);
+    
     // 4. Stream Response
     let mut stream = stream_openai_chat(&endpoint, &api_key, &model_id, history, tools).await?;
     

@@ -91,12 +91,29 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   useEffect(() => {
     if (!activeSessionId) return;
 
-    const unlistenPromise = listen<string>(`ai-response-${activeSessionId}`, (event) => {
+    const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
+      console.log('[AI] Request started');
+    });
+
+    const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
+      console.log('[AI] Response chunk received:', event.payload.length, 'chars');
       appendResponse(activeSessionId, event.payload);
     });
 
+    const errorListener = listen<string>(`ai-error-${activeSessionId}`, (event) => {
+      console.error('[AI] Error received:', event.payload);
+      // TODO: Show error in UI
+    });
+
+    const doneListener = listen<string>(`ai-done-${activeSessionId}`, () => {
+      console.log('[AI] Response complete');
+    });
+
     return () => {
-      unlistenPromise.then(unlisten => unlisten());
+      startedListener.then(unlisten => unlisten());
+      responseListener.then(unlisten => unlisten());
+      errorListener.then(unlisten => unlisten());
+      doneListener.then(unlisten => unlisten());
     };
   }, [activeSessionId, appendResponse]);
 
@@ -171,6 +188,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       const model = config?.aiModels.find(m => m.id === selectedModelId);
       const channelId = model?.channelId || '';
       
+      console.log('[AI] Sending message:', {
+        sessionId,
+        modelId: selectedModelId,
+        channelId,
+        mode,
+        currentTabId,
+        content: content.substring(0, 50)
+      });
+      
       await aiService.sendMessage(
         sessionId, 
         content, 
@@ -179,8 +205,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         mode,
         currentTabId
       );
+      
+      console.log('[AI] Message sent successfully');
     } catch (err) {
-      console.error('Failed to send message:', err);
+      console.error('[AI] Failed to send message:', err);
     }
   };
 

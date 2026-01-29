@@ -41,6 +41,10 @@ pub async fn stream_openai_chat(
     messages: Vec<ChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<String, String>> + Send>>, String> {
+    tracing::info!("[AI Client] Starting OpenAI API request to {}", endpoint);
+    tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
+        model, messages.len(), tools.is_some());
+    
     let client = Client::new();
     let req = ChatRequest {
         model: model.to_string(),
@@ -55,16 +59,24 @@ pub async fn stream_openai_chat(
         format!("{}/chat/completions", endpoint)
     };
 
+    tracing::info!("[AI Client] POST {}", url);
+
     let response = client.post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
         .header("Content-Type", "application/json")
         .json(&req)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            tracing::error!("[AI Client] Request failed: {}", e);
+            e.to_string()
+        })?;
 
+    tracing::info!("[AI Client] Response status: {}", response.status());
+    
     if !response.status().is_success() {
         let text = response.text().await.unwrap_or_default();
+        tracing::error!("[AI Client] API Error: {}", text);
         return Err(format!("API Error: {}", text));
     }
 
