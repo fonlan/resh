@@ -274,6 +274,38 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
   }, [tabId, isReady, getBufferText, server.name]);
 
+  // Listen for recording events
+  useEffect(() => {
+    const handleStartRecording = async (e: CustomEvent<{ path: string }>) => {
+      const { path } = e.detail;
+      if (sessionIdRef.current) {
+        try {
+          await invoke('start_recording', { sessionId: sessionIdRef.current, filePath: path });
+        } catch (err) {
+          console.error('Failed to start recording:', err);
+        }
+      }
+    };
+
+    const handleStopRecording = async () => {
+      if (sessionIdRef.current) {
+        try {
+          await invoke('stop_recording', { sessionId: sessionIdRef.current });
+        } catch (err) {
+          console.error('Failed to stop recording:', err);
+        }
+      }
+    };
+
+    window.addEventListener(`start-recording:${tabId}`, handleStartRecording as unknown as EventListener);
+    window.addEventListener(`stop-recording:${tabId}`, handleStopRecording as unknown as EventListener);
+
+    return () => {
+      window.removeEventListener(`start-recording:${tabId}`, handleStartRecording as unknown as EventListener);
+      window.removeEventListener(`stop-recording:${tabId}`, handleStopRecording as unknown as EventListener);
+    };
+  }, [tabId]);
+
   // Sync terminal size with backend upon connection
   useEffect(() => {
     if (isConnected && terminal && sessionId) {

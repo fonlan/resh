@@ -1,14 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { Copy, X, XCircle, FileDown } from 'lucide-react';
+import { Copy, X, XCircle, FileDown, Circle, Square } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
 interface TabContextMenuProps {
   x: number;
   y: number;
   tabId: string;
+  isRecording: boolean;
   onClose: () => void;
   onClone: (tabId: string) => void;
   onExport: (tabId: string) => void;
+  onStartRecording: (tabId: string) => void;
+  onStopRecording: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onCloseOthers: (tabId: string) => void;
 }
@@ -17,9 +20,12 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
   x,
   y,
   tabId,
+  isRecording,
   onClose,
   onClone,
   onExport,
+  onStartRecording,
+  onStopRecording,
   onCloseTab,
   onCloseOthers,
 }) => {
@@ -101,6 +107,32 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
         <FileDown size={14} />
         <span>{t.mainWindow.exportLogs}</span>
       </button>
+
+      {isRecording ? (
+        <button
+          type="button"
+          className="tab-context-menu-item"
+          onClick={() => {
+            onStopRecording(tabId);
+            onClose();
+          }}
+        >
+          <Square size={14} fill="currentColor" className="text-red-500" />
+          <span>{t.mainWindow.stopRecording}</span>
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="tab-context-menu-item"
+          onClick={() => {
+            onStartRecording(tabId);
+            onClose();
+          }}
+        >
+          <Circle size={14} fill="currentColor" className="text-red-500" />
+          <span>{t.mainWindow.startRecording}</span>
+        </button>
+      )}
 
       <div className="tab-context-menu-divider" />
       

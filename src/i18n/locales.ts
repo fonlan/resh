@@ -175,7 +175,9 @@ export const locales = {
       closeOthers: 'Close other tabs',
       settings: 'Settings',
       snippets: 'Snippets',
-      exportLogs: 'Export logs',
+      exportLogs: 'Export session',
+      startRecording: 'Start Recording',
+      stopRecording: 'Stop Recording',
       tabAriaLabel: 'Tab {index} of {total}',
     },
     windowControls: {
@@ -370,7 +372,9 @@ export const locales = {
       closeOthers: '关闭其他标签页',
       settings: '设置',
       snippets: '代码段',
-      exportLogs: '导出日志',
+      exportLogs: '导出会话',
+      startRecording: '开始录制',
+      stopRecording: '停止录制',
       tabAriaLabel: '第 {index} 个标签页，共 {total} 个',
     },
     windowControls: {

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, Suspense } from 'react';
-import { Settings, X, Code } from 'lucide-react';
+import { Settings, X, Code, Circle } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Config } from '../types/config';
 // SettingsModal is now lazy loaded
@@ -33,6 +33,7 @@ export const MainWindow: React.FC = () => {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
+  const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
 
   const {
     draggedIndex: draggedTabIndex,
@@ -120,6 +121,59 @@ export const MainWindow: React.FC = () => {
     window.dispatchEvent(event);
   }, []);
 
+  const handleStartRecording = useCallback(async (tabId: string) => {
+    // Check if the tab corresponds to an active session
+    // Since session_id is currently not directly mapped in Tab interface (it might be managed inside TerminalTab),
+    // we need to rely on the fact that for now, let's assume tabId is the sessionId or we can get it.
+    // Wait, TerminalTab generates the session ID or receives it.
+    // Looking at TerminalTab usage: <TerminalTab tabId={tab.id} ... />
+    // And in connection.rs: connect_to_server returns a session_id.
+    // MainWindow doesn't know the session_id directly.
+    // However, the TerminalTab can listen for an event or expose a ref.
+    // OR, we can assume tabId IS the sessionId if we structured it that way, but we generateId() for tabs.
+    
+    // We need a way to map tabId to sessionId.
+    // Option: Dispatch an event to the specific TerminalTab to initiate the "Start Recording" process?
+    // Or simpler: TerminalTab listens for a global event/context.
+    
+    // Let's dispatch a custom event that TerminalTab listens to.
+    // When TerminalTab receives "start-recording:<tabId>", it calls the backend.
+    // But MainWindow needs to know the file path first? No, TerminalTab can handle the UI flow too?
+    // No, context menu is in MainWindow.
+    
+    // Better: MainWindow asks the user for the path, then tells TerminalTab "Start recording to <path>".
+    // TerminalTab knows its session_id.
+    
+    const tab = tabs.find(t => t.id === tabId);
+    let defaultName = `recording-${tabId}.txt`;
+    if (tab && config) {
+      const server = config.servers.find(s => s.id === tab.serverId);
+      if (server) {
+         defaultName = `recording-${server.host.replace(/[^a-z0-9]/gi, '_')}-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+      }
+    }
+
+    try {
+      const path = await invoke<string | null>('select_save_path', { defaultName });
+      if (path) {
+        // Dispatch event to TerminalTab
+        window.dispatchEvent(new CustomEvent(`start-recording:${tabId}`, { detail: { path } }));
+        setRecordingTabs(prev => new Set(prev).add(tabId));
+      }
+    } catch (error) {
+      console.error('Failed to select save path:', error);
+    }
+  }, [tabs, config]);
+
+  const handleStopRecording = useCallback((tabId: string) => {
+    window.dispatchEvent(new CustomEvent(`stop-recording:${tabId}`));
+    setRecordingTabs(prev => {
+      const next = new Set(prev);
+      next.delete(tabId);
+      return next;
+    });
+  }, []);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
     e.preventDefault();
     setContextMenu({
@@ -191,6 +245,9 @@ export const MainWindow: React.FC = () => {
               onClick={() => setActiveTabId(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
+              {recordingTabs.has(tab.id) && (
+                <Circle size={8} fill="#ef4444" stroke="#ef4444" className="mr-2 animate-pulse" />
+              )}
               <span className="tab-label">{tab.label}</span>
               <button
                 type="button"
@@ -309,9 +366,12 @@ export const MainWindow: React.FC = () => {
           x={contextMenu.x}
           y={contextMenu.y}
           tabId={contextMenu.tabId}
+          isRecording={recordingTabs.has(contextMenu.tabId)}
           onClose={() => setContextMenu(null)}
           onClone={handleCloneTab}
           onExport={handleExportLogs}
+          onStartRecording={handleStartRecording}
+          onStopRecording={handleStopRecording}
           onCloseTab={handleCloseTab}
           onCloseOthers={handleCloseOthers}
         />
