@@ -24,6 +24,10 @@ pub async fn save_config(
     state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     let mut current_config = state.config.lock().await;
+    
+    // Calculate removed IDs to prevent them from being resurrected by sync
+    let removed_ids = find_removed_ids(&current_config, &config);
+
     *current_config = config.clone();
     
     let local_path = state.config_manager.local_config_path();
@@ -47,7 +51,7 @@ pub async fn save_config(
         // Run sync in background or await? 
         // Better to await to ensure sync completes before returning success if it's "save and sync"
         let mut local_copy = config.clone();
-        if let Err(e) = sync_manager.sync(&mut local_copy).await {
+        if let Err(e) = sync_manager.sync(&mut local_copy, removed_ids).await {
             tracing::error!("Sync failed: {}", e);
             // We don't necessarily want to fail the save if sync fails, 
             // but maybe return a specific error or warning?
@@ -78,12 +82,46 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         proxy,
     );
 
-    sync_manager.sync(&mut config).await?;
+    sync_manager.sync(&mut config, vec![]).await?;
     
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
     
     Ok(config.clone())
+}
+
+fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {
+    let mut removed = Vec::new();
+    
+    let new_server_ids: Vec<&String> = new.servers.iter().map(|s| &s.id).collect();
+    for server in &old.servers {
+        if !new_server_ids.contains(&&server.id) {
+            removed.push(server.id.clone());
+        }
+    }
+
+    let new_auth_ids: Vec<&String> = new.authentications.iter().map(|a| &a.id).collect();
+    for auth in &old.authentications {
+        if !new_auth_ids.contains(&&auth.id) {
+            removed.push(auth.id.clone());
+        }
+    }
+
+    let new_proxy_ids: Vec<&String> = new.proxies.iter().map(|p| &p.id).collect();
+    for proxy in &old.proxies {
+        if !new_proxy_ids.contains(&&proxy.id) {
+            removed.push(proxy.id.clone());
+        }
+    }
+    
+    let new_snippet_ids: Vec<&String> = new.snippets.iter().map(|s| &s.id).collect();
+    for snippet in &old.snippets {
+        if !new_snippet_ids.contains(&&snippet.id) {
+            removed.push(snippet.id.clone());
+        }
+    }
+
+    removed
 }
 
 #[tauri::command]

@@ -14,7 +14,7 @@ impl SyncManager {
         }
     }
 
-    pub async fn sync(&self, local_config: &mut Config) -> Result<(), String> {
+    pub async fn sync(&self, local_config: &mut Config, recently_removed_ids: Vec<String>) -> Result<(), String> {
         // 1. Download sync.json from WebDAV
         let remote_sync_config = match self.client.download("sync.json").await {
             Ok(Some(content)) => {
@@ -41,15 +41,15 @@ impl SyncManager {
         };
 
         // 2. Merge logic: Remote -> Local
-        self.merge_remote_to_local(local_config, &remote_sync_config);
+        self.merge_remote_to_local(local_config, &remote_sync_config, &recently_removed_ids);
 
         // Safety Check: If remote had items but local is empty after merge, something is wrong.
         // This prevents a "fresh" client from wiping remote if merge fails silently.
-        if !remote_sync_config.snippets.is_empty() && local_config.snippets.is_empty() {
+        if !remote_sync_config.snippets.is_empty() && local_config.snippets.is_empty() && recently_removed_ids.is_empty() {
             tracing::error!("CRITICAL: Remote has {} snippets but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.snippets.len());
             return Err("Merge integrity check failed: Snippets missing after merge".to_string());
         }
-        if !remote_sync_config.servers.is_empty() && local_config.servers.is_empty() {
+        if !remote_sync_config.servers.is_empty() && local_config.servers.is_empty() && recently_removed_ids.is_empty() {
             tracing::error!("CRITICAL: Remote has {} servers but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.servers.len());
             return Err("Merge integrity check failed: Servers missing after merge".to_string());
         }
@@ -71,7 +71,7 @@ impl SyncManager {
         Ok(())
     }
 
-    fn merge_remote_to_local(&self, local: &mut Config, remote: &SyncConfig) {
+    fn merge_remote_to_local(&self, local: &mut Config, remote: &SyncConfig, recently_removed_ids: &[String]) {
         // Handle removals first: if an ID is in removed_ids, disable sync locally
         for server in &mut local.servers {
             if remote.removed_ids.contains(&server.id) {
@@ -97,6 +97,9 @@ impl SyncManager {
         // Merge Servers
         let mut local_servers: HashMap<String, Server> = local.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_server in &remote.servers {
+            if recently_removed_ids.contains(&remote_server.id) {
+                continue;
+            }
             // If it's in remote sync.json, it SHOULD be synced to local, regardless of its own synced flag.
             // The flag is primarily for local-to-remote control.
             if let Some(local_server) = local_servers.get_mut(&remote_server.id) {
@@ -115,6 +118,9 @@ impl SyncManager {
         // Merge Authentications
         let mut local_auths: HashMap<String, Authentication> = local.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
         for remote_auth in &remote.authentications {
+            if recently_removed_ids.contains(&remote_auth.id) {
+                continue;
+            }
             if let Some(local_auth) = local_auths.get_mut(&remote_auth.id) {
                 if is_newer(&remote_auth.updated_at, &local_auth.updated_at) {
                     *local_auth = remote_auth.clone();
@@ -131,6 +137,9 @@ impl SyncManager {
         // Merge Proxies
         let mut local_proxies: HashMap<String, Proxy> = local.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
         for remote_proxy in &remote.proxies {
+            if recently_removed_ids.contains(&remote_proxy.id) {
+                continue;
+            }
             if let Some(local_proxy) = local_proxies.get_mut(&remote_proxy.id) {
                 if is_newer(&remote_proxy.updated_at, &local_proxy.updated_at) {
                     *local_proxy = remote_proxy.clone();
@@ -147,6 +156,9 @@ impl SyncManager {
         // Merge Snippets
         let mut local_snippets: HashMap<String, Snippet> = local.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_snippet in &remote.snippets {
+            if recently_removed_ids.contains(&remote_snippet.id) {
+                continue;
+            }
             if let Some(local_snippet) = local_snippets.get_mut(&remote_snippet.id) {
                 if is_newer(&remote_snippet.updated_at, &local_snippet.updated_at) {
                     *local_snippet = remote_snippet.clone();
