@@ -61,6 +61,9 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   const handleSnippetClick = (content: string) => {
     const event = new CustomEvent('paste-snippet', { detail: content });
     window.dispatchEvent(event);
+    if (!isLocked) {
+      onClose();
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, content: string) => {
@@ -74,6 +77,27 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
     e.preventDefault();
     setIsResizing(true);
   };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        isOpen && 
+        !isLocked && 
+        sidebarRef.current && 
+        !sidebarRef.current.contains(event.target as Node)
+      ) {
+        onClose();
+      }
+    };
+
+    if (isOpen && !isLocked) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen, isLocked, onClose]);
 
   useEffect(() => {
     const stopResizing = () => {
