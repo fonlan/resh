@@ -98,17 +98,28 @@ pub async fn send_chat_message(
     // Send immediate acknowledgment
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
     
-    // 1. Get Channel Config
-    let (endpoint, api_key) = {
+    // 1. Get Channel Config and Model Name
+    let (endpoint, api_key, model_name) = {
         let config = state.config.lock().await;
+        
+        // Find the model to get its name
+        let model = config.ai_models.iter().find(|m| m.id == model_id)
+            .ok_or_else(|| {
+                tracing::error!("[AI] Model not found: {}", model_id);
+                "Model not found".to_string()
+            })?;
+        
+        // Find the channel
         let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
             .ok_or_else(|| {
                 tracing::error!("[AI] Channel not found: {}", channel_id);
                 "Channel not found".to_string()
             })?;
+        
         (
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
+            model.name.clone(),
         )
     };
     
@@ -117,7 +128,8 @@ pub async fn send_chat_message(
         return Err("API key is not configured".to_string());
     }
     
-    tracing::info!("[AI] Using endpoint: {}, API key length: {}", endpoint, api_key.len());
+    tracing::info!("[AI] Using endpoint: {}, model: {}, API key length: {}", 
+        endpoint, model_name, api_key.len());
 
     // 2. Save User Message to DB
     let user_msg_id = Uuid::new_v4().to_string();
@@ -162,8 +174,8 @@ pub async fn send_chat_message(
 
     tracing::info!("[AI] Calling OpenAI API with {} messages, agent_mode={}", history.len(), is_agent_mode);
     
-    // 4. Stream Response
-    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_id, history, tools).await?;
+    // 4. Stream Response - Use model_name instead of model_id
+    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, history, tools).await?;
     
     let ai_msg_id = Uuid::new_v4().to_string();
     let mut full_response = String::new();
