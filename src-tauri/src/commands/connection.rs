@@ -81,6 +81,12 @@ pub async fn connect_to_server(
             // String::from_utf8_lossy is safe.
             let text = String::from_utf8_lossy(&data).to_string();
             
+            // Update terminal buffer for AI access
+            use crate::ssh_manager::ssh::SSHClient;
+            if let Err(e) = SSHClient::update_terminal_buffer(&session_id, &text).await {
+                tracing::error!("Failed to update terminal buffer: {}", e);
+            }
+            
             if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
                 tracing::error!("Failed to emit terminal event: {}", e);
             }

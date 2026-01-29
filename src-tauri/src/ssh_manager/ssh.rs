@@ -41,6 +41,7 @@ struct SessionData {
     tx: mpsc::Sender<(String, Vec<u8>)>,
     cols: u32,
     rows: u32,
+    terminal_buffer: String, // Store recent terminal output for AI
 }
 
 lazy_static! {
@@ -76,6 +77,7 @@ impl SSHClient {
                 tx,
                 cols: initial_cols,
                 rows: initial_rows,
+                terminal_buffer: String::new(),
             });
         }
         
@@ -325,6 +327,36 @@ impl SSHClient {
         let mut sessions = SESSIONS.lock().await;
         if let Some(_) = sessions.remove(session_id) {
              Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Get the current terminal buffer content (last 100KB)
+    pub async fn get_terminal_text(session_id: &str) -> Result<String, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            Ok(session_data.terminal_buffer.clone())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Update the terminal buffer with new data
+    pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<(), String> {
+        const MAX_BUFFER_SIZE: usize = 100_000; // Keep last 100KB
+        
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.terminal_buffer.push_str(data);
+            
+            // Trim to keep only recent data
+            if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
+                let excess = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
+                session_data.terminal_buffer = session_data.terminal_buffer[excess..].to_string();
+            }
+            
+            Ok(())
         } else {
             Err("Session not found".to_string())
         }

@@ -199,6 +199,37 @@ export const locales = {
     newTabButton: {
       connectTo: 'Connect to Server',
       manageServers: 'Manage Servers',
+    },
+    ai: {
+      sidebarTitle: 'AI Assistant',
+      tabTitle: 'AI',
+      newChat: 'New Chat',
+      history: 'History',
+      typeMessage: 'Type a message...',
+      startChat: 'Start Chat',
+      noHistory: 'No history available',
+      selectServer: 'Select a server and start a new chat to begin.',
+      channels: 'AI Channels',
+      models: 'AI Models',
+      addChannel: 'Add Channel',
+      addModel: 'Add Model',
+      noChannels: 'No AI Channels configured.',
+      noModels: 'No AI Models configured.',
+      editChannel: 'Edit AI Channel',
+      editModel: 'Edit AI Model',
+      deleteChannelConfirm: 'Are you sure you want to delete this AI Channel? Associated models will be affected.',
+      deleteModelConfirm: 'Are you sure you want to delete this AI Model?',
+      channelForm: {
+        name: 'Name',
+        type: 'Type',
+        endpoint: 'Endpoint (Optional)',
+        apiKey: 'API Key (Optional)',
+        active: 'Enable this channel'
+      },
+      modelForm: {
+        name: 'Model Name',
+        channel: 'Channel'
+      }
     }
   },
   'zh-CN': {
@@ -401,6 +432,37 @@ export const locales = {
     newTabButton: {
       connectTo: '连接到服务器',
       manageServers: '服务器管理',
+    },
+    ai: {
+      sidebarTitle: 'AI 助手',
+      tabTitle: 'AI',
+      newChat: '新对话',
+      history: '历史记录',
+      typeMessage: '输入消息...',
+      startChat: '开始对话',
+      noHistory: '暂无历史记录',
+      selectServer: '请选择一个服务器并开始新对话。',
+      channels: 'AI 渠道',
+      models: 'AI 模型',
+      addChannel: '添加渠道',
+      addModel: '添加模型',
+      noChannels: '暂无 AI 渠道配置。',
+      noModels: '暂无 AI 模型配置。',
+      editChannel: '编辑 AI 渠道',
+      editModel: '编辑 AI 模型',
+      deleteChannelConfirm: '确定要删除此 AI 渠道吗？关联的模型也会受到影响。',
+      deleteModelConfirm: '确定要删除此 AI 模型吗？',
+      channelForm: {
+        name: '名称',
+        type: '类型',
+        endpoint: '接口地址 (可选)',
+        apiKey: 'API Key (可选)',
+        active: '启用此渠道'
+      },
+      modelForm: {
+        name: '模型名称',
+        channel: '所属渠道'
+      }
     }
   }
 };

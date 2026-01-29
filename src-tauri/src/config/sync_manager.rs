@@ -1,4 +1,4 @@
-use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig};
+use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig, AiChannel, AiModel};
 use crate::webdav::client::WebDAVClient;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -31,6 +31,8 @@ impl SyncManager {
                     authentications: vec![],
                     proxies: vec![],
                     snippets: vec![],
+                    ai_channels: vec![],
+                    ai_models: vec![],
                     removed_ids: vec![],
                 }
             }
@@ -91,6 +93,16 @@ impl SyncManager {
         for snippet in &mut local.snippets {
             if remote.removed_ids.contains(&snippet.id) {
                 snippet.synced = false;
+            }
+        }
+        for channel in &mut local.ai_channels {
+            if remote.removed_ids.contains(&channel.id) {
+                channel.synced = false;
+            }
+        }
+        for model in &mut local.ai_models {
+            if remote.removed_ids.contains(&model.id) {
+                model.synced = false;
             }
         }
 
@@ -171,6 +183,44 @@ impl SyncManager {
             }
         }
         local.snippets = local_snippets.into_values().collect();
+
+        // Merge AI Channels
+        let mut local_channels: HashMap<String, AiChannel> = local.ai_channels.drain(..).map(|c| (c.id.clone(), c)).collect();
+        for remote_channel in &remote.ai_channels {
+            if recently_removed_ids.contains(&remote_channel.id) {
+                continue;
+            }
+            if let Some(local_channel) = local_channels.get_mut(&remote_channel.id) {
+                if is_newer(&remote_channel.updated_at, &local_channel.updated_at) {
+                    *local_channel = remote_channel.clone();
+                    local_channel.synced = true;
+                }
+            } else {
+                let mut c = remote_channel.clone();
+                c.synced = true;
+                local_channels.insert(c.id.clone(), c);
+            }
+        }
+        local.ai_channels = local_channels.into_values().collect();
+
+        // Merge AI Models
+        let mut local_models: HashMap<String, AiModel> = local.ai_models.drain(..).map(|m| (m.id.clone(), m)).collect();
+        for remote_model in &remote.ai_models {
+            if recently_removed_ids.contains(&remote_model.id) {
+                continue;
+            }
+            if let Some(local_model) = local_models.get_mut(&remote_model.id) {
+                if is_newer(&remote_model.updated_at, &local_model.updated_at) {
+                    *local_model = remote_model.clone();
+                    local_model.synced = true;
+                }
+            } else {
+                let mut m = remote_model.clone();
+                m.synced = true;
+                local_models.insert(m.id.clone(), m);
+            }
+        }
+        local.ai_models = local_models.into_values().collect();
     }
 
     fn merge_local_to_remote(&self, local: &Config, remote: &mut SyncConfig) {
@@ -180,6 +230,8 @@ impl SyncManager {
         let local_auths: HashMap<String, &Authentication> = local.authentications.iter().map(|a| (a.id.clone(), a)).collect();
         let local_proxies: HashMap<String, &Proxy> = local.proxies.iter().map(|p| (p.id.clone(), p)).collect();
         let local_snippets: HashMap<String, &Snippet> = local.snippets.iter().map(|s| (s.id.clone(), s)).collect();
+        let local_channels: HashMap<String, &AiChannel> = local.ai_channels.iter().map(|c| (c.id.clone(), c)).collect();
+        let local_models: HashMap<String, &AiModel> = local.ai_models.iter().map(|m| (m.id.clone(), m)).collect();
 
         let mut remote_servers: HashMap<String, Server> = remote.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         let mut to_remove_servers = Vec::new();
@@ -245,6 +297,38 @@ impl SyncManager {
             }
         }
 
+        let mut remote_channels: HashMap<String, AiChannel> = remote.ai_channels.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut to_remove_channels = Vec::new();
+        for id in remote_channels.keys() {
+            match local_channels.get(id) {
+                None => to_remove_channels.push(id.clone()),
+                Some(c) if !c.synced => to_remove_channels.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_channels {
+            remote_channels.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
+        let mut remote_models: HashMap<String, AiModel> = remote.ai_models.drain(..).map(|m| (m.id.clone(), m)).collect();
+        let mut to_remove_models = Vec::new();
+        for id in remote_models.keys() {
+            match local_models.get(id) {
+                None => to_remove_models.push(id.clone()),
+                Some(m) if !m.synced => to_remove_models.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_models {
+            remote_models.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
         // 2. Add/Update from local
         for local_server in &local.servers {
             if !local_server.synced { continue; }
@@ -302,6 +386,34 @@ impl SyncManager {
             }
         }
         remote.snippets = remote_snippets.into_values().collect();
+
+        for local_channel in &local.ai_channels {
+            if !local_channel.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_channel.id);
+
+            if let Some(remote_channel) = remote_channels.get_mut(&local_channel.id) {
+                if is_newer(&local_channel.updated_at, &remote_channel.updated_at) {
+                    *remote_channel = local_channel.clone();
+                }
+            } else {
+                remote_channels.insert(local_channel.id.clone(), local_channel.clone());
+            }
+        }
+        remote.ai_channels = remote_channels.into_values().collect();
+
+        for local_model in &local.ai_models {
+            if !local_model.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_model.id);
+
+            if let Some(remote_model) = remote_models.get_mut(&local_model.id) {
+                if is_newer(&local_model.updated_at, &remote_model.updated_at) {
+                    *remote_model = local_model.clone();
+                }
+            } else {
+                remote_models.insert(local_model.id.clone(), local_model.clone());
+            }
+        }
+        remote.ai_models = remote_models.into_values().collect();
     }
 }
 

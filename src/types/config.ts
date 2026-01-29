@@ -87,12 +87,33 @@ export interface GeneralSettings {
   recordingMode: 'raw' | 'text';
 }
 
+export interface AIChannel {
+  id: string;
+  name: string;
+  type: 'openai' | 'copilot';
+  endpoint?: string;
+  apiKey?: string;
+  isActive: boolean;
+  synced: boolean;
+  updatedAt: string;
+}
+
+export interface AIModel {
+  id: string;
+  name: string;
+  channelId: string;
+  synced: boolean;
+  updatedAt: string;
+}
+
 export interface Config {
   version: string;
   servers: Server[];
   authentications: Authentication[];
   proxies: ProxyConfig[];
   snippets: Snippet[];
+  aiChannels: AIChannel[];
+  aiModels: AIModel[];
   general: GeneralSettings;
 }
 

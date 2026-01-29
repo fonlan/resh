@@ -101,6 +101,35 @@ pub struct Snippet {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AiChannel {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub provider: String,
+    pub endpoint: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiModel {
+    pub id: String,
+    pub name: String,
+    pub channel_id: String,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub font_family: String,
     pub font_size: u32,
@@ -182,6 +211,12 @@ pub struct Config {
     #[serde(default)]
     #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
+    #[serde(default)]
+    #[serde(alias = "aiChannels", alias = "ai_channels")]
+    pub ai_channels: Vec<AiChannel>,
+    #[serde(default)]
+    #[serde(alias = "aiModels", alias = "ai_models")]
+    pub ai_models: Vec<AiModel>,
     pub general: GeneralSettings,
 }
 
@@ -199,6 +234,12 @@ pub struct SyncConfig {
     #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
     #[serde(default)]
+    #[serde(alias = "aiChannels", alias = "ai_channels")]
+    pub ai_channels: Vec<AiChannel>,
+    #[serde(default)]
+    #[serde(alias = "aiModels", alias = "ai_models")]
+    pub ai_models: Vec<AiModel>,
+    #[serde(default)]
     pub removed_ids: Vec<String>,
 }
 
@@ -210,6 +251,8 @@ impl Config {
             authentications: vec![],
             proxies: vec![],
             snippets: vec![],
+            ai_channels: vec![],
+            ai_models: vec![],
             general: GeneralSettings {
                 theme: "dark".to_string(),
                 language: "en".to_string(),

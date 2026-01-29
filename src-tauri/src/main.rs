@@ -6,6 +6,7 @@
 use resh::commands;
 use resh::config::ConfigManager;
 use resh::master_password::MasterPasswordManager;
+use resh::db::DatabaseManager;
 use resh::logger;
 use std::sync::Arc;
 use tauri::Manager;
@@ -40,6 +41,7 @@ async fn main() {
 
             let config_manager = ConfigManager::new(app_data_dir.clone());
             let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
+            let db_manager = DatabaseManager::new(app_data_dir.clone()).expect("Failed to initialize database");
 
             // Load initial config
             let local_config = config_manager.load_local_config().unwrap_or_else(|_| resh::config::Config::empty());
@@ -52,6 +54,7 @@ async fn main() {
             let state = Arc::new(commands::AppState {
                 config_manager: config_manager.clone(),
                 password_manager: master_password_manager,
+                db_manager,
                 config: Mutex::new(local_config.clone()),
             });
 
@@ -130,6 +133,12 @@ async fn main() {
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,
             commands::master_password::verify_master_password,
+            commands::ai::create_ai_session,
+            commands::ai::get_ai_sessions,
+            commands::ai::get_ai_messages,
+            commands::ai::send_chat_message,
+            commands::ai::get_terminal_text,
+            commands::ai::run_in_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

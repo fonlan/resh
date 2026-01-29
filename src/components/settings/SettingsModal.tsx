@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw } from 'lucide-react';
-import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet } from '../../types/config';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw, Bot } from 'lucide-react';
+import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet, AIChannel, AIModel } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
 import { AuthTab } from './AuthTab';
@@ -8,6 +8,7 @@ import { ProxyTab } from './ProxyTab';
 import { GeneralTab } from './GeneralTab';
 import { SyncTab } from './SyncTab';
 import { SnippetsTab } from './SnippetsTab';
+import { AITab } from './AITab';
 import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
 
@@ -18,7 +19,7 @@ export interface SettingsModalProps {
   initialTab?: TabType;
 }
 
-type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync';
+type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers' }) => {
@@ -187,6 +188,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, general } : null));
   };
 
+  const handleAIChannelsUpdate = (aiChannels: AIChannel[]) => {
+    setLocalConfig((prev) => (prev ? { ...prev, aiChannels } : null));
+  };
+
+  const handleAIModelsUpdate = (aiModels: AIModel[]) => {
+    setLocalConfig((prev) => (prev ? { ...prev, aiModels } : null));
+  };
+
   const handleConnectServer = async (serverId: string) => {
     // If there's a pending save, flush it immediately
     if (saveTimeoutRef.current) {
@@ -223,7 +232,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     { id: 'servers', label: t.servers, icon: <Server size={18} /> },
     { id: 'auth', label: t.auth, icon: <Key size={18} /> },
     { id: 'proxies', label: t.proxies, icon: <Globe size={18} /> },
-    { id: 'snippets', label: "Snippets", icon: <Code size={18} /> },
+    { id: 'snippets', label: t.snippets, icon: <Code size={18} /> },
+    { id: 'ai', label: t.ai.tabTitle, icon: <Bot size={18} /> },
     { id: 'sync', label: t.sync, icon: <RefreshCw size={18} /> },
     { id: 'general', label: t.general, icon: <Settings size={18} /> },
   ];
@@ -320,6 +330,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <SnippetsTab
                 snippets={localConfig.snippets || []}
                 onSnippetsUpdate={handleSnippetsUpdate}
+              />
+            )}
+            {activeTab === 'ai' && (
+              <AITab
+                aiChannels={localConfig.aiChannels || []}
+                aiModels={localConfig.aiModels || []}
+                onAIChannelsUpdate={handleAIChannelsUpdate}
+                onAIModelsUpdate={handleAIModelsUpdate}
               />
             )}
             {activeTab === 'general' && (

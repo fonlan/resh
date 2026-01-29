@@ -2,6 +2,7 @@
 
 use crate::config::{Config, ConfigManager, SyncManager};
 use crate::master_password::MasterPasswordManager;
+use crate::db::DatabaseManager;
 use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
@@ -9,6 +10,7 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub config_manager: ConfigManager,
     pub password_manager: MasterPasswordManager,
+    pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
 }
 
