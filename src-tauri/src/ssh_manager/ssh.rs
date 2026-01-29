@@ -39,6 +39,8 @@ struct SessionData {
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
     config: ConnectParams,
     tx: mpsc::Sender<(String, Vec<u8>)>,
+    cols: u32,
+    rows: u32,
 }
 
 lazy_static! {
@@ -53,11 +55,15 @@ impl SSHClient {
         tx: mpsc::Sender<(String, Vec<u8>)>,
     ) -> Result<String, String> {
         let session_id = uuid::Uuid::new_v4().to_string();
+        let initial_cols = 80;
+        let initial_rows = 24;
         
         let (channel, session, jh_session) = Self::establish_connection(
             session_id.clone(),
             &params,
-            tx.clone()
+            tx.clone(),
+            initial_cols,
+            initial_rows
         ).await?;
 
         {
@@ -68,6 +74,8 @@ impl SSHClient {
                 jumphost_session: jh_session,
                 config: params,
                 tx,
+                cols: initial_cols,
+                rows: initial_rows,
             });
         }
         
@@ -78,6 +86,8 @@ impl SSHClient {
         session_id: String,
         params: &ConnectParams,
         tx: mpsc::Sender<(String, Vec<u8>)>,
+        cols: u32,
+        rows: u32,
     ) -> Result<(russh::Channel<russh::client::Msg>, russh::client::Handle<ClientHandler>, Option<russh::client::Handle<ClientHandler>>), String> {
         let mut config = client::Config::default();
         
@@ -187,7 +197,7 @@ impl SSHClient {
 
         let channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
         
-        channel.request_pty(true, "xterm", 80, 24, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
+        channel.request_pty(true, "xterm-256color", cols, rows, 0, 0, &[]).await.map_err(|e| format!("PTY request failed: {}", e))?;
         channel.request_shell(true).await.map_err(|e| format!("Shell request failed: {}", e))?;
 
         Ok((channel, session, jh_handle_to_store))
@@ -267,10 +277,10 @@ impl SSHClient {
     }
 
     pub async fn reconnect(session_id: &str) -> Result<(), String> {
-        let (config, tx) = {
+        let (config, tx, cols, rows) = {
             let sessions = SESSIONS.lock().await;
             if let Some(data) = sessions.get(session_id) {
-                (data.config.clone(), data.tx.clone())
+                (data.config.clone(), data.tx.clone(), data.cols, data.rows)
             } else {
                 return Err("Session not found".to_string());
             }
@@ -279,7 +289,7 @@ impl SSHClient {
         // Notify user about reconnection attempt
         let _ = tx.send((session_id.to_string(), "\r\n[Resh] Connection lost. Reconnecting...\r\n".as_bytes().to_vec())).await;
 
-        match Self::establish_connection(session_id.to_string(), &config, tx.clone()).await {
+        match Self::establish_connection(session_id.to_string(), &config, tx.clone(), cols, rows).await {
             Ok((channel, session, jh_session)) => {
                 let mut sessions = SESSIONS.lock().await;
                 if let Some(data) = sessions.get_mut(session_id) {
@@ -302,6 +312,8 @@ impl SSHClient {
     pub async fn resize(session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.cols = cols;
+            session_data.rows = rows;
             session_data.channel.window_change(cols, rows, 0, 0).await.map_err(|e| format!("Failed to resize: {}", e))?;
             Ok(())
         } else {

@@ -23,7 +23,18 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
 
   return (
     <div className="status-bar" style={style}>
-      <div className="status-bar-left" title={leftText}>
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div 
+        className="status-bar-left" 
+        title={leftText}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          if (leftText) {
+            navigator.clipboard.writeText(leftText).catch(err => console.error('Failed to copy status text:', err));
+          }
+        }}
+        style={{ cursor: 'pointer' }}
+      >
         {leftText}
       </div>
       <div className="status-bar-right" title={rightText}>

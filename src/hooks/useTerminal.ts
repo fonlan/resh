@@ -62,6 +62,41 @@ export const useTerminal = (
       onDataRef.current?.(data);
     });
 
+    const selectionDisposable = term.onSelectionChange(debounce(() => {
+        if (term.hasSelection()) {
+            const selection = term.getSelection();
+            if (selection) {
+                navigator.clipboard.writeText(selection).catch(err => {
+                    console.error('Failed to copy selection:', err);
+                });
+            }
+        }
+    }, 500));
+
+    // Handle OSC 52 (Clipboard)
+    const oscDisposable = term.parser.registerOscHandler(52, (data) => {
+        try {
+            const parts = data.split(';');
+            if (parts.length < 2) return false;
+            
+            const b64Data = parts.slice(1).join(';');
+            if (b64Data === '?') return true; 
+
+            const text = new TextDecoder().decode(
+                Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))
+            );
+            
+            navigator.clipboard.writeText(text).catch(e => {
+                console.error('OSC 52 write failed:', e);
+            });
+            
+            return true;
+        } catch (e) {
+            console.warn('Failed to parse OSC 52:', e);
+            return false;
+        }
+    });
+
     const initTerminal = () => {
         if (!term.element && container.clientWidth > 0 && container.clientHeight > 0) {
             term.open(container);
@@ -106,6 +141,8 @@ export const useTerminal = (
 
     return () => {
       disposable.dispose();
+      selectionDisposable.dispose();
+      oscDisposable.dispose();
       resizeObserver.disconnect();
       webglAddonRef.current?.dispose();
       term.dispose();
