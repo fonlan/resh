@@ -356,16 +356,24 @@ pub async fn fetch_ai_models(
 
     let mut model_ids: Vec<String> = models.into_iter().filter(|m| {
         if provider == "copilot" {
-             // Filter for type=chat in capabilities or top-level
-             if let Some(cap) = m.extra.get("capabilities") {
-                 if let Some(t) = cap.get("type").and_then(|v| v.as_str()) {
-                     return t == "chat";
-                 }
+             // 1. Check capabilities.type == "chat"
+             let is_chat = if let Some(cap) = m.extra.get("capabilities") {
+                 cap.get("type").and_then(|v| v.as_str()) == Some("chat")
+             } else {
+                 // Fallback to top-level type if capabilities is missing
+                 m.extra.get("type").and_then(|v| v.as_str()) == Some("chat")
+             };
+
+             if !is_chat {
+                 return false;
              }
-             // Also check top-level type just in case
-             if let Some(t) = m.extra.get("type").and_then(|v| v.as_str()) {
-                 return t == "chat";
+
+             // 2. Check model_picker_enabled == true
+             if let Some(enabled) = m.extra.get("model_picker_enabled").and_then(|v| v.as_bool()) {
+                 return enabled;
              }
+             
+             // If field is missing, default to false (strict)
              false 
         } else {
             true

@@ -299,3 +299,11 @@ input[type="radio"]:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Additional Utility Classes */
+.underline { text-decoration: underline; }
+.ml-2 { margin-left: 8px; }
+.hover\:text-white:hover { color: var(--text-primary); }
+.bg-transparent { background-color: transparent; }
+.border-none { border: none; }
+.p-0 { padding: 0; }

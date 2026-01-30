@@ -55,6 +55,15 @@ export const AITab: React.FC<AITabProps> = ({
   const [dropdownPosition, setDropdownPosition] = useState<{ top: number, left: number, width: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Sort channels and models by name
+  const sortedChannels = React.useMemo(() => {
+    return [...aiChannels].sort((a, b) => a.name.localeCompare(b.name));
+  }, [aiChannels]);
+
+  const sortedModels = React.useMemo(() => {
+    return [...aiModels].sort((a, b) => a.name.localeCompare(b.name));
+  }, [aiModels]);
+
   // Update position when showing suggestions
   useEffect(() => {
     if (showModelSuggestions && inputRef.current) {
@@ -315,12 +324,12 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
 
       <div className="item-list mb-8">
-        {aiChannels.length === 0 ? (
+        {sortedChannels.length === 0 ? (
           <div className="empty-state-mini">
             <p>{t.ai.noChannels}</p>
           </div>
         ) : (
-          aiChannels.map((channel) => (
+          sortedChannels.map((channel) => (
             <div key={channel.id} className="item-card">
               <div className="item-info">
                 <div className="flex items-center gap-2">
@@ -362,12 +371,12 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
 
       <div className="item-list">
-        {aiModels.length === 0 ? (
+        {sortedModels.length === 0 ? (
           <div className="empty-state-mini">
             <p>{t.ai.noModels}</p>
           </div>
         ) : (
-          aiModels.map((model) => {
+          sortedModels.map((model) => {
             const channel = aiChannels.find(c => c.id === model.channelId);
             return (
               <div key={model.id} className="item-card">
@@ -466,7 +475,7 @@ export const AITab: React.FC<AITabProps> = ({
                  <button 
                    type="button" 
                    onClick={() => setChannelFormData({...channelFormData, apiKey: ''})}
-                   className="text-xs text-gray-400 hover:text-white underline ml-2"
+                   className="text-xs text-gray-400 hover:text-white underline ml-2 bg-transparent border-none cursor-pointer p-0"
                  >
                    Reset
                  </button>
