@@ -45,11 +45,15 @@ impl DatabaseManager {
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
                 tool_calls TEXT,
+                tool_call_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
             )",
             [],
         )?;
+
+        // Migration: Ensure tool_call_id column exists for existing tables
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN tool_call_id TEXT", []);
 
         Ok(())
     }

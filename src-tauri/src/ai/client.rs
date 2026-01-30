@@ -4,11 +4,38 @@ use std::pin::Pin;
 use reqwest::Client;
 use eventsource_stream::Eventsource;
 use futures::StreamExt;
+use std::time::Duration;
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: FunctionCall,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FunctionCall {
+    pub name: String,
+    pub arguments: String,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
-    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    Content(String),
+    ToolCall(serde_json::Value),
+    Done,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -40,12 +67,22 @@ pub async fn stream_openai_chat(
     model: &str,
     messages: Vec<ChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
-) -> Result<Pin<Box<dyn Stream<Item = Result<String, String>> + Send>>, String> {
+) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, String>> + Send>>, String> {
     tracing::info!("[AI Client] Starting OpenAI API request to {}", endpoint);
     tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
         model, messages.len(), tools.is_some());
     
-    let client = Client::new();
+    // Explicitly configure client for robustness
+    let client = Client::builder()
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(10))
+        .no_proxy() // Try bypassing system proxy first to see if that helps, or maybe we should NOT do this.
+                    // Actually, if the user has a system proxy (e.g. Clash), they need it.
+                    // "unexpected EOF" suggests the connection IS made but dropped.
+                    // Let's NOT use no_proxy() by default, but rely on reqwest default env behavior.
+        .build()
+        .map_err(|e| format!("Failed to build client: {}", e))?;
+
     let req = ChatRequest {
         model: model.to_string(),
         messages,
@@ -86,17 +123,22 @@ pub async fn stream_openai_chat(
         match event {
             Ok(event) => {
                 if event.data == "[DONE]" {
-                    return Ok("".to_string());
+                    return Ok(StreamEvent::Done);
                 }
                 match serde_json::from_str::<serde_json::Value>(&event.data) {
                     Ok(json) => {
-                        if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                            Ok(content.to_string())
+                        let delta = &json["choices"][0]["delta"];
+                        if let Some(content) = delta["content"].as_str() {
+                            Ok(StreamEvent::Content(content.to_string()))
+                        } else if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                            // Pass the whole tool_calls array to be processed by caller
+                            Ok(StreamEvent::ToolCall(serde_json::Value::Array(tool_calls.clone())))
                         } else {
-                            Ok("".to_string())
+                            // Keepalive or empty delta
+                            Ok(StreamEvent::Content("".to_string()))
                         }
                     },
-                    Err(_) => Ok("".to_string()) // Ignore parse errors for keepalives etc
+                    Err(_) => Ok(StreamEvent::Content("".to_string())) // Ignore parse errors
                 }
             },
             Err(e) => Err(e.to_string()),

@@ -5,8 +5,9 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
+import { ToolCall } from '../types/ai';
 import './AISidebar.css';
 
 interface AISidebarProps {
@@ -71,6 +72,106 @@ const CodeBlock = ({ children, className }: { children: React.ReactNode, classNa
   );
 };
 
+const ToolConfirmation = ({ 
+  toolCalls, 
+  onConfirm, 
+  onCancel 
+}: { 
+  toolCalls: ToolCall[], 
+  onConfirm: () => void, 
+  onCancel: () => void 
+}) => {
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [isSensitive, setIsSensitive] = useState(false);
+  
+  useEffect(() => {
+    const sensitiveRegex = /\b(rm|mv|dd|wget|curl|chmod|chown|reboot|shutdown|init|systemctl|service|kill|pkill)\b|[>|]/;
+    let sensitive = false;
+
+    toolCalls.forEach(call => {
+      if (call.function.name === 'run_in_terminal') {
+        try {
+          const args = JSON.parse(call.function.arguments);
+          if (args.command && sensitiveRegex.test(args.command)) {
+            sensitive = true;
+          }
+        } catch (e) {
+          sensitive = true;
+        }
+      }
+    });
+
+    setIsSensitive(sensitive);
+    
+    // Auto-execute if NOT sensitive
+    if (!sensitive) {
+      setCountdown(5);
+    }
+  }, [toolCalls]);
+
+  useEffect(() => {
+    if (countdown === null) return;
+    
+    if (countdown <= 0) {
+      console.log('[AI] Auto-executing tool calls...');
+      // Ensure we only call onConfirm once
+      onConfirm();
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setCountdown(c => {
+        if (c === null) return null;
+        if (c <= 1) return 0;
+        return c - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, [countdown]); // Removed onConfirm dependency
+
+  return (
+    <div className={`ai-tool-confirm ${isSensitive ? 'sensitive' : ''}`}>
+      <div className="ai-tool-header">
+        {isSensitive ? (
+          <><AlertTriangle size={16} className="text-red-500" /> Confirm Execution</>
+        ) : (
+          <><Clock size={16} /> Auto-execute in {countdown}s</>
+        )}
+      </div>
+      <div className="ai-tool-list">
+        {toolCalls.map(call => {
+          let displayArgs = call.function.arguments;
+          if (call.function.name === 'run_in_terminal') {
+             try {
+               const args = JSON.parse(call.function.arguments);
+               displayArgs = args.command || displayArgs;
+             } catch {}
+          }
+          return (
+            <div key={call.id} className="ai-tool-item">
+              <span className="font-mono text-xs opacity-70">
+                {call.function.name === 'run_in_terminal' ? 'Execute Command' : call.function.name}
+              </span>
+              <code className="block mt-1 text-sm bg-black/20 p-1 rounded">{displayArgs}</code>
+            </div>
+          );
+        })}
+      </div>
+      <div className="ai-tool-actions">
+        <button type="button" className="ai-btn-secondary" onClick={onCancel}>Cancel</button>
+        <button 
+          type="button"
+          className={`ai-btn-primary ${isSensitive ? 'bg-red-600 hover:bg-red-700' : ''}`} 
+          onClick={onConfirm}
+        >
+          {isSensitive ? 'Confirm Run' : `Run Now (${countdown}s)`}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 export const AISidebar: React.FC<AISidebarProps> = ({
   isOpen,
   onClose,
@@ -100,6 +201,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [mode, setMode] = useState<'ask' | 'agent'>('ask');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
+  const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[] | null>(null);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -135,7 +237,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages.length, isLoading]);
+  }, [currentMessages.length, isLoading, pendingToolCalls]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -147,12 +249,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [inputValue]);
 
-  // Listen for streaming responses
+  // Listen for streaming responses & tool calls
   useEffect(() => {
     if (!activeSessionId) return;
 
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
       console.log('[AI] Request started');
+      setPendingToolCalls(null);
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
@@ -161,9 +264,48 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       appendResponse(activeSessionId, event.payload);
     });
 
+    const toolCallListener = listen<ToolCall[]>(`ai-tool-call-${activeSessionId}`, (event) => {
+      console.log('[AI] Tool calls received:', event.payload);
+      const calls = event.payload;
+
+      // Filter: if ALL calls are get_terminal_text, auto-execute immediately WITHOUT UI
+      const isAllSafe = calls.every(c => c.function.name === 'get_terminal_text');
+
+      if (isAllSafe) {
+        console.log('[AI] All tool calls are safe (get_terminal_text). Auto-executing immediately.');
+        
+        // Ensure we are using valid IDs
+        const model = config?.aiModels.find(m => m.id === selectedModelId);
+        if (!model) {
+             console.error('Model not found for auto-execution');
+             setLoading(false);
+             return;
+        }
+        const channelId = model.channelId || '';
+
+        aiService.executeAgentTools(
+          activeSessionId,
+          selectedModelId,
+          channelId,
+          currentTabId,
+          calls.map(c => c.id)
+        ).catch(err => console.error('Failed to auto-execute safe tools:', err));
+        
+        // Do NOT set pendingToolCalls
+        setLoading(true); 
+      } else {
+        // Here we have run_in_terminal calls. 
+        // We set pendingToolCalls to show the UI.
+        // The UI (ToolConfirmation) handles the countdown for non-sensitive commands.
+        setLoading(false);
+        setPendingToolCalls(calls);
+      }
+    });
+
     const errorListener = listen<string>(`ai-error-${activeSessionId}`, (event) => {
       console.error('[AI] Error received:', event.payload);
       setLoading(false);
+      setPendingToolCalls(null);
       // TODO: Show error in UI
     });
 
@@ -175,10 +317,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     return () => {
       startedListener.then(unlisten => unlisten());
       responseListener.then(unlisten => unlisten());
+      toolCallListener.then(unlisten => unlisten());
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, setLoading]);
+  }, [activeSessionId, appendResponse, setLoading, config, selectedModelId, currentTabId]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -275,6 +418,39 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.error('[AI] Failed to send message:', err);
       setLoading(false);
     }
+  };
+
+  const handleConfirmTools = async () => {
+    if (!activeSessionId || !pendingToolCalls) return;
+
+    console.log('[AI] Confirming tool execution for session:', activeSessionId);
+    setLoading(true);
+    const callsToExecute = pendingToolCalls.map(c => c.id);
+    setPendingToolCalls(null); // Hide confirmation
+
+    try {
+      const model = config?.aiModels.find(m => m.id === selectedModelId);
+      const channelId = model?.channelId || '';
+
+      console.log('[AI] Invoking execute_agent_tools...');
+      await aiService.executeAgentTools(
+        activeSessionId,
+        selectedModelId,
+        channelId,
+        currentTabId,
+        callsToExecute
+      );
+      console.log('[AI] Tool execution command sent successfully');
+    } catch (err) {
+      console.error('Failed to execute tools:', err);
+      setLoading(false);
+    }
+  };
+
+  const handleCancelTools = () => {
+    setPendingToolCalls(null);
+    setLoading(false);
+    // Optionally insert a "Cancelled" system message
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -408,31 +584,51 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             {currentMessages.map((msg, idx) => (
               <div key={idx} className={`ai-message ${msg.role}`}>
                 <div className="ai-message-content">
-                  <ReactMarkdown 
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      pre({children}) {
-                        return <>{children}</>;
-                      },
-                      code({node, inline, className, children, ...props}: any) {
-                        return !inline ? (
-                          <CodeBlock className={className}>
-                            {children}
-                          </CodeBlock>
-                        ) : (
-                          <code className={className} {...props}>
-                            {children}
-                          </code>
-                        )
-                      }
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
+                  {msg.tool_calls ? (
+                      <div className="text-xs opacity-70 mb-1">
+                          Using tools: {msg.tool_calls.map(tc => tc.function.name).join(', ')}
+                      </div>
+                  ) : null}
+                  {msg.content && (
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        pre({children}) {
+                          return <>{children}</>;
+                        },
+                        code({node, inline, className, children, ...props}: any) {
+                          return !inline ? (
+                            <CodeBlock className={className}>
+                              {children}
+                            </CodeBlock>
+                          ) : (
+                            <code className={className} {...props}>
+                              {children}
+                            </code>
+                          )
+                        }
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  )}
                 </div>
               </div>
             ))}
-            {isLoading && (
+            
+            {pendingToolCalls && (
+              <div className="ai-message assistant">
+                <div className="ai-message-content p-0 overflow-hidden">
+                  <ToolConfirmation 
+                    toolCalls={pendingToolCalls} 
+                    onConfirm={handleConfirmTools} 
+                    onCancel={handleCancelTools} 
+                  />
+                </div>
+              </div>
+            )}
+
+            {isLoading && !pendingToolCalls && (
               <div className="ai-message assistant">
                 <div className="ai-message-content">
                   <div className="ai-typing-indicator">
@@ -452,7 +648,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 className="ai-select"
                 value={mode}
                 onChange={(e) => setMode(e.target.value as 'ask' | 'agent')}
-                disabled={isLoading}
+                disabled={isLoading || !!pendingToolCalls}
               >
                 <option value="ask">Ask</option>
                 <option value="agent">Agent</option>
@@ -461,7 +657,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 className="ai-select"
                 value={selectedModelId}
                 onChange={(e) => setSelectedModelId(e.target.value)}
-                disabled={isLoading}
+                disabled={isLoading || !!pendingToolCalls}
               >
                 {(config?.aiModels || []).map(model => {
                    const channel = config?.aiChannels?.find(c => c.id === model.channelId);
@@ -478,14 +674,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading}
+                disabled={isLoading || !!pendingToolCalls}
                 rows={1}
               />
               <button 
                 type="button"
                 className="ai-send-btn"
                 onClick={handleSendMessage}
-                disabled={!inputValue.trim() || isLoading || !selectedModelId}
+                disabled={!inputValue.trim() || isLoading || !selectedModelId || !!pendingToolCalls}
               >
                 <Send size={14} />
               </button>

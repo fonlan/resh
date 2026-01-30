@@ -22,6 +22,7 @@ interface TerminalTabProps {
   proxies: ProxyConfig[];
   terminalSettings?: TerminalSettings;
   theme?: 'light' | 'dark' | 'system';
+  onSessionChange?: (sessionId: string | null) => void;
 }
 
 export const TerminalTab = React.memo<TerminalTabProps>(({
@@ -34,6 +35,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   proxies,
   terminalSettings,
   theme,
+  onSessionChange,
 }) => {
   const { t } = useTranslation();
   const { config } = useConfig(); // Use config
@@ -186,6 +188,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         const sid = response.session_id;
         sessionIdRef.current = sid;
         setSessionId(sid);
+        onSessionChange?.(sid);
         setShowManualAuth(false);
         setIsConnected(true);
         const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
@@ -221,9 +224,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       const currentSid = sessionIdRef.current;
       if (currentSid) {
         invoke('close_session', { session_id: currentSid }).catch(err => console.error(`Failed to close session ${currentSid}:`, err));
+        onSessionChange?.(null);
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, connectTrigger, manualCredentials]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, connectTrigger, manualCredentials, onSessionChange]);
 
   // Terminal focus effect
   useEffect(() => {

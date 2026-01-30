@@ -27,4 +27,19 @@ export const aiService = {
       mode,
       sshSessionId
     }),
+
+  executeAgentTools: (
+    sessionId: string,
+    modelId: string,
+    channelId: string,
+    sshSessionId: string | undefined,
+    toolCallIds: string[]
+  ) =>
+    invoke('execute_agent_tools', {
+      sessionId,
+      modelId,
+      channelId,
+      sshSessionId,
+      toolCallIds
+    }),
 };

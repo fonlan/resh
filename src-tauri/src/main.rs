@@ -139,6 +139,7 @@ async fn main() {
             commands::ai::send_chat_message,
             commands::ai::get_terminal_text,
             commands::ai::run_in_terminal,
+            commands::ai::execute_agent_tools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

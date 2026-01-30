@@ -37,6 +37,7 @@ export const MainWindow: React.FC = () => {
   const [isAILocked, setIsAILocked] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
+  const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId
 
   const {
     draggedIndex: draggedTabIndex,
@@ -69,6 +70,11 @@ export const MainWindow: React.FC = () => {
     if (activeTabId === tabId) {
       setActiveTabId(newTabs.length > 0 ? newTabs[0].id : null);
     }
+    setTabSessions(prev => {
+      const next = { ...prev };
+      delete next[tabId];
+      return next;
+    });
   }, [tabs, activeTabId]);
 
   const handleAddTab = useCallback(async (serverId: string) => {
@@ -344,6 +350,12 @@ export const MainWindow: React.FC = () => {
                   proxies={config?.proxies || []}
                   terminalSettings={config?.general.terminal}
                   theme={config?.general.theme}
+                  onSessionChange={(sessionId) => {
+                    setTabSessions(prev => ({
+                      ...prev,
+                      [tab.id]: sessionId || ''
+                    }));
+                  }}
                 />
               </div>
             );
@@ -356,7 +368,7 @@ export const MainWindow: React.FC = () => {
           isLocked={isAILocked}
           onToggleLock={() => setIsAILocked(!isAILocked)}
           currentServerId={tabs.find(t => t.id === activeTabId)?.serverId}
-          currentTabId={activeTabId || undefined}
+          currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
         />
         <SnippetsSidebar  
           isOpen={isSnippetsOpen} 

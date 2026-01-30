@@ -1,5 +1,5 @@
 use crate::commands::AppState;
-use crate::ai::client::{stream_openai_chat, ChatMessage, create_agent_tools};
+use crate::ai::client::{stream_openai_chat, ChatMessage, create_agent_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
 use crate::ai::prompts::SYSTEM_PROMPT;
 use crate::ssh_manager::ssh::SSHClient;
 use tauri::{State, Window, Emitter};
@@ -7,6 +7,254 @@ use std::sync::Arc;
 use uuid::Uuid;
 use rusqlite::params;
 use futures::StreamExt;
+use std::collections::HashMap;
+
+// --- Helper Functions ---
+
+async fn load_history(state: &Arc<AppState>, session_id: &str) -> Result<Vec<ChatMessage>, String> {
+    let conn = state.db_manager.get_connection();
+    let conn = conn.lock().unwrap();
+    let mut stmt = conn.prepare(
+        "SELECT role, content, tool_calls, tool_call_id FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC"
+    ).map_err(|e| e.to_string())?;
+    
+    let rows = stmt.query_map(params![session_id], |row| {
+         let role: String = row.get(0)?;
+         let content_raw: String = row.get(1)?;
+         let tool_calls_json: Option<String> = row.get(2).ok();
+         let tool_call_id: Option<String> = row.get(3).ok();
+         
+         let content = if content_raw.is_empty() { None } else { Some(content_raw) };
+
+         let tool_calls = if let Some(json) = tool_calls_json {
+             serde_json::from_str(&json).unwrap_or(None)
+         } else {
+             None
+         };
+
+        Ok(ChatMessage {
+            role,
+            content,
+            tool_calls,
+            tool_call_id, 
+        })
+    }).map_err(|e| e.to_string())?;
+
+    let mut msgs = Vec::new();
+    msgs.push(ChatMessage {
+        role: "system".to_string(),
+        content: Some(SYSTEM_PROMPT.to_string()),
+        tool_calls: None,
+        tool_call_id: None,
+    });
+
+    for row in rows {
+        msgs.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(msgs)
+}
+
+struct ToolCallAccumulator {
+    calls: HashMap<u64, (Option<String>, Option<String>, String, String)>, // index -> (id, type, name, args)
+}
+
+impl ToolCallAccumulator {
+    fn new() -> Self {
+        Self { calls: HashMap::new() }
+    }
+
+    fn update(&mut self, json: &serde_json::Value) {
+        if let Some(arr) = json.as_array() {
+            for call in arr {
+                if let Some(index) = call["index"].as_u64() {
+                    let entry = self.calls.entry(index).or_insert((None, None, String::new(), String::new()));
+                    
+                    if let Some(id) = call["id"].as_str() {
+                        entry.0 = Some(id.to_string());
+                    }
+                    if let Some(t) = call["type"].as_str() {
+                        entry.1 = Some(t.to_string());
+                    }
+                    if let Some(f) = call.get("function") {
+                        if let Some(n) = f["name"].as_str() {
+                            entry.2.push_str(n);
+                        }
+                        if let Some(a) = f["arguments"].as_str() {
+                            entry.3.push_str(a);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn to_vec(&self) -> Vec<ToolCall> {
+        let mut result = Vec::new();
+        let mut indices: Vec<_> = self.calls.keys().collect();
+        indices.sort();
+        
+        for index in indices {
+            if let Some((Some(id), Some(t), name, args)) = self.calls.get(index) {
+                result.push(ToolCall {
+                    id: id.clone(),
+                    tool_type: t.clone(),
+                    function: FunctionCall {
+                        name: name.clone(),
+                        arguments: args.clone(),
+                    },
+                });
+            }
+        }
+        result
+    }
+}
+
+async fn execute_tools_and_save(
+    state: &Arc<AppState>, 
+    session_id: &str, 
+    ssh_session_id: Option<&str>,
+    tools: Vec<ToolCall>
+) -> Result<(), String> {
+    for call in tools {
+        tracing::info!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
+        
+        let result = match call.function.name.as_str() {
+            "get_terminal_text" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    match SSHClient::get_terminal_text(ssh_id).await { 
+                        Ok(text) => {
+                            String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
+                        },
+                        Err(e) => format!("Error: {}", e)
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            },
+            "run_in_terminal" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                        if let Some(cmd) = args["command"].as_str() {
+                            let cmd_nl = format!("{}\n", cmd);
+                            match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                                Ok(_) => "Command sent.".to_string(),
+                                Err(e) => format!("Error sending command: {}", e)
+                            }
+                        } else {
+                            "Error: Missing 'command' argument".to_string()
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            },
+            _ => format!("Error: Unknown tool {}", call.function.name)
+        };
+
+        // Save Tool Output
+        let tool_msg_id = Uuid::new_v4().to_string();
+        {
+            let conn = state.db_manager.get_connection();
+            let conn = conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![tool_msg_id, session_id, "tool", result, call.id],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+async fn run_ai_turn(
+    window: &Window,
+    state: &Arc<AppState>,
+    session_id: String,
+    model_id: String,
+    channel_id: String,
+    tools: Option<Vec<ToolDefinition>>,
+) -> Result<Option<Vec<ToolCall>>, String> {
+    
+    // 1. Get Config
+    let (endpoint, api_key, model_name) = {
+        let config = state.config.lock().await;
+        let model = config.ai_models.iter().find(|m| m.id == model_id)
+            .ok_or_else(|| "Model not found".to_string())?;
+        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+            .ok_or_else(|| "Channel not found".to_string())?;
+        
+        (
+            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel.api_key.clone().unwrap_or_default(),
+            model.name.clone(),
+        )
+    };
+    
+    if api_key.is_empty() {
+        return Err("API key is not configured".to_string());
+    }
+
+    // 2. Load History
+    let history = load_history(state, &session_id).await?;
+
+    // 3. Stream
+    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, history, tools).await?;
+    
+    let mut full_content = String::new();
+    let mut tool_accumulator = ToolCallAccumulator::new();
+    let mut has_tool_calls = false;
+
+    while let Some(event_result) = stream.next().await {
+        match event_result {
+            Ok(StreamEvent::Content(chunk)) => {
+                if !chunk.is_empty() {
+                    full_content.push_str(&chunk);
+                    window.emit(&format!("ai-response-{}", session_id), chunk).map_err(|e| e.to_string())?;
+                }
+            },
+            Ok(StreamEvent::ToolCall(json)) => {
+                has_tool_calls = true;
+                tool_accumulator.update(&json);
+            },
+            Ok(StreamEvent::Done) => {},
+            Err(e) => {
+                window.emit(&format!("ai-error-{}", session_id), e.clone()).map_err(|e| e.to_string())?;
+                return Err(e);
+            }
+        }
+    }
+
+    let final_tool_calls = if has_tool_calls {
+        Some(tool_accumulator.to_vec())
+    } else {
+        None
+    };
+
+    // Save Assistant Message
+    let ai_msg_id = Uuid::new_v4().to_string();
+    {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        let tool_calls_json = if let Some(calls) = &final_tool_calls {
+            Some(serde_json::to_string(calls).unwrap())
+        } else {
+            None
+        };
+
+        // Only insert if we have content or tool calls
+        if !full_content.is_empty() || final_tool_calls.is_some() {
+                conn.execute(
+                "INSERT INTO ai_messages (id, session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![ai_msg_id, session_id, "assistant", full_content, tool_calls_json],
+            ).map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(final_tool_calls)
+}
+
+// --- Commands ---
 
 #[tauri::command]
 pub async fn create_ai_session(
@@ -60,26 +308,10 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
-    
-    let mut stmt = conn.prepare(
-        "SELECT role, content FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC"
-    ).map_err(|e| e.to_string())?;
-    
-    let rows = stmt.query_map(params![session_id], |row| {
-        Ok(ChatMessage {
-            role: row.get(0)?,
-            content: row.get(1)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut messages = Vec::new();
-    for row in rows {
-        messages.push(row.map_err(|e| e.to_string())?);
-    }
-    
-    Ok(messages)
+    load_history(&state, &session_id).await.map(|msgs| {
+        // Filter out system prompt for frontend
+        msgs.into_iter().filter(|m| m.role != "system").collect()
+    })
 }
 
 #[tauri::command]
@@ -91,48 +323,14 @@ pub async fn send_chat_message(
     model_id: String,
     channel_id: String,
     mode: Option<String>, // "ask" or "agent"
-    _ssh_session_id: Option<String>, // For agent mode tool access (not yet used)
+    _ssh_session_id: Option<String>,
 ) -> Result<(), String> {
-    tracing::info!("[AI] send_chat_message called: session_id={}, model_id={}, channel_id={}, mode={:?}", 
-        session_id, model_id, channel_id, mode);
+    tracing::info!("[AI] send_chat_message called: session_id={}, model_id={}, mode={:?}", 
+        session_id, model_id, mode);
     
-    // Send immediate acknowledgment
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
     
-    // 1. Get Channel Config and Model Name
-    let (endpoint, api_key, model_name) = {
-        let config = state.config.lock().await;
-        
-        // Find the model to get its name
-        let model = config.ai_models.iter().find(|m| m.id == model_id)
-            .ok_or_else(|| {
-                tracing::error!("[AI] Model not found: {}", model_id);
-                "Model not found".to_string()
-            })?;
-        
-        // Find the channel
-        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
-            .ok_or_else(|| {
-                tracing::error!("[AI] Channel not found: {}", channel_id);
-                "Channel not found".to_string()
-            })?;
-        
-        (
-            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
-            channel.api_key.clone().unwrap_or_default(),
-            model.name.clone(),
-        )
-    };
-    
-    if api_key.is_empty() {
-        tracing::error!("[AI] API key is empty for channel: {}", channel_id);
-        return Err("API key is not configured".to_string());
-    }
-    
-    tracing::info!("[AI] Using endpoint: {}, model: {}, API key length: {}", 
-        endpoint, model_name, api_key.len());
-
-    // 2. Save User Message to DB
+    // 1. Save User Message
     let user_msg_id = Uuid::new_v4().to_string();
     {
         let conn = state.db_manager.get_connection();
@@ -143,81 +341,78 @@ pub async fn send_chat_message(
         ).map_err(|e| e.to_string())?;
     }
 
-    // 3. Load History
-    let history = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT role, content FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC"
-        ).map_err(|e| e.to_string())?;
-        
-        let rows = stmt.query_map(params![session_id], |row| {
-            Ok(ChatMessage {
-                role: row.get(0)?,
-                content: row.get(1)?,
-            })
-        }).map_err(|e| e.to_string())?;
-
-        let mut history = Vec::new();
-        
-        // Add System Prompt first
-        history.push(ChatMessage {
-            role: "system".to_string(),
-            content: SYSTEM_PROMPT.to_string(),
-        });
-
-        for row in rows {
-            history.push(row.map_err(|e| e.to_string())?);
-        }
-        history
-    };
-
-    // Determine if we should use tools (agent mode)
     let is_agent_mode = mode.as_deref() == Some("agent");
-    let tools = if is_agent_mode {
-        Some(create_agent_tools())
-    } else {
-        None
-    };
+    let tools = if is_agent_mode { Some(create_agent_tools()) } else { None };
 
-    tracing::info!("[AI] Calling OpenAI API with {} messages, agent_mode={}", history.len(), is_agent_mode);
-    
-    // 4. Stream Response - Use model_name instead of model_id
-    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, history, tools).await?;
-    
-    let ai_msg_id = Uuid::new_v4().to_string();
-    let mut full_response = String::new();
+    let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
 
-    while let Some(chunk_result) = stream.next().await {
-        match chunk_result {
-            Ok(chunk) => {
-                if !chunk.is_empty() {
-                    full_response.push_str(&chunk);
-                    window.emit(&format!("ai-response-{}", session_id), chunk).map_err(|e| e.to_string())?;
-                }
-            }
-            Err(e) => {
-                window.emit(&format!("ai-error-{}", session_id), e.clone()).map_err(|e| e.to_string())?;
-                // Don't error out, just log partial?
-                // For now return err
-                return Err(e);
-            }
+    if let Some(calls) = tool_calls {
+        if !calls.is_empty() {
+             // Emit event for confirmation instead of auto-executing
+             let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
+             // We return Ok here, leaving the frontend to handle the confirmation loop
+             return Ok(());
         }
     }
-    
-    // Send DONE signal
-    window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
 
-    // 5. Save Assistant Message
-    {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-            params![ai_msg_id, session_id, "assistant", full_response],
-        ).map_err(|e| e.to_string())?;
+    window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn execute_agent_tools(
+    window: Window,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    model_id: String,
+    channel_id: String,
+    ssh_session_id: Option<String>,
+    tool_call_ids: Vec<String>, // List of tool call IDs to confirm execution for
+) -> Result<(), String> {
+    tracing::info!("[AI] execute_agent_tools called for session {}", session_id);
+
+    // 1. Load the last assistant message to find the tool calls
+    // Note: We need to trust the frontend provided IDs OR just fetch the last message and verify.
+    // Simpler: Fetch history, find the last message. If it has tool_calls, execute them.
+    
+    let history = load_history(&state, &session_id).await?;
+    let last_msg = history.last().ok_or("No history found")?;
+    
+    if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
+        tracing::error!("[AI] Last message was not a tool call: {:?}", last_msg);
+        return Err("Last message was not an assistant tool call".to_string());
     }
 
+    let tools_to_run = last_msg.tool_calls.as_ref().unwrap().clone();
+    
+    // Filter? For now run all present in the message, assuming the frontend sent the command implies all approved.
+    // Or we could verify `tool_call_ids` match.
+    let tools_filtered: Vec<ToolCall> = tools_to_run.into_iter().filter(|t| tool_call_ids.contains(&t.id)).collect();
+
+    if tools_filtered.is_empty() {
+        tracing::warn!("[AI] No matching tools found to execute.");
+        window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    tracing::info!("[AI] Executing {} tools...", tools_filtered.len());
+    execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered).await?;
+    tracing::info!("[AI] Tool execution complete. Running next AI turn...");
+
+    // Continue the loop (1 turn)
+    let tools = Some(create_agent_tools());
+    let next_tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
+
+    if let Some(calls) = next_tool_calls {
+        if !calls.is_empty() {
+             tracing::info!("[AI] Next turn generated {} more tool calls", calls.len());
+             let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
+             return Ok(());
+        }
+    }
+
+    tracing::info!("[AI] Agent turn complete.");
+    window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -227,10 +422,7 @@ pub async fn get_terminal_text(
     session_id: String,
 ) -> Result<String, String> {
     let text = SSHClient::get_terminal_text(&session_id).await?;
-    
-    // Strip ANSI codes for cleaner text
     let clean_text = String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string();
-    
     Ok(clean_text)
 }
 
@@ -240,9 +432,7 @@ pub async fn run_in_terminal(
     session_id: String,
     command: String,
 ) -> Result<String, String> {
-    // Add newline to execute the command
     let command_with_newline = format!("{}\n", command);
     SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await?;
-    
     Ok(format!("Command sent: {}", command))
 }
