@@ -13,6 +13,7 @@ interface AIState {
   selectSession: (sessionId: string | null) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   appendResponse: (sessionId: string, content: string) => void;
+  setLoading: (loading: boolean) => void;
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -20,6 +21,8 @@ export const useAIStore = create<AIState>((set, get) => ({
   activeSessionId: null,
   messages: {},
   isLoading: false,
+
+  setLoading: (loading) => set({ isLoading: loading }),
 
   loadSessions: async (serverId) => {
     set({ isLoading: true });

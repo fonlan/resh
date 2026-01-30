@@ -90,7 +90,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     createSession,
     selectSession,
     addMessage,
-    appendResponse
+    appendResponse,
+    setLoading
   } = useAIStore();
 
   const [width, setWidth] = useState(350);
@@ -116,11 +117,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (currentServerId && isOpen) {
       loadSessions(currentServerId);
     }
-    // Clear active session when switching servers
-    if (currentServerId && activeSessionId) {
+  }, [currentServerId, isOpen, loadSessions]);
+
+  // Clear active session when switching servers
+  useEffect(() => {
+    // console.log('[AISidebar] Server context changed to:', currentServerId);
+    if (currentServerId || currentServerId === undefined) {
       selectSession(null);
     }
-  }, [currentServerId, isOpen, loadSessions]);
+  }, [currentServerId, selectSession]);
 
   // Scroll to bottom on new messages
   const currentMessages = useMemo(() => 
@@ -152,16 +157,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
       console.log('[AI] Response chunk received:', event.payload.length, 'chars');
+      setLoading(false);
       appendResponse(activeSessionId, event.payload);
     });
 
     const errorListener = listen<string>(`ai-error-${activeSessionId}`, (event) => {
       console.error('[AI] Error received:', event.payload);
+      setLoading(false);
       // TODO: Show error in UI
     });
 
     const doneListener = listen<string>(`ai-done-${activeSessionId}`, () => {
       console.log('[AI] Response complete');
+      setLoading(false);
     });
 
     return () => {
@@ -170,7 +178,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse]);
+  }, [activeSessionId, appendResponse, setLoading]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -238,6 +246,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     // Optimistic update
     addMessage(sessionId, { role: 'user', content });
+    setLoading(true);
 
     try {
       const model = config?.aiModels.find(m => m.id === selectedModelId);
@@ -264,6 +273,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.log('[AI] Message sent successfully');
     } catch (err) {
       console.error('[AI] Failed to send message:', err);
+      setLoading(false);
     }
   };
 
@@ -425,7 +435,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             {isLoading && (
               <div className="ai-message assistant">
                 <div className="ai-message-content">
-                  <span className="animate-pulse">...</span>
+                  <div className="ai-typing-indicator">
+                    <div className="ai-typing-dot"></div>
+                    <div className="ai-typing-dot"></div>
+                    <div className="ai-typing-dot"></div>
+                  </div>
                 </div>
               </div>
             )}
