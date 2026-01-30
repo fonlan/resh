@@ -150,7 +150,46 @@ export const useTerminal = (
       webglAddonRef.current = null;
       setIsReady(false);
     };
-  }, [containerId, settings, theme]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [containerId]);
+
+  // Update terminal settings dynamically
+  useEffect(() => {
+    const term = terminalRef.current;
+    if (!term) return;
+
+    if (settings) {
+      term.options.fontSize = settings.fontSize || 14;
+      term.options.fontFamily = settings.fontFamily || 'Consolas, monospace';
+      term.options.cursorStyle = (settings.cursorStyle as 'block' | 'underline' | 'bar') || 'block';
+      term.options.scrollback = settings.scrollback || 5000;
+    }
+
+    // Determine actual theme
+    let actualTheme: 'light' | 'dark' = 'dark';
+    if (theme === 'system') {
+      actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } else if (theme === 'light') {
+      actualTheme = 'light';
+    }
+
+    term.options.theme = actualTheme === 'light' ? {
+        background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
+    } : {
+        background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
+    };
+
+    // Re-fit after settings change (e.g. font size)
+    // Small timeout to ensure DOM update if necessary
+    setTimeout(() => {
+        fitAddonRef.current?.fit();
+        // Also notify backend about resize if needed
+        if (term.element && onResizeRef.current) {
+             onResizeRef.current(term.cols, term.rows);
+        }
+    }, 10);
+    
+  }, [settings, theme]);
 
   const write = useCallback((data: string) => {
     terminalRef.current?.write(data);
