@@ -90,6 +90,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, [theme]);
 
   const [showManualAuth, setShowManualAuth] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
   const [manualCredentials, setManualCredentials] = useState<ManualAuthCredentials>({ 
     username: server.username, 
     password: '', 
@@ -114,6 +115,11 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     serversRef.current = servers;
     proxiesRef.current = proxies;
   }, [authentications, servers, proxies]);
+
+  // Reset cancellation when server config changes
+  useEffect(() => {
+    setIsCancelled(false);
+  }, [serverId, server.host, server.port, server.username, server.authId]);
 
   // Connection effect
   useEffect(() => {
@@ -237,7 +243,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
     if (connectTrigger > 0) {
       connect(manualCredentials.password || manualCredentials.privateKey ? manualCredentials : undefined);
-    } else if (!showManualAuth) {
+    } else if (!showManualAuth && !isCancelled) {
       connect();
     }
 
@@ -250,7 +256,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         onSessionChange?.(null);
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, connectTrigger, manualCredentials, onSessionChange]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, isCancelled, connectTrigger, manualCredentials, onSessionChange]);
 
   // Terminal focus effect
   useEffect(() => {
@@ -374,10 +380,15 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
             credentials={manualCredentials}
             onCredentialsChange={setManualCredentials}
             onConnect={() => {
+              setIsCancelled(false);
               connectedRef.current = false;
               setConnectTrigger(prev => prev + 1);
             }}
-            onCancel={() => setShowManualAuth(false)}
+            onCancel={() => {
+              setIsCancelled(true);
+              setShowManualAuth(false);
+              setStatusText(t.terminalTab.connectionClosed);
+            }}
           />
         )}
       </div>

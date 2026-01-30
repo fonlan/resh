@@ -29,9 +29,10 @@ export const aiService = {
     }),
 
   executeAgentTools: (
-    sessionId: string,
-    modelId: string,
-    channelId: string,
+    sessionId: String,
+    modelId: String,
+    channelId: String,
+    mode: string | undefined,
     sshSessionId: string | undefined,
     toolCallIds: string[]
   ) =>
@@ -39,9 +40,11 @@ export const aiService = {
       sessionId,
       modelId,
       channelId,
+      mode,
       sshSessionId,
       toolCallIds
     }),
+
 
   generateTitle: (
     sessionId: string,

@@ -87,6 +87,7 @@ export interface GeneralSettings {
   maxRecentServers: number;
   recentServerIds: string[];
   recordingMode: 'raw' | 'text';
+  aiModelId?: string;
 }
 
 export interface AIChannel {

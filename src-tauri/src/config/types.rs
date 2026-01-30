@@ -192,6 +192,9 @@ pub struct GeneralSettings {
     #[serde(default = "default_recording_mode")]
     #[serde(alias = "recordingMode", alias = "recording_mode")]
     pub recording_mode: String,
+    #[serde(default)]
+    #[serde(alias = "aiModelId", alias = "ai_model_id")]
+    pub ai_model_id: Option<String>,
 }
 
 fn default_recording_mode() -> String {
@@ -294,6 +297,7 @@ impl Config {
                 recent_server_ids: vec![],
                 window_state: default_window_state(),
                 recording_mode: default_recording_mode(),
+                ai_model_id: None,
             },
         }
     }

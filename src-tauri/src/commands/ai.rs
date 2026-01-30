@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 // --- Helper Functions ---
 
-async fn load_history(state: &Arc<AppState>, session_id: &str) -> Result<Vec<ChatMessage>, String> {
+async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bool) -> Result<Vec<ChatMessage>, String> {
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
     let mut stmt = conn.prepare(
@@ -42,9 +42,19 @@ async fn load_history(state: &Arc<AppState>, session_id: &str) -> Result<Vec<Cha
     }).map_err(|e| e.to_string())?;
 
     let mut msgs = Vec::new();
+    
+    // Customize system prompt based on mode
+    let mode_desc = if is_agent_mode {
+        "You are currently in AGENT mode. You can read terminal output AND execute commands to solve problems."
+    } else {
+        "You are currently in ASK mode. You can read terminal output to analyze issues, but you CANNOT execute commands directly. Suggest commands to the user instead."
+    };
+
+    let full_system_prompt = format!("{}\n\n{}", SYSTEM_PROMPT, mode_desc);
+
     msgs.push(ChatMessage {
         role: "system".to_string(),
-        content: Some(SYSTEM_PROMPT.to_string()),
+        content: Some(full_system_prompt),
         tool_calls: None,
         tool_call_id: None,
     });
@@ -174,6 +184,7 @@ async fn run_ai_turn(
     session_id: String,
     model_id: String,
     channel_id: String,
+    is_agent_mode: bool,
     tools: Option<Vec<ToolDefinition>>,
 ) -> Result<Option<Vec<ToolCall>>, String> {
     
@@ -209,8 +220,8 @@ async fn run_ai_turn(
         return Err("API key is not configured".to_string());
     }
 
-    // 2. Load History
-    let history = load_history(state, &session_id).await?;
+    // 2. Load History with mode awareness
+    let history = load_history(state, &session_id, is_agent_mode).await?;
 
     // 3. Prepare headers and token if Copilot
     let mut final_api_key = api_key;
@@ -225,18 +236,6 @@ async fn run_ai_turn(
         copilot_token_data = token_resp.token; // Copilot Session Token (tid_...)
         final_api_key = copilot_token_data.clone();
         
-        // Copilot specific endpoint (if not overridden by user, but user shouldn't override usually)
-        // But the token response might contain endpoints.
-        // Usually Copilot uses https://api.githubcopilot.com/chat/completions
-        // If the user didn't set an endpoint, use the default one.
-        // Actually, let's trust what the user put in config or default hardcoded in frontend?
-        // Wait, for Copilot, we should probably ignore the user-configured endpoint if it's generic, 
-        // or use the one returned by `get_copilot_token` if available.
-        // The `CopilotTokenResponse` has `endpoints`.
-        
-        // For now, let's stick to the one configured in the channel (which we should set to the correct URL in frontend).
-        // OR better: hardcode it here if provider is copilot.
-        // Copilot production endpoint: https://api.githubcopilot.com
         final_endpoint = "https://api.githubcopilot.com".to_string(); 
 
         let mut headers = HashMap::new();
@@ -479,7 +478,7 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    load_history(&state, &session_id).await.map(|msgs| {
+    load_history(&state, &session_id, false).await.map(|msgs| {
         // Filter out system and tool messages for frontend to keep UI clean
         msgs.into_iter().filter(|m| m.role != "system" && m.role != "tool").collect()
     })
@@ -518,7 +517,7 @@ pub async fn send_chat_message(
     // Both agent and ask mode now support tools
     let tools = if is_agent_mode || is_ask_mode { Some(create_tools(is_agent_mode)) } else { None };
 
-    let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
+    let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools).await?;
 
     if let Some(calls) = tool_calls {
         if !calls.is_empty() {
@@ -540,18 +539,17 @@ pub async fn execute_agent_tools(
     session_id: String,
     model_id: String,
     channel_id: String,
+    mode: Option<String>,
     ssh_session_id: Option<String>,
     tool_call_ids: Vec<String>, // List of tool call IDs to confirm execution for
 ) -> Result<(), String> {
-    tracing::debug!("[AI] execute_agent_tools called for session {}", session_id);
+    tracing::debug!("[AI] execute_agent_tools called for session {} (mode: {:?})", session_id, mode);
 
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
     // 1. Load the last assistant message to find the tool calls
-    // Note: We need to trust the frontend provided IDs OR just fetch the last message and verify.
-    // Simpler: Fetch history, find the last message. If it has tool_calls, execute them.
-    
-    let history = load_history(&state, &session_id).await?;
+    let is_agent_mode = mode.as_deref() == Some("agent");
+    let history = load_history(&state, &session_id, is_agent_mode).await?;
     let last_msg = history.last().ok_or("No history found")?;
     
     if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
@@ -560,9 +558,6 @@ pub async fn execute_agent_tools(
     }
 
     let tools_to_run = last_msg.tool_calls.as_ref().unwrap().clone();
-    
-    // Filter? For now run all present in the message, assuming the frontend sent the command implies all approved.
-    // Or we could verify `tool_call_ids` match.
     let tools_filtered: Vec<ToolCall> = tools_to_run.into_iter().filter(|t| tool_call_ids.contains(&t.id)).collect();
 
     if tools_filtered.is_empty() {
@@ -571,13 +566,23 @@ pub async fn execute_agent_tools(
         return Ok(());
     }
 
+    // Safety check: if NOT in agent mode, do not allow run_in_terminal
+    if !is_agent_mode {
+        for call in &tools_filtered {
+            if call.function.name == "run_in_terminal" {
+                tracing::error!("[AI] Attempted to run_in_terminal in non-agent mode!");
+                return Err("Execution denied: run_in_terminal is only allowed in Agent mode.".to_string());
+            }
+        }
+    }
+
     tracing::debug!("[AI] Executing {} tools...", tools_filtered.len());
     execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered).await?;
     tracing::debug!("[AI] Tool execution complete. Running next AI turn...");
 
     // Continue the loop (1 turn)
-    let tools = Some(create_tools(true));
-    let next_tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
+    let tools = Some(create_tools(is_agent_mode));
+    let next_tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools).await?;
 
     if let Some(calls) = next_tool_calls {
         if !calls.is_empty() {
@@ -724,15 +729,12 @@ pub async fn generate_session_title(
     ];
 
     // 5. Call LLM to generate title
-    // Copilot logic for title generation
     let mut final_api_key = api_key;
     let mut extra_headers = None;
     let mut final_endpoint = endpoint;
     let copilot_token_data;
 
     if provider == "copilot" {
-        // We reuse the logic from run_ai_turn. Ideally should be refactored into a helper.
-        // But for now duplicating is fine to avoid large refactor.
         let token_resp = copilot::get_copilot_token(&final_api_key).await?;
         copilot_token_data = token_resp.token;
         final_api_key = copilot_token_data.clone();
@@ -759,13 +761,12 @@ pub async fn generate_session_title(
         }
     }
 
-    // Clean up title (trim, remove quotes)
+    // Clean up title
     let title = title.trim()
         .trim_matches('"')
         .trim_matches('\'')
         .to_string();
 
-    // Limit to reasonable length
     let title = if title.len() > 50 {
         format!("{}...", &title[..47])
     } else {
@@ -799,7 +800,6 @@ pub async fn delete_ai_session(
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
     
-    // Delete messages first (cascade might be configured, but let's be explicit if not)
     conn.execute(
         "DELETE FROM ai_messages WHERE session_id = ?1",
         params![session_id],
@@ -822,13 +822,11 @@ pub async fn delete_all_ai_sessions(
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
     
-    // Delete messages for all sessions of this server
     conn.execute(
         "DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)",
         params![server_id],
     ).map_err(|e| e.to_string())?;
 
-    // Delete all sessions for this server
     conn.execute(
         "DELETE FROM ai_sessions WHERE server_id = ?1",
         params![server_id],

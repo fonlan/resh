@@ -321,12 +321,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load mode from config
+  // Load mode & model from config
   useEffect(() => {
     if (config?.general.aiMode) {
       setMode(config.general.aiMode as 'ask' | 'agent');
     }
-  }, [config?.general.aiMode]);
+    if (config?.general.aiModelId) {
+      setSelectedModelId(config.general.aiModelId);
+    }
+  }, [config?.general.aiMode, config?.general.aiModelId]);
 
   // Set default model
   useEffect(() => {
@@ -449,6 +452,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           activeSessionId,
           selectedModelId,
           channelId,
+          mode,
           currentTabId,
           calls.map(c => c.id)
         ).catch(err => console.error('Failed to auto-execute safe tools:', err));
@@ -504,7 +508,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, appendResponse, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -623,6 +627,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         activeSessionId,
         selectedModelId,
         channelId,
+        mode,
         currentTabId,
         callsToExecute
       );
@@ -631,7 +636,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.error('Failed to execute tools:', err);
       setLoading(false);
     }
-  }, [activeSessionId, pendingToolCalls, config, selectedModelId, currentTabId, setLoading]);
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setLoading]);
 
   const handleCancelTools = useCallback(() => {
     setPendingToolCalls(null);
@@ -653,6 +658,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         await saveConfig(newConfig);
       } catch (err) {
         console.error('Failed to save AI mode:', err);
+      }
+    }
+  };
+
+  const handleModelChange = async (newModelId: string) => {
+    setSelectedModelId(newModelId);
+    if (config) {
+      try {
+        const newConfig = {
+          ...config,
+          general: {
+            ...config.general,
+            aiModelId: newModelId
+          }
+        };
+        await saveConfig(newConfig);
+      } catch (err) {
+        console.error('Failed to save AI model:', err);
       }
     }
   };
@@ -877,7 +900,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 <select
                   className="ai-select"
                   value={selectedModelId}
-                  onChange={(e) => setSelectedModelId(e.target.value)}
+                  onChange={(e) => handleModelChange(e.target.value)}
                   disabled={isLoading || !!pendingToolCalls}
                 >
                   {(config?.aiModels || [])

@@ -146,6 +146,7 @@
   flex-direction: column;
   align-items: flex-start;
   min-width: 0;
+  flex: 1;
 }
 
 .server-card-name {
@@ -170,6 +171,7 @@
   text-overflow: ellipsis;
   letter-spacing: -0.01em;
   line-height: 1.5;
+  width: 100%;
 }
 
 .add-card {
