@@ -143,6 +143,8 @@ async fn main() {
             commands::ai::generate_session_title,
             commands::ai::delete_ai_session,
             commands::ai::delete_all_ai_sessions,
+            commands::ai::start_copilot_auth,
+            commands::ai::poll_copilot_auth,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

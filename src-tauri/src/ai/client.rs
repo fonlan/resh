@@ -1,4 +1,5 @@
 use serde::{Serialize, Deserialize};
+use std::collections::HashMap;
 use futures::Stream;
 use std::pin::Pin;
 use reqwest::Client;
@@ -67,6 +68,7 @@ pub async fn stream_openai_chat(
     model: &str,
     messages: Vec<ChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
+    extra_headers: Option<HashMap<String, String>>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, String>> + Send>>, String> {
     tracing::debug!("[AI Client] Starting OpenAI API request to {}", endpoint);
     tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
@@ -98,9 +100,17 @@ pub async fn stream_openai_chat(
 
     tracing::debug!("[AI Client] POST {}", url);
 
-    let response = client.post(&url)
+    let mut request_builder = client.post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
+        .header("Content-Type", "application/json");
+
+    if let Some(headers) = extra_headers {
+        for (k, v) in headers {
+            request_builder = request_builder.header(k, v);
+        }
+    }
+
+    let response = request_builder
         .json(&req)
         .send()
         .await

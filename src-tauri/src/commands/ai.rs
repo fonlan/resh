@@ -1,6 +1,7 @@
 use crate::commands::AppState;
 use crate::ai::client::{stream_openai_chat, ChatMessage, create_agent_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
 use crate::ai::prompts::SYSTEM_PROMPT;
+use crate::ai::copilot;
 use crate::ssh_manager::ssh::SSHClient;
 use tauri::{State, Window, Emitter};
 use std::sync::Arc;
@@ -177,7 +178,7 @@ async fn run_ai_turn(
 ) -> Result<Option<Vec<ToolCall>>, String> {
     
     // 1. Get Config
-    let (endpoint, api_key, model_name) = {
+    let (endpoint, api_key, model_name, provider) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
@@ -188,6 +189,7 @@ async fn run_ai_turn(
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
+            channel.provider.clone(),
         )
     };
     
@@ -198,8 +200,42 @@ async fn run_ai_turn(
     // 2. Load History
     let history = load_history(state, &session_id).await?;
 
-    // 3. Stream
-    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, history, tools).await?;
+    // 3. Prepare headers and token if Copilot
+    let mut final_api_key = api_key;
+    let mut extra_headers = None;
+    let mut final_endpoint = endpoint;
+
+    let copilot_token_data; // Needed to extend lifetime if copilot is used
+
+    if provider == "copilot" {
+        // Exchange OAuth token for Session Token
+        let token_resp = copilot::get_copilot_token(&final_api_key).await?;
+        copilot_token_data = token_resp.token; // Copilot Session Token (tid_...)
+        final_api_key = copilot_token_data.clone();
+        
+        // Copilot specific endpoint (if not overridden by user, but user shouldn't override usually)
+        // But the token response might contain endpoints.
+        // Usually Copilot uses https://api.githubcopilot.com/chat/completions
+        // If the user didn't set an endpoint, use the default one.
+        // Actually, let's trust what the user put in config or default hardcoded in frontend?
+        // Wait, for Copilot, we should probably ignore the user-configured endpoint if it's generic, 
+        // or use the one returned by `get_copilot_token` if available.
+        // The `CopilotTokenResponse` has `endpoints`.
+        
+        // For now, let's stick to the one configured in the channel (which we should set to the correct URL in frontend).
+        // OR better: hardcode it here if provider is copilot.
+        // Copilot production endpoint: https://api.githubcopilot.com
+        final_endpoint = "https://api.githubcopilot.com".to_string(); 
+
+        let mut headers = HashMap::new();
+        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
+        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        extra_headers = Some(headers);
+    }
+
+    // 4. Stream
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers).await?;
     
     let mut full_content = String::new();
     let mut tool_accumulator = ToolCallAccumulator::new();
@@ -255,6 +291,16 @@ async fn run_ai_turn(
 }
 
 // --- Commands ---
+
+#[tauri::command]
+pub async fn start_copilot_auth() -> Result<copilot::DeviceCodeResponse, String> {
+    copilot::start_device_auth().await
+}
+
+#[tauri::command]
+pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
+    copilot::poll_access_token(&device_code).await
+}
 
 #[tauri::command]
 pub async fn create_ai_session(
@@ -493,7 +539,7 @@ pub async fn generate_session_title(
     }
 
     // 3. Get model and channel config
-    let (endpoint, api_key, model_name) = {
+    let (endpoint, api_key, model_name, provider) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
@@ -504,6 +550,7 @@ pub async fn generate_session_title(
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
+            channel.provider.clone(),
         )
     };
     
@@ -538,7 +585,28 @@ pub async fn generate_session_title(
     ];
 
     // 5. Call LLM to generate title
-    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, title_messages, None).await?;
+    // Copilot logic for title generation
+    let mut final_api_key = api_key;
+    let mut extra_headers = None;
+    let mut final_endpoint = endpoint;
+    let copilot_token_data;
+
+    if provider == "copilot" {
+        // We reuse the logic from run_ai_turn. Ideally should be refactored into a helper.
+        // But for now duplicating is fine to avoid large refactor.
+        let token_resp = copilot::get_copilot_token(&final_api_key).await?;
+        copilot_token_data = token_resp.token;
+        final_api_key = copilot_token_data.clone();
+        final_endpoint = "https://api.githubcopilot.com".to_string(); 
+        
+        let mut headers = HashMap::new();
+        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
+        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        extra_headers = Some(headers);
+    }
+
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers).await?;
     let mut title = String::new();
     
     while let Some(event_result) = stream.next().await {

@@ -1,16 +1,25 @@
 import React, { useState } from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
 import { AIChannel, AIModel } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { useTranslation } from '../../i18n';
+import { invoke } from '@tauri-apps/api/core';
 
 interface AITabProps {
   aiChannels: AIChannel[];
   aiModels: AIModel[];
   onAIChannelsUpdate: (channels: AIChannel[]) => void;
   onAIModelsUpdate: (models: AIModel[]) => void;
+}
+
+interface DeviceCodeResponse {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  expires_in: number;
+  interval: number;
 }
 
 export const AITab: React.FC<AITabProps> = ({
@@ -26,11 +35,78 @@ export const AITab: React.FC<AITabProps> = ({
   const [channelFormData, setChannelFormData] = useState<Partial<AIChannel>>({});
   const [channelToDelete, setChannelToDelete] = useState<string | null>(null);
 
+  // Copilot Auth State
+  const [copilotAuthData, setCopilotAuthData] = useState<DeviceCodeResponse | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   // State for Model Form
   const [isModelFormOpen, setIsModelFormOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<AIModel | null>(null);
   const [modelFormData, setModelFormData] = useState<Partial<AIModel>>({});
   const [modelToDelete, setModelToDelete] = useState<string | null>(null);
+
+  // --- Copilot Handlers ---
+  const startCopilotAuth = async () => {
+    setIsAuthLoading(true);
+    setAuthError(null);
+    try {
+      const data = await invoke<DeviceCodeResponse>('start_copilot_auth');
+      setCopilotAuthData(data);
+      pollCopilotAuth(data);
+    } catch (e: any) {
+      setAuthError(e.toString());
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
+  const pollCopilotAuth = async (data: DeviceCodeResponse) => {
+    setIsPolling(true);
+    let attempts = 0;
+    const maxAttempts = 100; // Safety break
+    
+    // We need a way to stop polling if the modal closes. 
+    // Since we are inside a function closure, we can't easily check a ref that changes.
+    // Ideally we should use a useEffect or a ref for cancellation.
+    // For now, valid as long as isChannelFormOpen is true? 
+    // Actually, `channelFormData.type` should be checked.
+
+    const pollLoop = async () => {
+      if (attempts >= maxAttempts) {
+        setIsPolling(false);
+        setAuthError("Auth timed out");
+        return;
+      }
+
+      try {
+        const token = await invoke<string>('poll_copilot_auth', { deviceCode: data.device_code });
+        // Success!
+        setChannelFormData(prev => ({ ...prev, apiKey: token }));
+        setCopilotAuthData(null);
+        setIsPolling(false);
+      } catch (e: any) {
+        const err = e.toString();
+        if (err.includes("pending") || err.includes("slow_down")) {
+           // Continue polling
+           attempts++;
+           setTimeout(pollLoop, (data.interval + 1) * 1000);
+        } else {
+           setIsPolling(false);
+           setAuthError(err);
+        }
+      }
+    };
+    
+    setTimeout(pollLoop, (data.interval + 1) * 1000);
+  };
+
+  const copyUserCode = () => {
+    if (copilotAuthData) {
+      navigator.clipboard.writeText(copilotAuthData.user_code);
+    }
+  };
 
   // --- Channel Handlers ---
 
@@ -43,12 +119,18 @@ export const AITab: React.FC<AITabProps> = ({
       apiKey: '',
       isActive: true,
     });
+    setCopilotAuthData(null);
+    setIsPolling(false);
+    setAuthError(null);
     setIsChannelFormOpen(true);
   };
 
   const handleEditChannel = (channel: AIChannel) => {
     setEditingChannel(channel);
     setChannelFormData({ ...channel });
+    setCopilotAuthData(null);
+    setIsPolling(false);
+    setAuthError(null);
     setIsChannelFormOpen(true);
   };
 
@@ -274,34 +356,115 @@ export const AITab: React.FC<AITabProps> = ({
             id="channel-type"
             className="form-select"
             value={channelFormData.type || 'openai'}
-            onChange={(e) => setChannelFormData({ ...channelFormData, type: e.target.value as any })}
+            onChange={(e) => {
+              setChannelFormData({ ...channelFormData, type: e.target.value as any });
+              // Reset auth state when switching types
+              setCopilotAuthData(null);
+              setIsPolling(false);
+            }}
           >
             <option value="openai">OpenAI</option>
             <option value="copilot">GitHub Copilot</option>
           </select>
         </div>
-        <div className="form-group">
-          <label htmlFor="channel-endpoint" className="form-label">{t.ai.channelForm.endpoint}</label>
-          <input
-            id="channel-endpoint"
-            type="text"
-            className="form-input"
-            value={channelFormData.endpoint || ''}
-            onChange={(e) => setChannelFormData({ ...channelFormData, endpoint: e.target.value })}
-            placeholder="https://api.openai.com/v1"
-          />
-        </div>
-        <div className="form-group">
-          <label htmlFor="channel-apikey" className="form-label">{t.ai.channelForm.apiKey}</label>
-          <input
-            id="channel-apikey"
-            type="password"
-            className="form-input"
-            value={channelFormData.apiKey || ''}
-            onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
-            placeholder="sk-..."
-          />
-        </div>
+
+        {channelFormData.type === 'copilot' ? (
+           <div className="form-group p-4 bg-gray-800 rounded-lg border border-gray-700">
+             <label className="form-label mb-2 block">GitHub Authentication</label>
+             
+             {channelFormData.apiKey ? (
+               <div className="flex items-center gap-2 text-green-400 mb-4">
+                 <Check size={18} />
+                 <span>Authenticated with GitHub</span>
+                 <button 
+                   type="button" 
+                   onClick={() => setChannelFormData({...channelFormData, apiKey: ''})}
+                   className="text-xs text-gray-400 hover:text-white underline ml-2"
+                 >
+                   Reset
+                 </button>
+               </div>
+             ) : (
+               <>
+                 {!copilotAuthData && (
+                   <button 
+                     type="button" 
+                     onClick={startCopilotAuth} 
+                     disabled={isAuthLoading}
+                     className="btn btn-secondary w-full flex items-center justify-center gap-2"
+                   >
+                     {isAuthLoading ? <Loader2 size={16} className="animate-spin" /> : null}
+                     Sign in with GitHub
+                   </button>
+                 )}
+
+                 {authError && (
+                   <div className="text-red-400 text-sm mt-2">{authError}</div>
+                 )}
+
+                 {copilotAuthData && (
+                   <div className="mt-4 space-y-4">
+                     <div className="text-sm text-gray-300">
+                       1. Copy code: <strong className="text-white select-all">{copilotAuthData.user_code}</strong>
+                     </div>
+                     <div className="text-sm text-gray-300">
+                       2. Open link: 
+                       <a 
+                         href={copilotAuthData.verification_uri} 
+                         target="_blank" 
+                         rel="noopener noreferrer"
+                         className="text-blue-400 hover:underline ml-1 inline-flex items-center gap-1"
+                       >
+                         {copilotAuthData.verification_uri} <ExternalLink size={12} />
+                       </a>
+                     </div>
+                     
+                     <div className="flex gap-2">
+                        <button 
+                          type="button" 
+                          onClick={copyUserCode}
+                          className="btn btn-secondary flex-1 flex items-center justify-center gap-2"
+                        >
+                          <Copy size={14} /> Copy Code
+                        </button>
+                     </div>
+
+                     <div className="text-center text-xs text-gray-400 flex items-center justify-center gap-2">
+                       {isPolling && <Loader2 size={12} className="animate-spin" />}
+                       Waiting for authentication...
+                     </div>
+                   </div>
+                 )}
+               </>
+             )}
+           </div>
+        ) : (
+          <>
+            <div className="form-group">
+              <label htmlFor="channel-endpoint" className="form-label">{t.ai.channelForm.endpoint}</label>
+              <input
+                id="channel-endpoint"
+                type="text"
+                className="form-input"
+                value={channelFormData.endpoint || ''}
+                onChange={(e) => setChannelFormData({ ...channelFormData, endpoint: e.target.value })}
+                placeholder="https://api.openai.com/v1"
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="channel-apikey" className="form-label">{t.ai.channelForm.apiKey}</label>
+              <input
+                id="channel-apikey"
+                type="password"
+                className="form-input"
+                value={channelFormData.apiKey || ''}
+                onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
+                placeholder="sk-..."
+              />
+            </div>
+          </>
+        )}
+
         <div className="form-group flex items-center gap-2 mt-4">
           <input
             type="checkbox"
