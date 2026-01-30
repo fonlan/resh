@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAIStore } from '../stores/useAIStore';
 import { useConfig } from '../hooks/useConfig';
 import { aiService } from '../services/aiService';
@@ -88,6 +88,7 @@ const ToolConfirmation = ({
   const { t } = useTranslation();
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isSensitive, setIsSensitive] = useState(false);
+  const confirmedRef = useRef(false);
   
   useEffect(() => {
     // Dangerous commands that should always require confirmation
@@ -153,11 +154,12 @@ const ToolConfirmation = ({
   }, [toolCalls]);
 
   useEffect(() => {
-    if (countdown === null) return;
+    if (countdown === null || confirmedRef.current) return;
     
     if (countdown <= 0) {
       console.log('[AI] Auto-executing tool calls...');
       // Ensure we only call onConfirm once
+      confirmedRef.current = true;
       onConfirm();
       return;
     }
@@ -517,7 +519,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     };
   }, [isResizing]);
 
-  const handleCreateSession = async () => {
+  const handleCreateSession = useCallback(async () => {
     if (currentServerId) {
       try {
         await createSession(currentServerId, selectedModelId);
@@ -526,9 +528,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         console.error('Failed to create session:', err);
       }
     }
-  };
+  }, [currentServerId, selectedModelId, createSession]);
 
-  const handleSendMessage = async () => {
+  const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim()) return;
 
     let sessionId = activeSessionId;
@@ -580,9 +582,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.error('[AI] Failed to send message:', err);
       setLoading(false);
     }
-  };
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setLoading, config, mode, currentTabId]);
 
-  const handleConfirmTools = async () => {
+  const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
 
     console.log('[AI] Confirming tool execution for session:', activeSessionId);
@@ -607,13 +609,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.error('Failed to execute tools:', err);
       setLoading(false);
     }
-  };
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, currentTabId, setLoading]);
 
-  const handleCancelTools = () => {
+  const handleCancelTools = useCallback(() => {
     setPendingToolCalls(null);
     setLoading(false);
     // Optionally insert a "Cancelled" system message
-  };
+  }, [setLoading]);
 
   const handleModeChange = async (newMode: 'ask' | 'agent') => {
     setMode(newMode);
