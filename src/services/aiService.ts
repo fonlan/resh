@@ -53,4 +53,7 @@ export const aiService = {
       modelId,
       channelId
     }),
+
+  deleteSession: (sessionId: string) =>
+    invoke<void>('delete_ai_session', { sessionId }),
 };

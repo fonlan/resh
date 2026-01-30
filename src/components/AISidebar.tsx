@@ -5,7 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall } from '../types/ai';
 import './AISidebar.css';
@@ -234,7 +234,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     selectSession,
     addMessage,
     appendResponse,
-    setLoading
+    setLoading,
+    deleteSession
   } = useAIStore();
 
   const [width, setWidth] = useState(350);
@@ -294,9 +295,21 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       textareaRef.current.style.height = 'auto';
       if (inputValue) {
         textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px';
+      } else {
+        textareaRef.current.style.height = '28px';
       }
     }
   }, [inputValue]);
+  
+  const handleDeleteSession = async (sessionId: string) => {
+    if (currentServerId) {
+      try {
+        await deleteSession(currentServerId, sessionId);
+      } catch (err) {
+        console.error('Failed to delete session:', err);
+      }
+    }
+  };
 
   // Listen for streaming responses & tool calls
   useEffect(() => {
@@ -639,24 +652,55 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       {showHistory ? (
         <div className="ai-messages">
           {sortedSessions.length === 0 ? (
-            <div className="ai-empty-state">{t.ai.noHistory}</div>
+            <div className="ai-empty-history">
+              <History size={48} className="ai-empty-history-icon" />
+              <p>{t.ai.noHistory}</p>
+            </div>
           ) : (
-             sortedSessions.map(session => (
-               <button
-                 type="button"
-                 key={session.id}
-                 className={`snippet-item w-full text-left ${activeSessionId === session.id ? 'bg-bg-tertiary' : ''}`}
-                 onClick={() => {
-                   selectSession(session.id);
-                   setShowHistory(false);
-                 }}
-               >
-                 <div className="snippet-name">{session.title || t.ai.newChat}</div>
-                 <div className="snippet-content text-xs text-text-muted">
-                   {new Date(session.createdAt).toLocaleDateString()}
-                 </div>
-               </button>
-             ))
+             <div className="ai-history-list">
+               {sortedSessions.map(session => (
+                 <button
+                   type="button"
+                   key={session.id}
+                   className={`ai-history-item ${activeSessionId === session.id ? 'active' : ''}`}
+                   onClick={() => {
+                     selectSession(session.id);
+                     setShowHistory(false);
+                   }}
+                 >
+                   <div className="ai-history-icon">
+                     <MessageSquare size={16} />
+                   </div>
+                   <div className="ai-history-info">
+                     <div className="ai-history-title" title={session.title || t.ai.newChat}>
+                       {session.title || t.ai.newChat}
+                     </div>
+                     <div className="ai-history-meta">
+                       <Clock size={10} />
+                       {new Date(session.createdAt).toLocaleString(undefined, {
+                         month: 'short',
+                         day: 'numeric',
+                         hour: '2-digit',
+                         minute: '2-digit'
+                       })}
+                     </div>
+                   </div>
+                   <button
+                     type="button"
+                     className="ai-history-delete"
+                     onClick={(e) => {
+                       e.stopPropagation();
+                       if (confirm(t.ai.deleteSessionConfirm)) {
+                         handleDeleteSession(session.id);
+                       }
+                     }}
+                     title={t.common.delete}
+                   >
+                     <Trash2 size={14} />
+                   </button>
+                 </button>
+               ))}
+             </div>
           )}
         </div>
       ) : (

@@ -332,11 +332,13 @@
   color: var(--text-primary);
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.5;
+  line-height: 28px;
   resize: none;
   outline: none;
   max-height: 150px;
-  min-height: 20px;
+  min-height: 28px;
+  padding: 0;
+  display: block;
 }
 
 .ai-send-btn {
@@ -364,16 +366,150 @@
   cursor: not-allowed;
 }
 
-.ai-empty-state {
+/* History List Styles */
+.ai-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+}
+
+.ai-history-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  width: 100%;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+
+.ai-history-item:hover {
+  background: var(--bg-tertiary);
+  border-color: var(--glass-border);
+}
+
+.ai-history-item.active {
+  background: var(--bg-tertiary);
+  border-color: var(--accent-primary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ai-history-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.ai-history-item:hover .ai-history-icon,
+.ai-history-item.active .ai-history-icon {
+  color: var(--accent-primary);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.ai-history-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-history-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ai-history-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ai-history-delete {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: all var(--transition-fast);
+  z-index: 2;
+}
+
+.ai-history-item:hover .ai-history-delete {
+  opacity: 1;
+}
+
+.ai-history-delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.ai-history-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-primary);
+}
+
+.ai-empty-history {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  padding: 20px;
+  color: var(--text-muted);
+  text-align: center;
+  gap: 12px;
+}
+
+.ai-empty-history-icon {
+  opacity: 0.2;
+}
+
+.ai-empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
   text-align: center;
   padding: 32px;
   gap: 16px;
+  min-height: 200px;
 }
 
 /* Typing Indicator Animation */

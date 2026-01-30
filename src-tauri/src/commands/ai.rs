@@ -579,3 +579,26 @@ pub async fn generate_session_title(
     tracing::debug!("[AI] Generated title for session {}: {}", session_id, title);
     Ok(title)
 }
+
+#[tauri::command]
+pub async fn delete_ai_session(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<(), String> {
+    tracing::debug!("[AI] delete_ai_session called for session {}", session_id);
+    let conn = state.db_manager.get_connection();
+    let conn = conn.lock().unwrap();
+    
+    // Delete messages first (cascade might be configured, but let's be explicit if not)
+    conn.execute(
+        "DELETE FROM ai_messages WHERE session_id = ?1",
+        params![session_id],
+    ).map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "DELETE FROM ai_sessions WHERE id = ?1",
+        params![session_id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}

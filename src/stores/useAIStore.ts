@@ -14,6 +14,7 @@ interface AIState {
   addMessage: (sessionId: string, message: ChatMessage) => void;
   appendResponse: (sessionId: string, content: string) => void;
   setLoading: (loading: boolean) => void;
+  deleteSession: (serverId: string, sessionId: string) => Promise<void>;
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -77,5 +78,13 @@ export const useAIStore = create<AIState>((set, get) => ({
         };
       }
     });
+  },
+
+  deleteSession: async (serverId, sessionId) => {
+    await aiService.deleteSession(sessionId);
+    if (get().activeSessionId === sessionId) {
+      set({ activeSessionId: null });
+    }
+    await get().loadSessions(serverId);
   },
 }));

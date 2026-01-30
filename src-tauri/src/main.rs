@@ -141,6 +141,7 @@ async fn main() {
             commands::ai::run_in_terminal,
             commands::ai::execute_agent_tools,
             commands::ai::generate_session_title,
+            commands::ai::delete_ai_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
