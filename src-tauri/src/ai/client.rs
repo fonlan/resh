@@ -252,9 +252,9 @@ pub async fn stream_openai_chat(
     Ok(Box::pin(stream_mapped))
 }
 
-/// Create tool definitions for agent mode
-pub fn create_agent_tools() -> Vec<ToolDefinition> {
-    vec![
+/// Create tool definitions based on the mode
+pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
+    let mut tools = vec![
         ToolDefinition {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
@@ -267,7 +267,10 @@ pub fn create_agent_tools() -> Vec<ToolDefinition> {
                 }),
             },
         },
-        ToolDefinition {
+    ];
+
+    if is_agent_mode {
+        tools.push(ToolDefinition {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "run_in_terminal".to_string(),
@@ -283,6 +286,8 @@ pub fn create_agent_tools() -> Vec<ToolDefinition> {
                     "required": ["command"]
                 }),
             },
-        },
-    ]
+        });
+    }
+
+    tools
 }

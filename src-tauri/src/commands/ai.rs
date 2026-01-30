@@ -1,5 +1,5 @@
 use crate::commands::AppState;
-use crate::ai::client::{stream_openai_chat, fetch_models, ChatMessage, create_agent_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
+use crate::ai::client::{stream_openai_chat, fetch_models, ChatMessage, create_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
 use crate::ai::prompts::SYSTEM_PROMPT;
 use crate::ai::copilot;
 use crate::ssh_manager::ssh::SSHClient;
@@ -516,7 +516,7 @@ pub async fn send_chat_message(
     let is_ask_mode = mode.as_deref() == Some("ask");
     
     // Both agent and ask mode now support tools
-    let tools = if is_agent_mode || is_ask_mode { Some(create_agent_tools()) } else { None };
+    let tools = if is_agent_mode || is_ask_mode { Some(create_tools(is_agent_mode)) } else { None };
 
     let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
 
@@ -574,7 +574,7 @@ pub async fn execute_agent_tools(
     tracing::debug!("[AI] Tool execution complete. Running next AI turn...");
 
     // Continue the loop (1 turn)
-    let tools = Some(create_agent_tools());
+    let tools = Some(create_tools(true));
     let next_tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
 
     if let Some(calls) = next_tool_calls {
