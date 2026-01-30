@@ -142,6 +142,7 @@ async fn main() {
             commands::ai::execute_agent_tools,
             commands::ai::generate_session_title,
             commands::ai::delete_ai_session,
+            commands::ai::delete_all_ai_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -605,3 +605,27 @@ pub async fn delete_ai_session(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn delete_all_ai_sessions(
+    state: State<'_, Arc<AppState>>,
+    server_id: String,
+) -> Result<(), String> {
+    tracing::debug!("[AI] delete_all_ai_sessions called for server {}", server_id);
+    let conn = state.db_manager.get_connection();
+    let conn = conn.lock().unwrap();
+    
+    // Delete messages for all sessions of this server
+    conn.execute(
+        "DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)",
+        params![server_id],
+    ).map_err(|e| e.to_string())?;
+
+    // Delete all sessions for this server
+    conn.execute(
+        "DELETE FROM ai_sessions WHERE server_id = ?1",
+        params![server_id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(())
+}

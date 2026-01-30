@@ -3,6 +3,7 @@ import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { AIChannel, AIModel } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
+import { ConfirmationModal } from '../ConfirmationModal';
 import { useTranslation } from '../../i18n';
 
 interface AITabProps {
@@ -23,11 +24,13 @@ export const AITab: React.FC<AITabProps> = ({
   const [isChannelFormOpen, setIsChannelFormOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<AIChannel | null>(null);
   const [channelFormData, setChannelFormData] = useState<Partial<AIChannel>>({});
+  const [channelToDelete, setChannelToDelete] = useState<string | null>(null);
 
   // State for Model Form
   const [isModelFormOpen, setIsModelFormOpen] = useState(false);
   const [editingModel, setEditingModel] = useState<AIModel | null>(null);
   const [modelFormData, setModelFormData] = useState<Partial<AIModel>>({});
+  const [modelToDelete, setModelToDelete] = useState<string | null>(null);
 
   // --- Channel Handlers ---
 
@@ -50,10 +53,14 @@ export const AITab: React.FC<AITabProps> = ({
   };
 
   const handleDeleteChannel = (id: string) => {
-    if (window.confirm(t.ai.deleteChannelConfirm)) {
-      onAIChannelsUpdate(aiChannels.filter((c) => c.id !== id));
-      // Also cleanup models
-      onAIModelsUpdate(aiModels.filter((m) => m.channelId !== id));
+    setChannelToDelete(id);
+  };
+
+  const confirmDeleteChannel = () => {
+    if (channelToDelete) {
+      onAIChannelsUpdate(aiChannels.filter((c) => c.id !== channelToDelete));
+      onAIModelsUpdate(aiModels.filter((m) => m.channelId !== channelToDelete));
+      setChannelToDelete(null);
     }
   };
 
@@ -111,8 +118,13 @@ export const AITab: React.FC<AITabProps> = ({
   };
 
   const handleDeleteModel = (id: string) => {
-    if (window.confirm(t.ai.deleteModelConfirm)) {
-      onAIModelsUpdate(aiModels.filter((m) => m.id !== id));
+    setModelToDelete(id);
+  };
+
+  const confirmDeleteModel = () => {
+    if (modelToDelete) {
+      onAIModelsUpdate(aiModels.filter((m) => m.id !== modelToDelete));
+      setModelToDelete(null);
     }
   };
 
@@ -336,6 +348,24 @@ export const AITab: React.FC<AITabProps> = ({
           </select>
         </div>
       </FormModal>
+
+      <ConfirmationModal
+        isOpen={!!channelToDelete}
+        title={t.common.delete}
+        message={t.ai.deleteChannelConfirm}
+        onConfirm={confirmDeleteChannel}
+        onCancel={() => setChannelToDelete(null)}
+        type="danger"
+      />
+
+      <ConfirmationModal
+        isOpen={!!modelToDelete}
+        title={t.common.delete}
+        message={t.ai.deleteModelConfirm}
+        onConfirm={confirmDeleteModel}
+        onCancel={() => setModelToDelete(null)}
+        type="danger"
+      />
     </div>
   );
 };

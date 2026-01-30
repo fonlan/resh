@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { Authentication, Server as ServerType } from '../../types/config';
 import { FormModal } from '../FormModal';
+import { ConfirmationModal } from '../ConfirmationModal';
 import { AuthForm, AuthFormHandle } from './AuthForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
@@ -23,6 +24,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingAuth, setEditingAuth] = useState<Authentication | null>(null);
   const [isSynced, setIsSynced] = useState(true);
+  const [authToDelete, setAuthToDelete] = useState<string | null>(null);
   const formRef = useRef<AuthFormHandle>(null);
 
   // Sync state with formref
@@ -52,17 +54,20 @@ export const AuthTab: React.FC<AuthTabProps> = ({
     const usingServers = servers.filter((s) => s.authId === authId);
     
     if (usingServers.length > 0) {
-      if (window.confirm(t.authTab.deleteInUseConfirmation)) {
-        // Clear auth from servers
-        const updatedServers = servers.map((s) => 
-          s.authId === authId ? { ...s, authId: null } : s
-        );
-        onServersUpdate(updatedServers);
-        // Delete auth
-        onAuthUpdate(authentications.filter((a) => a.id !== authId));
-      }
+      setAuthToDelete(authId);
     } else {
       onAuthUpdate(authentications.filter((a) => a.id !== authId));
+    }
+  };
+
+  const confirmDeleteAuth = () => {
+    if (authToDelete) {
+      const updatedServers = servers.map((s) => 
+        s.authId === authToDelete ? { ...s, authId: null } : s
+      );
+      onServersUpdate(updatedServers);
+      onAuthUpdate(authentications.filter((a) => a.id !== authToDelete));
+      setAuthToDelete(null);
     }
   };
 
@@ -177,6 +182,15 @@ export const AuthTab: React.FC<AuthTabProps> = ({
           onSave={handleSaveAuth}
         />
       </FormModal>
+
+      <ConfirmationModal
+        isOpen={!!authToDelete}
+        title={t.authTab.deleteTooltip}
+        message={t.authTab.deleteInUseConfirmation}
+        onConfirm={confirmDeleteAuth}
+        onCancel={() => setAuthToDelete(null)}
+        type="danger"
+      />
     </div>
   );
 };

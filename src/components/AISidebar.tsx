@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
+import { ConfirmationModal } from './ConfirmationModal';
 import './AISidebar.css';
 
 interface AISidebarProps {
@@ -298,7 +299,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     addMessage,
     appendResponse,
     setLoading,
-    deleteSession
+    deleteSession,
+    clearSessions
   } = useAIStore();
 
   const [width, setWidth] = useState(350);
@@ -308,6 +310,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [mode, setMode] = useState<'ask' | 'agent'>(config?.general.aiMode as 'ask' | 'agent' || 'ask');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[] | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [isClearingHistory, setIsClearingHistory] = useState(false);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -368,8 +372,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (currentServerId) {
       try {
         await deleteSession(currentServerId, sessionId);
+        setSessionToDelete(null);
       } catch (err) {
         console.error('Failed to delete session:', err);
+      }
+    }
+  };
+
+  const handleClearHistory = async () => {
+    if (currentServerId) {
+      try {
+        await clearSessions(currentServerId);
+        setIsClearingHistory(false);
+      } catch (err) {
+        console.error('Failed to clear history:', err);
       }
     }
   };
@@ -720,8 +736,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               <p>{t.ai.noHistory}</p>
             </div>
           ) : (
-             <div className="ai-history-list">
-               {sortedSessions.map(session => (
+              <div className="ai-history-list">
+                <div className="ai-history-header">
+                  <span>{t.ai.history}</span>
+                  <button 
+                    type="button" 
+                    className="ai-clear-btn"
+                    onClick={() => setIsClearingHistory(true)}
+                  >
+                    <Trash2 size={12} /> {t.ai.clearHistory}
+                  </button>
+                </div>
+                {sortedSessions.map(session => (
+
                  <button
                    type="button"
                    key={session.id}
@@ -748,19 +775,18 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                        })}
                      </div>
                    </div>
-                   <button
-                     type="button"
-                     className="ai-history-delete"
-                     onClick={(e) => {
-                       e.stopPropagation();
-                       if (confirm(t.ai.deleteSessionConfirm)) {
-                         handleDeleteSession(session.id);
-                       }
-                     }}
-                     title={t.common.delete}
-                   >
-                     <Trash2 size={14} />
-                   </button>
+                    <button
+                      type="button"
+                      className="ai-history-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSessionToDelete(session.id);
+                      }}
+                      title={t.common.delete}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+
                  </button>
                ))}
              </div>
@@ -859,6 +885,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           </div>
         </>
       )}
+      
+      <ConfirmationModal
+        isOpen={!!sessionToDelete}
+        title={t.common.delete}
+        message={t.ai.deleteSessionConfirm}
+        onConfirm={() => sessionToDelete && handleDeleteSession(sessionToDelete)}
+        onCancel={() => setSessionToDelete(null)}
+        type="danger"
+      />
+
+      <ConfirmationModal
+        isOpen={isClearingHistory}
+        title={t.ai.clearHistory}
+        message={t.ai.clearHistoryConfirm}
+        onConfirm={handleClearHistory}
+        onCancel={() => setIsClearingHistory(false)}
+        type="danger"
+      />
     </div>
   );
 };

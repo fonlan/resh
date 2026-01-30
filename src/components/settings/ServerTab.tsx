@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
 import { Server, Authentication, ProxyConfig as ProxyType, Snippet } from '../../types/config';
 import { FormModal } from '../FormModal';
+import { ConfirmationModal } from '../ConfirmationModal';
 import { ServerForm, ServerFormHandle } from './ServerForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
@@ -27,6 +28,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
   const [isSynced, setIsSynced] = useState(true);
+  const [serverToDelete, setServerToDelete] = useState<{ id: string; isInUse: boolean } | null>(null);
   const formRef = useRef<ServerFormHandle>(null);
 
   // Sync state with formref
@@ -58,17 +60,16 @@ export const ServerTab: React.FC<ServerTabProps> = ({
 
   const handleDeleteServer = (serverId: string) => {
     const usingServers = servers.filter((s) => s.jumphostId === serverId);
+    setServerToDelete({ id: serverId, isInUse: usingServers.length > 0 });
+  };
 
-    if (usingServers.length > 0) {
-      if (window.confirm(t.serverTab.deleteInUseConfirmation)) {
-        // Clear jumphost from servers
-        const updatedServers = servers
-          .filter((s) => s.id !== serverId)
-          .map((s) => (s.jumphostId === serverId ? { ...s, jumphostId: null } : s));
-        onServersUpdate(updatedServers);
-      }
-    } else {
-      onServersUpdate(servers.filter((s) => s.id !== serverId));
+  const confirmDeleteServer = () => {
+    if (serverToDelete) {
+      const updatedServers = servers
+        .filter((s) => s.id !== serverToDelete.id)
+        .map((s) => (s.jumphostId === serverToDelete.id ? { ...s, jumphostId: null } : s));
+      onServersUpdate(updatedServers);
+      setServerToDelete(null);
     }
   };
 
@@ -212,6 +213,15 @@ export const ServerTab: React.FC<ServerTabProps> = ({
           onSave={handleSaveServer}
         />
       </FormModal>
+
+      <ConfirmationModal
+        isOpen={!!serverToDelete}
+        title={t.serverTab.deleteTooltip}
+        message={serverToDelete?.isInUse ? t.serverTab.deleteInUseConfirmation : t.serverTab.deleteConfirmation}
+        onConfirm={confirmDeleteServer}
+        onCancel={() => setServerToDelete(null)}
+        type="danger"
+      />
     </div>
   );
 };

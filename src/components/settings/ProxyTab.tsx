@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { ProxyConfig as ProxyType, Server as ServerType } from '../../types/config';
 import { FormModal } from '../FormModal';
+import { ConfirmationModal } from '../ConfirmationModal';
 import { ProxyForm, ProxyFormHandle } from './ProxyForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
@@ -23,6 +24,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null);
   const [isSynced, setIsSynced] = useState(true);
+  const [proxyToDelete, setProxyToDelete] = useState<string | null>(null);
   const formRef = useRef<ProxyFormHandle>(null);
 
   // Sync state with formref
@@ -52,17 +54,20 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
     const usingServers = servers.filter((s) => s.proxyId === proxyId);
     
     if (usingServers.length > 0) {
-      if (window.confirm(t.proxyTab.deleteInUseConfirmation)) {
-        // Clear proxy from servers
-        const updatedServers = servers.map((s) => 
-          s.proxyId === proxyId ? { ...s, proxyId: null } : s
-        );
-        onServersUpdate(updatedServers);
-        // Delete proxy
-        onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
-      }
+      setProxyToDelete(proxyId);
     } else {
       onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
+    }
+  };
+
+  const confirmDeleteProxy = () => {
+    if (proxyToDelete) {
+      const updatedServers = servers.map((s) => 
+        s.proxyId === proxyToDelete ? { ...s, proxyId: null } : s
+      );
+      onServersUpdate(updatedServers);
+      onProxiesUpdate(proxies.filter((p) => p.id !== proxyToDelete));
+      setProxyToDelete(null);
     }
   };
 
@@ -177,6 +182,15 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
           onSave={handleSaveProxy}
         />
       </FormModal>
+
+      <ConfirmationModal
+        isOpen={!!proxyToDelete}
+        title={t.proxyTab.deleteTooltip}
+        message={t.proxyTab.deleteInUseConfirmation}
+        onConfirm={confirmDeleteProxy}
+        onCancel={() => setProxyToDelete(null)}
+        type="danger"
+      />
     </div>
   );
 };

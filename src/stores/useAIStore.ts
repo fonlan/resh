@@ -15,6 +15,7 @@ interface AIState {
   appendResponse: (sessionId: string, content: string) => void;
   setLoading: (loading: boolean) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
+  clearSessions: (serverId: string) => Promise<void>;
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -85,6 +86,12 @@ export const useAIStore = create<AIState>((set, get) => ({
     if (get().activeSessionId === sessionId) {
       set({ activeSessionId: null });
     }
+    await get().loadSessions(serverId);
+  },
+
+  clearSessions: async (serverId) => {
+    await aiService.deleteAllSessions(serverId);
+    set({ activeSessionId: null, sessions: [] });
     await get().loadSessions(serverId);
   },
 }));

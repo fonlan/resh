@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Code, Folder } from 'lucide-react';
 import { Snippet } from '../../types/config';
 import { FormModal } from '../FormModal';
+import { ConfirmationModal } from '../ConfirmationModal';
 import { SnippetForm, SnippetFormHandle } from './SnippetForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
@@ -21,6 +22,7 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
   const [isSynced, setIsSynced] = useState(true);
+  const [snippetToDelete, setSnippetToDelete] = useState<string | null>(null);
   const formRef = useRef<SnippetFormHandle>(null);
 
   const existingGroups = Array.from(new Set([
@@ -47,8 +49,13 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
   };
 
   const handleDeleteSnippet = (snippetId: string) => {
-    if (window.confirm(t.snippetsTab.deleteConfirmation)) {
-      onSnippetsUpdate(snippets.filter((s) => s.id !== snippetId));
+    setSnippetToDelete(snippetId);
+  };
+
+  const confirmDeleteSnippet = () => {
+    if (snippetToDelete) {
+      onSnippetsUpdate(snippets.filter((s) => s.id !== snippetToDelete));
+      setSnippetToDelete(null);
     }
   };
 
@@ -169,6 +176,15 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
           onSave={handleSaveSnippet}
         />
       </FormModal>
+
+      <ConfirmationModal
+        isOpen={!!snippetToDelete}
+        title={t.snippetsTab.deleteTooltip}
+        message={t.snippetsTab.deleteConfirmation}
+        onConfirm={confirmDeleteSnippet}
+        onCancel={() => setSnippetToDelete(null)}
+        type="danger"
+      />
     </div>
   );
 };

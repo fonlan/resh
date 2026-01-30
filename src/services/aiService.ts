@@ -56,4 +56,7 @@ export const aiService = {
 
   deleteSession: (sessionId: string) =>
     invoke<void>('delete_ai_session', { sessionId }),
+
+  deleteAllSessions: (serverId: string) =>
+    invoke<void>('delete_all_ai_sessions', { serverId }),
 };
