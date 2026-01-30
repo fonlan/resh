@@ -218,7 +218,7 @@ const ToolConfirmation = ({
   );
 };
 
-const MessageBubble = ({ msg, t }: { msg: ChatMessage, t: any }) => {
+const MessageBubble = ({ msg, t, isPending }: { msg: ChatMessage, t: any, isPending?: boolean }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -236,9 +236,31 @@ const MessageBubble = ({ msg, t }: { msg: ChatMessage, t: any }) => {
     <div className={`ai-message ${msg.role}`}>
       <div className="ai-message-wrapper">
         <div className="ai-message-content">
-          {msg.tool_calls ? (
-            <div className="text-xs opacity-70 mb-1">
-              {t.ai.tool.usingTools.replace('{tools}', msg.tool_calls.map((tc: ToolCall) => tc.function.name).join(', '))}
+          {msg.tool_calls && msg.tool_calls.length > 0 && !isPending ? (
+            <div className="ai-tool-confirm mb-2">
+              <div className="ai-tool-header">
+                <Check size={16} className="text-green-500" />
+                <span>{t.ai.tool.executeCommand}</span>
+              </div>
+              <div className="ai-tool-list">
+                {msg.tool_calls.map((call: ToolCall) => {
+                  let displayArgs = call.function.arguments;
+                  if (call.function.name === 'run_in_terminal') {
+                     try {
+                       const args = JSON.parse(call.function.arguments);
+                       displayArgs = args.command || displayArgs;
+                     } catch {}
+                  }
+                  return (
+                    <div key={call.id} className="ai-tool-item">
+                      <span className="font-mono text-xs opacity-70 block">
+                        {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
+                      </span>
+                      <code className="block mt-1 text-sm bg-black/20 p-1 rounded break-all">{displayArgs}</code>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
           {msg.content && (
@@ -852,9 +874,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
             )}
             
-            {currentMessages.map((msg, idx) => (
-              <MessageBubble key={`${activeSessionId}-${idx}`} msg={msg} t={t} />
-            ))}
+            {currentMessages.map((msg, idx) => {
+              const isPending = !!(pendingToolCalls && msg.tool_calls && pendingToolCalls.length > 0 && 
+                  msg.tool_calls.some(tc => pendingToolCalls.some(ptc => ptc.id === tc.id)));
+              return <MessageBubble key={`${activeSessionId}-${idx}`} msg={msg} t={t} isPending={isPending} />;
+            })}
             
             {pendingToolCalls && (
               <div className="ai-message assistant">
