@@ -125,6 +125,8 @@ pub struct AiModel {
     pub name: String,
     pub channel_id: String,
     #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
     pub synced: bool,
     #[serde(default = "default_updated_at")]
     #[serde(alias = "updated_at")]

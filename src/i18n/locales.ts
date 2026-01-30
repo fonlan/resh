@@ -235,7 +235,8 @@ export const locales = {
       },
       modelForm: {
         name: 'Model Name',
-        channel: 'Channel'
+        channel: 'Channel',
+        active: 'Enable this model'
       },
       tool: {
         confirmExecution: 'Confirm Execution',
@@ -487,7 +488,8 @@ export const locales = {
       },
       modelForm: {
         name: '模型名称',
-        channel: '所属渠道'
+        channel: '所属渠道',
+        active: '启用此模型'
       },
       tool: {
         confirmExecution: '确认执行',

@@ -123,6 +123,20 @@ fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {
         }
     }
 
+    let new_channel_ids: Vec<&String> = new.ai_channels.iter().map(|c| &c.id).collect();
+    for channel in &old.ai_channels {
+        if !new_channel_ids.contains(&&channel.id) {
+            removed.push(channel.id.clone());
+        }
+    }
+
+    let new_model_ids: Vec<&String> = new.ai_models.iter().map(|m| &m.id).collect();
+    for model in &old.ai_models {
+        if !new_model_ids.contains(&&model.id) {
+            removed.push(model.id.clone());
+        }
+    }
+
     removed
 }
 

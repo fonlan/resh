@@ -105,6 +105,7 @@ export interface AIModel {
   id: string;
   name: string;
   channelId: string;
+  enabled: boolean;
   synced: boolean;
   updatedAt: string;
 }

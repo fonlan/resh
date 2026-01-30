@@ -480,8 +480,8 @@ pub async fn get_ai_messages(
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
     load_history(&state, &session_id).await.map(|msgs| {
-        // Filter out system prompt for frontend
-        msgs.into_iter().filter(|m| m.role != "system").collect()
+        // Filter out system and tool messages for frontend to keep UI clean
+        msgs.into_iter().filter(|m| m.role != "system" && m.role != "tool").collect()
     })
 }
 
@@ -544,6 +544,8 @@ pub async fn execute_agent_tools(
     tool_call_ids: Vec<String>, // List of tool call IDs to confirm execution for
 ) -> Result<(), String> {
     tracing::debug!("[AI] execute_agent_tools called for session {}", session_id);
+
+    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
     // 1. Load the last assistant message to find the tool calls
     // Note: We need to trust the frontend provided IDs OR just fetch the last message and verify.

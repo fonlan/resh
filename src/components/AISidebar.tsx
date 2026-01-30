@@ -299,7 +299,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     createSession,
     selectSession,
     addMessage,
+    newAssistantMessage,
     appendResponse,
+    appendToolCalls,
     setLoading,
     deleteSession,
     clearSessions
@@ -329,9 +331,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   // Set default model
   useEffect(() => {
     if (config?.aiModels && config.aiModels.length > 0 && !selectedModelId) {
-      setSelectedModelId(config.aiModels[0].id);
+      const firstEnabledModel = config.aiModels.find(model => {
+        const channel = config.aiChannels?.find(c => c.id === model.channelId);
+        return model.enabled && channel?.isActive;
+      });
+      if (firstEnabledModel) {
+        setSelectedModelId(firstEnabledModel.id);
+      }
     }
-  }, [config?.aiModels, selectedModelId]);
+  }, [config?.aiModels, config?.aiChannels, selectedModelId]);
 
   // Load sessions when server changes
   useEffect(() => {
@@ -357,6 +365,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [currentMessages.length, isLoading, pendingToolCalls]);
+
+  // Focus textarea when sidebar opens or when tools are resolved
+  useEffect(() => {
+    if (isOpen && !pendingToolCalls) {
+      textareaRef.current?.focus();
+    }
+  }, [isOpen, pendingToolCalls]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -399,6 +414,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
       console.log('[AI] Request started');
       setPendingToolCalls(null);
+      newAssistantMessage(activeSessionId);
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
@@ -410,6 +426,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     const toolCallListener = listen<ToolCall[]>(`ai-tool-call-${activeSessionId}`, (event) => {
       console.log('[AI] Tool calls received:', event.payload);
       const calls = event.payload;
+
+      // Update store with tool calls so they appear in the message bubble
+      appendToolCalls(activeSessionId, calls);
 
       // Filter: if ALL calls are get_terminal_output, auto-execute immediately WITHOUT UI
       const isAllSafe = calls.every(c => c.function.name === 'get_terminal_output');
@@ -485,7 +504,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, setLoading, config, selectedModelId, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, appendResponse, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -531,7 +550,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [currentServerId, selectedModelId, createSession]);
 
   const handleSendMessage = useCallback(async () => {
-    if (!inputValue.trim()) return;
+    if (!inputValue.trim() || isLoading || !!pendingToolCalls) return;
 
     let sessionId = activeSessionId;
 
@@ -549,7 +568,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     const content = inputValue;
     setInputValue('');
-    if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.focus();
+    }
 
     // Optimistic update
     addMessage(sessionId, { role: 'user', content });
@@ -582,7 +604,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.error('[AI] Failed to send message:', err);
       setLoading(false);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setLoading, config, mode, currentTabId]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setLoading, config, mode, currentTabId, isLoading, pendingToolCalls]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
@@ -638,7 +660,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      if (!isLoading && !pendingToolCalls) {
+        handleSendMessage();
+      }
     }
   };
 
@@ -856,11 +880,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                   onChange={(e) => setSelectedModelId(e.target.value)}
                   disabled={isLoading || !!pendingToolCalls}
                 >
-                  {(config?.aiModels || []).map(model => {
-                     const channel = config?.aiChannels?.find(c => c.id === model.channelId);
-                     const label = channel ? `${channel.name} - ${model.name}` : model.name;
-                     return <option key={model.id} value={model.id}>{label}</option>;
-                  })}
+                  {(config?.aiModels || [])
+                    .filter(model => {
+                      const channel = config?.aiChannels?.find(c => c.id === model.channelId);
+                      return model.enabled && channel?.isActive;
+                    })
+                    .map(model => {
+                      const channel = config?.aiChannels?.find(c => c.id === model.channelId);
+                      const label = channel ? `${channel.name} - ${model.name}` : model.name;
+                      return <option key={model.id} value={model.id}>{label}</option>;
+                    })}
                 </select>
               </div>
             </div>
@@ -872,7 +901,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isLoading || !!pendingToolCalls}
+                disabled={!!pendingToolCalls}
                 rows={1}
               />
               <button 

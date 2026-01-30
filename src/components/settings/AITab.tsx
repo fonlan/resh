@@ -265,6 +265,8 @@ export const AITab: React.FC<AITabProps> = ({
     setModelFormData({
       name: '',
       channelId: aiChannels[0].id,
+      enabled: true,
+      synced: true,
     });
     setIsModelFormOpen(true);
   };
@@ -296,6 +298,8 @@ export const AITab: React.FC<AITabProps> = ({
         ...editingModel,
         name: modelFormData.name,
         channelId: modelFormData.channelId,
+        enabled: modelFormData.enabled ?? true,
+        synced: modelFormData.synced ?? true,
         updatedAt: now,
       };
       onAIModelsUpdate(aiModels.map((m) => (m.id === editingModel.id ? updatedModel : m)));
@@ -304,7 +308,8 @@ export const AITab: React.FC<AITabProps> = ({
         id: generateId(),
         name: modelFormData.name,
         channelId: modelFormData.channelId,
-        synced: true,
+        enabled: modelFormData.enabled ?? true,
+        synced: modelFormData.synced ?? true,
         updatedAt: now,
       };
       onAIModelsUpdate([...aiModels, newModel]);
@@ -378,10 +383,21 @@ export const AITab: React.FC<AITabProps> = ({
         ) : (
           sortedModels.map((model) => {
             const channel = aiChannels.find(c => c.id === model.channelId);
+            const isChannelActive = channel ? channel.isActive : false;
+            const effectivelyEnabled = model.enabled && isChannelActive;
+
             return (
-              <div key={model.id} className="item-card">
+              <div key={model.id} className={`item-card ${!effectivelyEnabled ? 'opacity-60' : ''}`}>
                 <div className="item-info">
-                  <span className="item-name">{model.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="item-name">{model.name}</span>
+                    {!model.enabled && <span className="tag text-xs bg-gray-700 text-gray-300">Disabled</span>}
+                    {model.enabled && !isChannelActive && (
+                      <span className="tag text-xs bg-yellow-900 text-yellow-200" title="Parent channel is disabled">
+                        Channel Disabled
+                      </span>
+                    )}
+                  </div>
                   <p className="item-detail">Channel: {channel ? channel.name : 'Unknown Channel'}</p>
                 </div>
                 <div className="item-actions">
@@ -597,6 +613,20 @@ export const AITab: React.FC<AITabProps> = ({
         title={editingModel ? t.ai.editModel : t.ai.addModel}
         onClose={() => setIsModelFormOpen(false)}
         onSubmit={handleSaveModel}
+        extraFooterContent={
+          <div className="flex items-center gap-2 mr-auto">
+            <input
+              type="checkbox"
+              id="model-synced"
+              checked={modelFormData.synced ?? true}
+              onChange={(e) => setModelFormData({ ...modelFormData, synced: e.target.checked })}
+              className="checkbox"
+            />
+            <label htmlFor="model-synced" className="text-sm font-medium text-gray-300 cursor-pointer">
+              {t.common.syncThisItem || 'Sync this item'}
+            </label>
+          </div>
+        }
       >
           <div className="form-group relative">
             <label htmlFor="model-name" className="form-label">{t.ai.modelForm.name}</label>
@@ -673,6 +703,17 @@ export const AITab: React.FC<AITabProps> = ({
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="form-group flex items-center gap-2 mt-4">
+          <input
+            type="checkbox"
+            id="model-active"
+            className="checkbox"
+            checked={modelFormData.enabled ?? true}
+            onChange={(e) => setModelFormData({ ...modelFormData, enabled: e.target.checked })}
+          />
+          <label htmlFor="model-active" className="text-sm cursor-pointer">{t.ai.modelForm.active}</label>
         </div>
       </FormModal>
 

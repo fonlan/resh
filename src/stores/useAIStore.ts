@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { ChatMessage, AISession } from '../types/ai';
+import { ChatMessage, AISession, ToolCall } from '../types/ai';
 import { aiService } from '../services/aiService';
 
 interface AIState {
@@ -12,7 +12,9 @@ interface AIState {
   createSession: (serverId: string, modelId?: string) => Promise<string>;
   selectSession: (sessionId: string | null) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
+  newAssistantMessage: (sessionId: string) => void;
   appendResponse: (sessionId: string, content: string) => void;
+  appendToolCalls: (sessionId: string, toolCalls: ToolCall[]) => void;
   setLoading: (loading: boolean) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
   clearSessions: (serverId: string) => Promise<void>;
@@ -62,6 +64,20 @@ export const useAIStore = create<AIState>((set, get) => ({
     });
   },
 
+  newAssistantMessage: (sessionId) => {
+    set(state => {
+      const current = state.messages[sessionId] || [];
+      // Don't add a new message if the last one is already an empty assistant message
+      const last = current[current.length - 1];
+      if (last && last.role === 'assistant' && !last.content && !last.tool_calls) {
+        return state;
+      }
+      return {
+        messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '' }] }
+      };
+    });
+  },
+
   appendResponse: (sessionId, content) => {
     set(state => {
       const current = state.messages[sessionId] || [];
@@ -70,12 +86,29 @@ export const useAIStore = create<AIState>((set, get) => ({
       if (last && last.role === 'assistant') {
         // Update last message
         const updated = [...current];
-        updated[updated.length - 1] = { ...last, content: last.content + content };
+        updated[updated.length - 1] = { ...last, content: (last.content || '') + content };
         return { messages: { ...state.messages, [sessionId]: updated } };
       } else {
         // Create new assistant message
         return {
           messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content }] }
+        };
+      }
+    });
+  },
+
+  appendToolCalls: (sessionId, toolCalls) => {
+    set(state => {
+      const current = state.messages[sessionId] || [];
+      const last = current[current.length - 1];
+      
+      if (last && last.role === 'assistant') {
+        const updated = [...current];
+        updated[updated.length - 1] = { ...last, tool_calls: toolCalls };
+        return { messages: { ...state.messages, [sessionId]: updated } };
+      } else {
+        return {
+          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', tool_calls: toolCalls }] }
         };
       }
     });
