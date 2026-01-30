@@ -106,7 +106,7 @@
 .ai-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px 40px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -127,13 +127,68 @@
   align-items: flex-start;
 }
 
+.ai-message-wrapper {
+  position: relative;
+  max-width: 90%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-message.user .ai-message-wrapper {
+  align-items: flex-end;
+}
+
+.ai-message.assistant .ai-message-wrapper {
+  align-items: flex-start;
+}
+
 .ai-message-content {
   padding: 8px 12px;
   border-radius: 8px;
   font-size: 13px;
   line-height: 1.5;
-  max-width: 90%;
+  width: 100%;
   word-wrap: break-word;
+}
+
+.ai-message-copy-btn {
+  position: absolute;
+  top: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--glass-border);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ai-message.user .ai-message-copy-btn {
+  left: -32px;
+}
+
+.ai-message.assistant .ai-message-copy-btn {
+  right: -32px;
+}
+
+.ai-message:hover .ai-message-copy-btn {
+  opacity: 1;
+}
+
+.ai-message-copy-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.ai-message-copy-btn.copied {
+  opacity: 1;
+  color: var(--accent-primary);
 }
 
 .ai-message.user .ai-message-content {

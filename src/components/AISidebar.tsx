@@ -7,7 +7,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2 } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
-import { ToolCall } from '../types/ai';
+import { ToolCall, ChatMessage } from '../types/ai';
 import './AISidebar.css';
 
 interface AISidebarProps {
@@ -170,7 +170,7 @@ const ToolConfirmation = ({
     }, 1000);
     
     return () => clearInterval(timer);
-  }, [countdown]); // Removed onConfirm dependency
+  }, [countdown, onConfirm]); // Added onConfirm dependency
 
   return (
     <div className={`ai-tool-confirm ${isSensitive ? 'sensitive' : ''}`}>
@@ -208,6 +208,69 @@ const ToolConfirmation = ({
           onClick={onConfirm}
         >
           {isSensitive ? t.ai.tool.confirmRun : t.ai.tool.runNow.replace('{seconds}', String(countdown))}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const MessageBubble = ({ msg, t }: { msg: ChatMessage, t: any }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (!msg.content) return;
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+    }
+  };
+
+  return (
+    <div className={`ai-message ${msg.role}`}>
+      <div className="ai-message-wrapper">
+        <div className="ai-message-content">
+          {msg.tool_calls ? (
+            <div className="text-xs opacity-70 mb-1">
+              {t.ai.tool.usingTools.replace('{tools}', msg.tool_calls.map((tc: ToolCall) => tc.function.name).join(', '))}
+            </div>
+          ) : null}
+          {msg.content && (
+            <ReactMarkdown 
+              remarkPlugins={[remarkGfm]}
+              components={{
+                pre({children}) {
+                  return <>{children}</>;
+                },
+                code({className, children}: any) {
+                  if (className && className.startsWith('language-')) {
+                    return (
+                      <CodeBlock className={className}>
+                        {children}
+                      </CodeBlock>
+                    );
+                  }
+                  return (
+                    <code className="ai-inline-reference">
+                      {children}
+                    </code>
+                  );
+                }
+              }}
+            >
+              {msg.content}
+            </ReactMarkdown>
+          )}
+        </div>
+        <button 
+          type="button"
+          className={`ai-message-copy-btn ${copied ? 'copied' : ''}`}
+          onClick={handleCopy}
+          title={t.ai.copyMessage}
+        >
+          {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
         </button>
       </div>
     </div>
@@ -714,54 +777,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             )}
             
             {currentMessages.map((msg, idx) => (
-              <div key={idx} className={`ai-message ${msg.role}`}>
-                <div className="ai-message-content">
-                  {msg.tool_calls ? (
-                      <div className="text-xs opacity-70 mb-1">
-                          {t.ai.tool.usingTools.replace('{tools}', msg.tool_calls.map(tc => tc.function.name).join(', '))}
-                      </div>
-                  ) : null}
-                  {msg.content && (
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        pre({children}) {
-                          // 不渲染 <pre> 标签，直接返回子元素
-                          return <>{children}</>;
-                        },
-                        code({className, children}: any) {
-                          // 代码块（三个反引号）
-                          if (className && className.startsWith('language-')) {
-                            return (
-                              <CodeBlock className={className}>
-                                {children}
-                              </CodeBlock>
-                            );
-                          }
-                          
-                          // 单个反引号（inline code）- 渲染为 reference 格式
-                          return (
-                            <code 
-                              className="ai-inline-reference" 
-                              style={{ 
-                                border: '1px solid var(--glass-border)', 
-                                fontStyle: 'italic',
-                                padding: '0 4px',
-                                borderRadius: '4px',
-                                background: 'transparent'
-                              }}
-                            >
-                              {children}
-                            </code>
-                          );
-                        }
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
-                  )}
-                </div>
-              </div>
+              <MessageBubble key={`${activeSessionId}-${idx}`} msg={msg} t={t} />
             ))}
             
             {pendingToolCalls && (
