@@ -172,6 +172,12 @@ pub struct GeneralSettings {
     #[serde(default)]
     #[serde(alias = "snippetsSidebarLocked", alias = "snippets_sidebar_locked")]
     pub snippets_sidebar_locked: bool,
+    #[serde(default)]
+    #[serde(alias = "aiSidebarLocked", alias = "ai_sidebar_locked")]
+    pub ai_sidebar_locked: bool,
+    #[serde(default = "default_ai_mode")]
+    #[serde(alias = "aiMode", alias = "ai_mode")]
+    pub ai_mode: String,
     #[serde(default = "default_max_recent_servers")]
     pub max_recent_servers: u32,
     #[serde(default)]
@@ -185,6 +191,10 @@ pub struct GeneralSettings {
 
 fn default_recording_mode() -> String {
     "raw".to_string()
+}
+
+fn default_ai_mode() -> String {
+    "ask".to_string()
 }
 
 fn default_max_recent_servers() -> u32 {
@@ -273,6 +283,8 @@ impl Config {
                 confirm_exit_app: true,
                 debug_enabled: false,
                 snippets_sidebar_locked: false,
+                ai_sidebar_locked: false,
+                ai_mode: default_ai_mode(),
                 max_recent_servers: 3,
                 recent_server_ids: vec![],
                 window_state: default_window_state(),

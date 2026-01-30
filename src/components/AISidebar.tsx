@@ -223,7 +223,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   currentTabId
 }) => {
   const { t } = useTranslation();
-  const { config } = useConfig();
+  const { config, saveConfig } = useConfig();
   const { 
     sessions, 
     activeSessionId, 
@@ -241,13 +241,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [isResizing, setIsResizing] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [showHistory, setShowHistory] = useState(false);
-  const [mode, setMode] = useState<'ask' | 'agent'>('ask');
+  const [mode, setMode] = useState<'ask' | 'agent'>(config?.general.aiMode as 'ask' | 'agent' || 'ask');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[] | null>(null);
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load mode from config
+  useEffect(() => {
+    if (config?.general.aiMode) {
+      setMode(config.general.aiMode as 'ask' | 'agent');
+    }
+  }, [config?.general.aiMode]);
 
   // Set default model
   useEffect(() => {
@@ -351,9 +358,30 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       // TODO: Show error in UI
     });
 
-    const doneListener = listen<string>(`ai-done-${activeSessionId}`, () => {
+    const doneListener = listen<string>(`ai-done-${activeSessionId}`, async () => {
       console.log('[AI] Response complete');
       setLoading(false);
+
+      // Auto-generate title for new sessions after first response
+      const currentSession = sessions.find(s => s.id === activeSessionId);
+      if (currentSession && currentSession.title === 'New Chat') {
+        console.log('[AI] Generating title for new session...');
+        try {
+          const model = config?.aiModels.find(m => m.id === selectedModelId);
+          const channelId = model?.channelId || '';
+          
+          await aiService.generateTitle(activeSessionId, selectedModelId, channelId);
+          console.log('[AI] Title generated successfully');
+          
+          // Reload sessions to get the updated title
+          if (currentServerId) {
+            await loadSessions(currentServerId);
+          }
+        } catch (err) {
+          console.error('[AI] Failed to generate title:', err);
+          // Don't show error to user, it's not critical
+        }
+      }
     });
 
     return () => {
@@ -363,7 +391,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, setLoading, config, selectedModelId, currentTabId]);
+  }, [activeSessionId, appendResponse, setLoading, config, selectedModelId, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -493,6 +521,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     setPendingToolCalls(null);
     setLoading(false);
     // Optionally insert a "Cancelled" system message
+  };
+
+  const handleModeChange = async (newMode: 'ask' | 'agent') => {
+    setMode(newMode);
+    if (config) {
+      try {
+        const newConfig = {
+          ...config,
+          general: {
+            ...config.general,
+            aiMode: newMode
+          }
+        };
+        await saveConfig(newConfig);
+      } catch (err) {
+        console.error('Failed to save AI mode:', err);
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -691,7 +737,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 <select 
                   className="ai-select"
                   value={mode}
-                  onChange={(e) => setMode(e.target.value as 'ask' | 'agent')}
+                  onChange={(e) => handleModeChange(e.target.value as 'ask' | 'agent')}
                   disabled={isLoading || !!pendingToolCalls}
                 >
                   <option value="ask">Ask</option>

@@ -436,3 +436,146 @@ pub async fn run_in_terminal(
     SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await?;
     Ok(format!("Command sent: {}", command))
 }
+
+/// Generate a title for an AI session based on the first conversation round
+#[tauri::command]
+pub async fn generate_session_title(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    model_id: String,
+    channel_id: String,
+) -> Result<String, String> {
+    tracing::debug!("[AI] generate_session_title called for session {}", session_id);
+
+    // 1. Check if session needs title generation
+    let current_title = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT title FROM ai_sessions WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![session_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+    };
+
+    // Only generate title if it's still "New Chat"
+    if current_title != "New Chat" {
+        tracing::debug!("[AI] Session already has a custom title: {}", current_title);
+        return Ok(current_title);
+    }
+
+    // 2. Get first round of conversation (user + assistant)
+    let messages = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT role, content FROM ai_messages 
+             WHERE session_id = ?1 
+             ORDER BY created_at ASC 
+             LIMIT 2"
+        ).map_err(|e| e.to_string())?;
+        
+        let rows = stmt.query_map(params![session_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        
+        let mut msgs = Vec::new();
+        for row in rows {
+            msgs.push(row.map_err(|e| e.to_string())?);
+        }
+        msgs
+    };
+
+    if messages.len() < 2 {
+        return Err("Not enough messages to generate title".to_string());
+    }
+
+    // 3. Get model and channel config
+    let (endpoint, api_key, model_name) = {
+        let config = state.config.lock().await;
+        let model = config.ai_models.iter().find(|m| m.id == model_id)
+            .ok_or_else(|| "Model not found".to_string())?;
+        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+            .ok_or_else(|| "Channel not found".to_string())?;
+        
+        (
+            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel.api_key.clone().unwrap_or_default(),
+            model.name.clone(),
+        )
+    };
+    
+    if api_key.is_empty() {
+        return Err("API key is not configured".to_string());
+    }
+
+    // 4. Build prompt for title generation
+    let system_prompt = "You are a helpful assistant that generates concise chat titles. \
+                        Generate a short title (max 6 words) that summarizes the main topic of the conversation. \
+                        Only output the title text, nothing else.";
+    
+    let user_content = format!(
+        "Based on this conversation, generate a concise title:\n\nUser: {}\n\nAssistant: {}",
+        messages.get(0).map(|(_, c)| c.as_str()).unwrap_or(""),
+        messages.get(1).map(|(_, c)| c.as_str()).unwrap_or("")
+    );
+
+    let title_messages = vec![
+        ChatMessage {
+            role: "system".to_string(),
+            content: Some(system_prompt.to_string()),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        ChatMessage {
+            role: "user".to_string(),
+            content: Some(user_content),
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    // 5. Call LLM to generate title
+    let mut stream = stream_openai_chat(&endpoint, &api_key, &model_name, title_messages, None).await?;
+    let mut title = String::new();
+    
+    while let Some(event_result) = stream.next().await {
+        match event_result {
+            Ok(StreamEvent::Content(chunk)) => {
+                title.push_str(&chunk);
+            },
+            Ok(StreamEvent::Done) => break,
+            Err(e) => return Err(e),
+            _ => {}
+        }
+    }
+
+    // Clean up title (trim, remove quotes)
+    let title = title.trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string();
+
+    // Limit to reasonable length
+    let title = if title.len() > 50 {
+        format!("{}...", &title[..47])
+    } else {
+        title
+    };
+
+    if title.is_empty() {
+        return Err("Failed to generate title".to_string());
+    }
+
+    // 6. Update session title in database
+    {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        conn.execute(
+            "UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![title, session_id],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    tracing::debug!("[AI] Generated title for session {}: {}", session_id, title);
+    Ok(title)
+}

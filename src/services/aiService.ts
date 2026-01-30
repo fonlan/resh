@@ -42,4 +42,15 @@ export const aiService = {
       sshSessionId,
       toolCallIds
     }),
+
+  generateTitle: (
+    sessionId: string,
+    modelId: string,
+    channelId: string
+  ) =>
+    invoke<string>('generate_session_title', {
+      sessionId,
+      modelId,
+      channelId
+    }),
 };

@@ -83,6 +83,7 @@ export interface GeneralSettings {
   debugEnabled: boolean;
   snippetsSidebarLocked: boolean;
   aiSidebarLocked: boolean;
+  aiMode: 'ask' | 'agent';
   maxRecentServers: number;
   recentServerIds: string[];
   recordingMode: 'raw' | 'text';
