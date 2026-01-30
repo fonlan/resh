@@ -3,6 +3,7 @@ import { RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { GeneralSettings } from '../../types/config';
 import { useTranslation } from '../../i18n';
 import { useConfig } from '../../hooks/useConfig';
+import { CustomSelect } from '../CustomSelect';
 
 export interface SyncTabProps {
   general: GeneralSettings;
@@ -106,17 +107,18 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
 
           <div className="form-group">
             <label htmlFor="webdav-proxy" className="form-label">{t.webdavProxy}</label>
-            <select
+            <CustomSelect
               id="webdav-proxy"
               value={general.webdav.proxyId || ''}
-              onChange={(e) => handleWebDAVUpdate('proxyId', e.target.value || null)}
-              className="form-input form-select"
-            >
-              <option value="">{t.common.none}</option>
-              {config?.proxies.map(proxy => (
-                <option key={proxy.id} value={proxy.id}>{proxy.name}</option>
-              ))}
-            </select>
+              onChange={(val) => handleWebDAVUpdate('proxyId', val || null)}
+              options={[
+                { value: '', label: t.common.none },
+                ...(config?.proxies || []).map(proxy => ({
+                    value: proxy.id,
+                    label: proxy.name
+                }))
+              ]}
+            />
           </div>
 
           <div className="form-group">

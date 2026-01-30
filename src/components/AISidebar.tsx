@@ -9,6 +9,7 @@ import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, Ale
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
+import { CustomSelect } from './CustomSelect';
 import './AISidebar.css';
 
 interface AISidebarProps {
@@ -885,25 +886,23 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             <div className="ai-controls">
               <div className="ai-select-wrapper">
                 <Sliders size={14} className="ai-select-icon" />
-                <select 
-                  className="ai-select"
+                <CustomSelect 
                   value={mode}
-                  onChange={(e) => handleModeChange(e.target.value as 'ask' | 'agent')}
+                  onChange={(val) => handleModeChange(val as 'ask' | 'agent')}
                   disabled={isLoading || !!pendingToolCalls}
-                >
-                  <option value="ask">Ask</option>
-                  <option value="agent">Agent</option>
-                </select>
+                  options={[
+                    { value: 'ask', label: 'Ask' },
+                    { value: 'agent', label: 'Agent' }
+                  ]}
+                />
               </div>
               <div className="ai-select-wrapper ai-select-wrapper-model">
                 <Sparkles size={14} className="ai-select-icon" />
-                <select
-                  className="ai-select"
+                <CustomSelect
                   value={selectedModelId}
-                  onChange={(e) => handleModelChange(e.target.value)}
+                  onChange={(val) => handleModelChange(val)}
                   disabled={isLoading || !!pendingToolCalls}
-                >
-                  {(config?.aiModels || [])
+                  options={(config?.aiModels || [])
                     .filter(model => {
                       const channel = config?.aiChannels?.find(c => c.id === model.channelId);
                       return model.enabled && channel?.isActive;
@@ -911,9 +910,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                     .map(model => {
                       const channel = config?.aiChannels?.find(c => c.id === model.channelId);
                       const label = channel ? `${channel.name} - ${model.name}` : model.name;
-                      return <option key={model.id} value={model.id}>{label}</option>;
+                      return { value: model.id, label };
                     })}
-                </select>
+                />
               </div>
             </div>
             <div className="ai-input-container">

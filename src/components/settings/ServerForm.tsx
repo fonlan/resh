@@ -3,6 +3,7 @@ import { Settings, Network, Terminal, Code } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
+import { CustomSelect } from '../CustomSelect';
 import { SnippetsTab } from './SnippetsTab';
 import './SettingsModal.css';
 
@@ -350,19 +351,18 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   </label>
                   <span className="text-xs text-gray-500">({t.common.optional})</span>
                 </div>
-                <select
+                <CustomSelect
                   id="server-auth"
                   value={formData.authId || ''}
-                  onChange={(e) => handleChange('authId', e.target.value || null)}
-                  className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">{t.serverForm.authPlaceholder}</option>
-                  {availableAuths.map((auth) => (
-                    <option key={auth.id} value={auth.id}>
-                      {auth.name} ({auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => handleChange('authId', val || null)}
+                  options={[
+                      { value: '', label: t.serverForm.authPlaceholder },
+                      ...availableAuths.map(auth => ({
+                          value: auth.id,
+                          label: `${auth.name} (${auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType})`
+                      }))
+                  ]}
+                />
               </div>
             </>
           )}
@@ -379,21 +379,20 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   <label htmlFor="server-proxy" className="block text-sm font-medium text-gray-400 mb-1">
                     {t.serverForm.proxyLabel}
                   </label>
-                  <select
+                  <CustomSelect
                     id="server-proxy"
                     value={formData.proxyId || ''}
-                    onChange={(e) => handleProxyOrJumphostChange('proxy', e.target.value)}
-                    className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">{t.common.none}</option>
-                    {[...availableProxies]
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .map((proxy) => (
-                      <option key={proxy.id} value={proxy.id}>
-                        {proxy.name} ({proxy.type.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => handleProxyOrJumphostChange('proxy', val)}
+                    options={[
+                        { value: '', label: t.common.none },
+                        ...[...availableProxies]
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map(proxy => ({
+                                value: proxy.id,
+                                label: `${proxy.name} (${proxy.type.toUpperCase()})`
+                            }))
+                    ]}
+                  />
                 </div>
 
                 {/* Jumphost */}
@@ -401,22 +400,21 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   <label htmlFor="server-jumphost" className="block text-sm font-medium text-gray-400 mb-1">
                     {t.serverForm.jumphostLabel}
                   </label>
-                  <select
+                  <CustomSelect
                     id="server-jumphost"
                     value={formData.jumphostId || ''}
-                    onChange={(e) => handleProxyOrJumphostChange('jumphost', e.target.value)}
-                    className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">{t.common.none}</option>
-                    {availableServers
-                      .filter((s) => s.id !== server?.id) // Don't allow self as jumphost
-                      .sort((a, b) => a.name.localeCompare(b.name))
-                      .map((srv) => (
-                        <option key={srv.id} value={srv.id}>
-                          {srv.name}
-                        </option>
-                      ))}
-                  </select>
+                    onChange={(val) => handleProxyOrJumphostChange('jumphost', val)}
+                    options={[
+                        { value: '', label: t.common.none },
+                        ...availableServers
+                            .filter((s) => s.id !== server?.id) // Don't allow self as jumphost
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map((srv) => ({
+                                value: srv.id,
+                                label: srv.name
+                            }))
+                    ]}
+                  />
                 </div>
 
                 {/* Keepalive Settings */}

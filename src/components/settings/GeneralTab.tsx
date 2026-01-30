@@ -1,6 +1,7 @@
 import React from 'react';
 import { GeneralSettings } from '../../types/config';
 import { useTranslation } from '../../i18n';
+import { CustomSelect } from '../CustomSelect';
 
 export interface GeneralTabProps {
   general: GeneralSettings;
@@ -41,42 +42,42 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
         <div className="space-y-4">
           <div className="form-group">
             <label htmlFor="theme-select" className="form-label">{t.theme}</label>
-            <select
+            <CustomSelect
               id="theme-select"
               value={general.theme}
-              onChange={(e) => handleThemeChange(e.target.value as 'light' | 'dark' | 'system')}
-              className="form-input form-select"
-            >
-              <option value="system">{t.system}</option>
-              <option value="light">{t.light}</option>
-              <option value="dark">{t.dark}</option>
-            </select>
+              onChange={(val) => handleThemeChange(val as 'light' | 'dark' | 'system')}
+              options={[
+                { value: 'system', label: t.system },
+                { value: 'light', label: t.light },
+                { value: 'dark', label: t.dark }
+              ]}
+            />
           </div>
 
           <div className="form-group">
             <label htmlFor="language-select" className="form-label">{t.language}</label>
-            <select
+            <CustomSelect
               id="language-select"
               value={general.language}
-              onChange={(e) => handleLanguageChange(e.target.value as 'en' | 'zh-CN')}
-              className="form-input form-select"
-            >
-              <option value="en">English</option>
-              <option value="zh-CN">简体中文</option>
-            </select>
+              onChange={(val) => handleLanguageChange(val as 'en' | 'zh-CN')}
+              options={[
+                { value: 'en', label: 'English' },
+                { value: 'zh-CN', label: '简体中文' }
+              ]}
+            />
           </div>
 
           <div className="form-group">
             <label htmlFor="recording-mode-select" className="form-label">{t.recordingMode}</label>
-            <select
+            <CustomSelect
               id="recording-mode-select"
               value={general.recordingMode || 'raw'}
-              onChange={(e) => handleRecordingModeChange(e.target.value as 'raw' | 'text')}
-              className="form-input form-select"
-            >
-              <option value="raw">{t.recordingModes.raw}</option>
-              <option value="text">{t.recordingModes.text}</option>
-            </select>
+              onChange={(val) => handleRecordingModeChange(val as 'raw' | 'text')}
+              options={[
+                { value: 'raw', label: t.recordingModes.raw },
+                { value: 'text', label: t.recordingModes.text }
+              ]}
+            />
           </div>
 
           <div className="form-group">
@@ -125,16 +126,16 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
           <div className="form-group">
             <label htmlFor="cursor-style" className="form-label">{t.cursorStyle}</label>
-            <select
+            <CustomSelect
               id="cursor-style"
               value={general.terminal.cursorStyle}
-              onChange={(e) => handleTerminalUpdate('cursorStyle', e.target.value)}
-              className="form-input form-select"
-            >
-              <option value="block">{t.cursorStyles.block}</option>
-              <option value="underline">{t.cursorStyles.underline}</option>
-              <option value="bar">{t.cursorStyles.bar}</option>
-            </select>
+              onChange={(val) => handleTerminalUpdate('cursorStyle', val)}
+              options={[
+                { value: 'block', label: t.cursorStyles.block },
+                { value: 'underline', label: t.cursorStyles.underline },
+                { value: 'bar', label: t.cursorStyles.bar }
+              ]}
+            />
           </div>
 
           <div className="form-group">

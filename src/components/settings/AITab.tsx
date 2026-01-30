@@ -5,6 +5,7 @@ import { AIChannel, AIModel, ProxyConfig } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
+import { CustomSelect } from '../CustomSelect';
 import { useTranslation } from '../../i18n';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -458,12 +459,11 @@ export const AITab: React.FC<AITabProps> = ({
         </div>
         <div className="form-group">
           <label htmlFor="channel-type" className="form-label">{t.ai.channelForm.type}</label>
-          <select
+          <CustomSelect
             id="channel-type"
-            className="form-select"
             value={channelFormData.type || 'openai'}
-            onChange={(e) => {
-              const newType = e.target.value as any;
+            onChange={(val) => {
+              const newType = val as any;
               setChannelFormData({ 
                 ...channelFormData, 
                 type: newType,
@@ -474,10 +474,11 @@ export const AITab: React.FC<AITabProps> = ({
               setCopilotAuthData(null);
               setIsPolling(false);
             }}
-          >
-            <option value="openai">OpenAI</option>
-            <option value="copilot">GitHub Copilot</option>
-          </select>
+            options={[
+                { value: 'openai', label: 'OpenAI' },
+                { value: 'copilot', label: 'GitHub Copilot' }
+            ]}
+          />
         </div>
 
         {channelFormData.type === 'copilot' ? (
@@ -591,19 +592,18 @@ export const AITab: React.FC<AITabProps> = ({
 
         <div className="form-group mt-4 pt-4 border-t border-gray-700">
           <label htmlFor="channel-proxy" className="form-label">{t.common.proxy}</label>
-          <select
+          <CustomSelect
             id="channel-proxy"
-            className="form-select"
             value={channelFormData.proxyId || ''}
-            onChange={(e) => setChannelFormData({ ...channelFormData, proxyId: e.target.value === '' ? null : e.target.value })}
-          >
-            <option value="">{t.common.noProxy}</option>
-            {proxies.map(proxy => (
-              <option key={proxy.id} value={proxy.id}>
-                {proxy.name} ({proxy.host}:{proxy.port})
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setChannelFormData({ ...channelFormData, proxyId: val === '' ? null : val })}
+            options={[
+                { value: '', label: t.common.noProxy },
+                ...proxies.map(proxy => ({
+                    value: proxy.id,
+                    label: `${proxy.name} (${proxy.host}:${proxy.port})`
+                }))
+            ]}
+          />
         </div>
       </FormModal>
 
@@ -691,18 +691,15 @@ export const AITab: React.FC<AITabProps> = ({
           </div>
         <div className="form-group">
           <label htmlFor="model-channel" className="form-label">{t.ai.modelForm.channel}</label>
-          <select
+          <CustomSelect
             id="model-channel"
-            className="form-select"
             value={modelFormData.channelId || ''}
-            onChange={(e) => setModelFormData({ ...modelFormData, channelId: e.target.value })}
-          >
-            {aiChannels.map(channel => (
-              <option key={channel.id} value={channel.id}>
-                {channel.name}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setModelFormData({ ...modelFormData, channelId: val })}
+            options={aiChannels.map(channel => ({
+                value: channel.id,
+                label: channel.name
+            }))}
+          />
         </div>
 
         <div className="form-group flex items-center gap-2 mt-4">
