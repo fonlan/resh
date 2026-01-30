@@ -34,6 +34,19 @@ export const MainWindow: React.FC = () => {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
+
+  // Sync locked sidebar state from config on initial load
+  React.useEffect(() => {
+    if (config?.general) {
+      if (config.general.aiSidebarLocked) {
+        setIsAIOpen(true);
+      }
+      if (config.general.snippetsSidebarLocked) {
+        setIsSnippetsOpen(true);
+      }
+    }
+  }, [config?.general]);
+
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId

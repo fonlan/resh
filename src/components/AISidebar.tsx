@@ -726,18 +726,34 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                       remarkPlugins={[remarkGfm]}
                       components={{
                         pre({children}) {
+                          // 不渲染 <pre> 标签，直接返回子元素
                           return <>{children}</>;
                         },
-                        code({node, inline, className, children, ...props}: any) {
-                          return !inline ? (
-                            <CodeBlock className={className}>
-                              {children}
-                            </CodeBlock>
-                          ) : (
-                            <code className={className} {...props}>
+                        code({className, children}: any) {
+                          // 代码块（三个反引号）
+                          if (className && className.startsWith('language-')) {
+                            return (
+                              <CodeBlock className={className}>
+                                {children}
+                              </CodeBlock>
+                            );
+                          }
+                          
+                          // 单个反引号（inline code）- 渲染为 reference 格式
+                          return (
+                            <code 
+                              className="ai-inline-reference" 
+                              style={{ 
+                                border: '1px solid var(--glass-border)', 
+                                fontStyle: 'italic',
+                                padding: '2px 4px',
+                                borderRadius: '4px',
+                                background: 'transparent'
+                              }}
+                            >
                               {children}
                             </code>
-                          )
+                          );
                         }
                       }}
                     >

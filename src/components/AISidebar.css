@@ -217,8 +217,21 @@
   font-size: 12px;
 }
 
-/* Inline code style */
-.ai-message-content :not(pre) > code {
+/* Inline reference style (单个反引号) - 必须在前面以便后面覆盖 */
+.ai-message-content .ai-inline-reference {
+  background: transparent !important;
+  color: var(--text-primary);
+  font-family: inherit !important;
+  font-size: inherit !important;
+  padding: 2px 4px !important;
+  font-style: italic;
+  opacity: 0.9;
+  border-radius: 4px;
+  border: 1px solid var(--glass-border) !important;
+}
+
+/* Inline code style - 只用于非 reference 的 code */
+.ai-message-content :not(pre) > code:not(.ai-inline-reference) {
   background: rgba(0, 0, 0, 0.3);
   padding: 2px 4px;
   border-radius: 4px;
