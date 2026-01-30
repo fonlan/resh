@@ -232,18 +232,23 @@ const MessageBubble = ({ msg, t, isPending }: { msg: ChatMessage, t: any, isPend
     }
   };
 
+  const visibleToolCalls = useMemo(() => {
+    if (!msg.tool_calls || isPending) return [];
+    return msg.tool_calls.filter(call => call.function.name !== 'get_terminal_output');
+  }, [msg.tool_calls, isPending]);
+
   return (
     <div className={`ai-message ${msg.role}`}>
       <div className="ai-message-wrapper">
         <div className="ai-message-content">
-          {msg.tool_calls && msg.tool_calls.length > 0 && !isPending ? (
+          {visibleToolCalls.length > 0 ? (
             <div className="ai-tool-confirm mb-2">
               <div className="ai-tool-header">
                 <Check size={16} className="text-green-500" />
                 <span>{t.ai.tool.executeCommand}</span>
               </div>
               <div className="ai-tool-list">
-                {msg.tool_calls.map((call: ToolCall) => {
+                {visibleToolCalls.map((call: ToolCall) => {
                   let displayArgs = call.function.arguments;
                   if (call.function.name === 'run_in_terminal') {
                      try {
