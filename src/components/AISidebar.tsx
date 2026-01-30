@@ -882,6 +882,22 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             {currentMessages.map((msg, idx) => {
               const isPending = !!(pendingToolCalls && msg.tool_calls && pendingToolCalls.length > 0 && 
                   msg.tool_calls.some(tc => pendingToolCalls.some(ptc => ptc.id === tc.id)));
+              
+              // Filter out completely empty assistant messages (no content and no visible tool calls)
+              // But keep them if they might contain pending tools that are handled by the bottom component
+              if (msg.role === 'assistant') {
+                const hasContent = msg.content && msg.content.trim().length > 0;
+                const hasVisibleTools = msg.tool_calls && msg.tool_calls.some(tc => 
+                  tc.function.name !== 'get_terminal_output'
+                );
+                
+                // If it has no content and no visible tools, don't render it
+                // Note: Pending tools are rendered separately at the bottom, so we don't need to worry about hiding them here
+                if (!hasContent && !hasVisibleTools) {
+                  return null;
+                }
+              }
+
               return <MessageBubble key={`${activeSessionId}-${idx}`} msg={msg} t={t} isPending={isPending} />;
             })}
             
