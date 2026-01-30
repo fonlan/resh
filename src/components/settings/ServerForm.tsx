@@ -95,13 +95,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     const portError = validatePort(formData.port, t.common.port);
     if (portError) newErrors.port = portError;
 
-    // Always validate username
-    const usernameError = validateRequired(formData.username, t.serverForm.usernameLabel);
-    if (usernameError) newErrors.username = usernameError;
-
-    // Authentication is required
-    const authError = validateRequired(formData.authId || '', t.serverForm.authLabel);
-    if (authError) newErrors.authId = authError;
+    // Username and auth are optional - will be prompted at connect time if missing
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -331,35 +325,36 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
                 {/* Username */}
                 <div>
-                  <label htmlFor="server-username" className="block text-sm font-medium text-gray-300 mb-1">
-                    {t.serverForm.usernameLabel}
-                  </label>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="server-username" className="block text-sm font-medium text-gray-300 mb-1">
+                      {t.serverForm.usernameLabel}
+                    </label>
+                    <span className="text-xs text-gray-500">({t.common.optional})</span>
+                  </div>
                   <input
                     id="server-username"
                     type="text"
                     value={formData.username}
                     onChange={(e) => handleChange('username', e.target.value)}
                     placeholder={t.serverForm.usernamePlaceholder}
-                    className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                      errors.username ? 'border-red-500' : 'border-gray-600'
-                    } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
-                  {errors.username && <p className="text-red-400 text-xs mt-1">{errors.username}</p>}
                 </div>
               </div>
 
               {/* Authentication Selection */}
               <div>
-                <label htmlFor="server-auth" className="block text-sm font-medium text-gray-300 mb-1">
-                  {t.serverForm.authLabel}
-                </label>
+                <div className="flex items-center gap-2">
+                  <label htmlFor="server-auth" className="block text-sm font-medium text-gray-300 mb-1">
+                    {t.serverForm.authLabel}
+                  </label>
+                  <span className="text-xs text-gray-500">({t.common.optional})</span>
+                </div>
                 <select
                   id="server-auth"
                   value={formData.authId || ''}
                   onChange={(e) => handleChange('authId', e.target.value || null)}
-                  className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                    errors.authId ? 'border-red-500' : 'border-gray-600'
-                  } text-white focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">{t.serverForm.authPlaceholder}</option>
                   {availableAuths.map((auth) => (
@@ -368,9 +363,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     </option>
                   ))}
                 </select>
-                {errors.authId && (
-                  <p className="text-red-400 text-xs mt-1">{errors.authId}</p>
-                )}
               </div>
             </>
           )}

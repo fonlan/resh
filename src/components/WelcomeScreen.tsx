@@ -51,7 +51,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   <div className="server-card-content">
                     <h3 className="server-card-name">{server.name}</h3>
                     <p className="server-card-info">
-                      {server.username}@{server.host}
+                      {server.username ? `${server.username}@` : ''}{server.host}
                     </p>
                   </div>
                 </button>

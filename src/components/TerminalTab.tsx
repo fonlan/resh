@@ -134,7 +134,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         // Reset input mode on new connection attempt
         isInputModeRef.current = false;
         inputBufferRef.current = '';
-        
+
         const connectingMsg = t.terminalTab.connecting.replace('{name}', server.name);
         updateStatus(connectingMsg);
 
@@ -143,22 +143,28 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         let passphrase = manualCreds?.passphrase;
         let username = manualCreds?.username || server.username;
 
+        // Check if manual auth is needed (missing username or auth)
+        if (!manualCreds && (!server.username || !server.authId)) {
+          setShowManualAuth(true);
+          connectedRef.current = false;
+          return;
+        }
+
         if (!manualCreds) {
           const auth = authenticationsRef.current.find(a => a.id === server.authId);
-          if (!auth && server.authId) {
-            const errorMsg = t.terminalTab.error.replace('{error}', 'Authentication not found.');
-            writeRef.current('\r\n' + errorMsg + '\r\n');
-            updateStatus('Authentication not found');
-            setShowManualAuth(true);
-            connectedRef.current = false;
-            return;
-          }
           if (auth?.type === 'password') {
-            password = auth.password;
+            password = auth.password || undefined;
           } else if (auth?.type === 'key') {
-            private_key = auth.keyContent;
-            passphrase = auth.passphrase;
+            private_key = auth.keyContent || undefined;
+            passphrase = auth.passphrase || undefined;
           }
+        }
+
+        // Ensure username is provided
+        if (!username) {
+          setShowManualAuth(true);
+          connectedRef.current = false;
+          return;
         }
 
         const proxy = proxiesRef.current.find(p => p.id === server.proxyId);
@@ -172,18 +178,35 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
             let jhPrivateKey: string | undefined = undefined;
             let jhPassphrase: string | undefined = undefined;
             if (jhAuth?.type === 'password') {
-              jhPassword = jhAuth.password;
+              jhPassword = jhAuth.password || undefined;
             } else if (jhAuth?.type === 'key') {
-              jhPrivateKey = jhAuth.keyContent;
-              jhPassphrase = jhAuth.passphrase;
+              jhPrivateKey = jhAuth.keyContent || undefined;
+              jhPassphrase = jhAuth.passphrase || undefined;
             }
-            jumphost = { host: jhServer.host, port: jhServer.port, username: jhUsername, password: jhPassword, private_key: jhPrivateKey, passphrase: jhPassphrase };
+            jumphost = {
+              host: jhServer.host,
+              port: jhServer.port,
+              username: jhUsername,
+              password: jhPassword || undefined,
+              private_key: jhPrivateKey || undefined,
+              passphrase: jhPassphrase || undefined
+            };
           }
         }
 
-        const response = await invoke<{ session_id: string }>('connect_to_server', { 
-          params: { host: server.host, port: server.port, username, password, private_key, passphrase, proxy: proxy || null, jumphost: jumphost || null } 
-        });
+        const response = await invoke<{ session_id: string }>('connect_to_server',
+          {
+            params: {
+              host: server.host,
+              port: server.port,
+              username,
+              password: password || undefined,
+              private_key: private_key || undefined,
+              passphrase: passphrase || undefined,
+              proxy: proxy || null,
+              jumphost: jumphost || null
+            }
+          });
         
         const sid = response.session_id;
         sessionIdRef.current = sid;
@@ -328,10 +351,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   return (
     <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>
-      <StatusBar 
-        leftText={statusText} 
-        rightText={`${server.username}@${server.host}`} 
-        theme={theme} 
+      <StatusBar
+        leftText={statusText}
+        rightText={server.username ? `${server.username}@${server.host}` : server.host}
+        theme={theme}
         connected={isConnected}
       />
       <div className="relative flex-1" style={{ padding: '8px', minHeight: 0, overflow: 'hidden' }}>

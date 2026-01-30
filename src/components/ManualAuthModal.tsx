@@ -21,7 +21,7 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
       <div className="bg-gray-900 p-6 rounded-lg border border-gray-700 w-full max-w-md shadow-2xl">
         <h3 className="text-lg font-semibold text-white mb-4">Manual Authentication</h3>
         <p className="text-sm text-gray-400 mb-4">
-          Credentials for {serverName} not found in config. Please enter manually:
+          Enter credentials for {serverName}:
         </p>
 
         <div className="space-y-4">

@@ -97,7 +97,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
                   <div className="dropdown-item-content">
                     <span className="dropdown-item-name">{server.name}</span>
                     <span className="dropdown-item-info">
-                      {server.username}@{server.host}
+                      {server.username ? `${server.username}@` : ''}{server.host}
                     </span>
                   </div>
                 </button>

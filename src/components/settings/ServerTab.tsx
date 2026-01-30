@@ -128,7 +128,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                 <div className="item-info">
                   <p className="item-name">{server.name}</p>
                   <p className="item-detail">
-                    {server.username}@{server.host}:{server.port}
+                    {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
                   </p>
                   {(auth || proxy || jumphost) && (
                     <div className="item-tags">
