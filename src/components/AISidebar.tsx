@@ -89,7 +89,15 @@ const ToolConfirmation = ({
   const [isSensitive, setIsSensitive] = useState(false);
   
   useEffect(() => {
-    const sensitiveRegex = /\b(rm|mv|dd|wget|curl|chmod|chown|reboot|shutdown|init|systemctl|service|kill|pkill)\b|[>|]/;
+    // Dangerous commands that should always require confirmation
+    const alwaysDangerous = /\b(rm|dd|mkfs|fdisk|reboot|shutdown|halt|poweroff|init)\b/;
+    
+    // Potentially dangerous commands (chmod, kill, etc.)
+    const potentiallyDangerous = /\b(mv|chmod|chown|chgrp|systemctl|service|kill|pkill|killall)\b/;
+    
+    // Commands that are dangerous when piped to shell (curl xxx | bash)
+    const dangerousWhenPiped = /\b(curl|wget)\b.*\|.*\b(bash|sh|zsh|fish|python|perl|ruby)\b/;
+    
     let sensitive = false;
 
     toolCalls.forEach(call => {
@@ -97,15 +105,36 @@ const ToolConfirmation = ({
         try {
           const args = JSON.parse(call.function.arguments);
           if (args.command) {
-            // Remove safe redirections to /dev/null and FD redirections (e.g. 2>&1) from sensitivity check
-            let cleanCommand = args.command.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, '');
-            cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, '');
+            const originalCommand = args.command;
             
-            if (sensitiveRegex.test(cleanCommand)) {
+            // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
+            let cleanCommand = originalCommand.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, ' ');
+            cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, ' ');
+            
+            console.log('[AI ToolConfirm] Original command:', originalCommand);
+            console.log('[AI ToolConfirm] Cleaned command:', cleanCommand);
+            
+            // Check for always dangerous commands
+            if (alwaysDangerous.test(cleanCommand)) {
+              console.log('[AI ToolConfirm] Detected always-dangerous command');
               sensitive = true;
+            } 
+            // Check for potentially dangerous commands
+            else if (potentiallyDangerous.test(cleanCommand)) {
+              console.log('[AI ToolConfirm] Detected potentially-dangerous command');
+              sensitive = true;
+            }
+            // Check for curl/wget piped to shell
+            else if (dangerousWhenPiped.test(cleanCommand)) {
+              console.log('[AI ToolConfirm] Detected curl/wget piped to shell');
+              sensitive = true;
+            }
+            else {
+              console.log('[AI ToolConfirm] Command is safe');
             }
           }
         } catch (e) {
+          console.error('[AI ToolConfirm] Failed to parse command arguments:', e);
           sensitive = true;
         }
       }
@@ -115,7 +144,10 @@ const ToolConfirmation = ({
     
     // Auto-execute if NOT sensitive
     if (!sensitive) {
+      console.log('[AI ToolConfirm] Starting 5s countdown for auto-execution');
       setCountdown(5);
+    } else {
+      console.log('[AI ToolConfirm] Sensitive command detected, requiring manual confirmation');
     }
   }, [toolCalls]);
 
