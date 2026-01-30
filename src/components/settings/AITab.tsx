@@ -427,17 +427,17 @@ export const AITab: React.FC<AITabProps> = ({
                      <div className="text-sm text-gray-300">
                        1. Copy code: <strong className="text-white select-all">{copilotAuthData.user_code}</strong>
                      </div>
-                     <div className="text-sm text-gray-300">
-                       2. Open link: 
-                       <a 
-                         href={copilotAuthData.verification_uri} 
-                         target="_blank" 
-                         rel="noopener noreferrer"
-                         className="text-blue-400 hover:underline ml-1 inline-flex items-center gap-1"
-                       >
-                         {copilotAuthData.verification_uri} <ExternalLink size={12} />
-                       </a>
-                     </div>
+                      <div className="text-sm text-gray-300">
+                        2. Open link: 
+                        <button 
+                          type="button"
+                          onClick={() => invoke('open_url', { url: copilotAuthData.verification_uri })}
+                          className="text-blue-400 hover:underline ml-1 inline-flex items-center gap-1 bg-transparent border-none p-0 cursor-pointer"
+                        >
+                          {copilotAuthData.verification_uri} <ExternalLink size={12} />
+                        </button>
+                      </div>
+
                      
                      <div className="flex gap-2">
                         <button 

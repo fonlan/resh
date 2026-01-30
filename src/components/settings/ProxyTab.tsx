@@ -92,6 +92,8 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
     }
   };
 
+  const sortedProxies = [...proxies].sort((a, b) => a.name.localeCompare(b.name));
+
   return (
     <div className="tab-container">
       <div className="flex justify-between items-center mb-4">
@@ -112,7 +114,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
         </div>
       ) : (
         <div className="item-list">
-          {proxies.map((proxy) => (
+          {sortedProxies.map((proxy) => (
             <div
               key={proxy.id}
               className="item-card"
