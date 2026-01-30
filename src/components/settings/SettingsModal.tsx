@@ -331,8 +331,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 aiChannels={localConfig.aiChannels || []}
                 aiModels={localConfig.aiModels || []}
                 proxies={localConfig.proxies || []}
+                general={localConfig.general}
                 onAIChannelsUpdate={handleAIChannelsUpdate}
                 onAIModelsUpdate={handleAIModelsUpdate}
+                onGeneralUpdate={handleGeneralUpdate}
               />
             )}
             {activeTab === 'general' && (

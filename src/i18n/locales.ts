@@ -206,6 +206,7 @@ export const locales = {
     ai: {
       sidebarTitle: 'AI Assistant',
       tabTitle: 'AI',
+      configuration: 'Configuration',
       newChat: 'New Chat',
       history: 'History',
       clearHistory: 'Clear History',
@@ -459,6 +460,7 @@ export const locales = {
     ai: {
       sidebarTitle: 'AI 助手',
       tabTitle: 'AI',
+      configuration: '配置',
       newChat: '新对话',
       history: '历史记录',
       clearHistory: '清空历史',

@@ -13,13 +13,26 @@ use std::collections::HashMap;
 // --- Helper Functions ---
 
 async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bool) -> Result<Vec<ChatMessage>, String> {
+    let max_history = {
+        let config = state.config.lock().await;
+        config.general.ai_max_history
+    };
+
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
+    
+    // Get the last N messages
     let mut stmt = conn.prepare(
-        "SELECT role, content, tool_calls, tool_call_id FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC"
+        "SELECT role, content, tool_calls, tool_call_id FROM (
+            SELECT role, content, tool_calls, tool_call_id, created_at 
+            FROM ai_messages 
+            WHERE session_id = ?1 
+            ORDER BY created_at DESC 
+            LIMIT ?2
+        ) ORDER BY created_at ASC"
     ).map_err(|e| e.to_string())?;
     
-    let rows = stmt.query_map(params![session_id], |row| {
+    let rows = stmt.query_map(params![session_id, max_history], |row| {
          let role: String = row.get(0)?;
          let content_raw: String = row.get(1)?;
          let tool_calls_json: Option<String> = row.get(2).ok();

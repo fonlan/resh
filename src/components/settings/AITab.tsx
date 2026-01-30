@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
-import { AIChannel, AIModel, ProxyConfig } from '../../types/config';
+import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
@@ -13,8 +13,10 @@ interface AITabProps {
   aiChannels: AIChannel[];
   aiModels: AIModel[];
   proxies: ProxyConfig[];
+  general: GeneralSettings;
   onAIChannelsUpdate: (channels: AIChannel[]) => void;
   onAIModelsUpdate: (models: AIModel[]) => void;
+  onGeneralUpdate: (settings: GeneralSettings) => void;
 }
 
 interface DeviceCodeResponse {
@@ -29,8 +31,10 @@ export const AITab: React.FC<AITabProps> = ({
   aiChannels,
   aiModels,
   proxies,
+  general,
   onAIChannelsUpdate,
   onAIModelsUpdate,
+  onGeneralUpdate,
 }) => {
   const { t } = useTranslation();
   // State for Channel Form
@@ -320,6 +324,31 @@ export const AITab: React.FC<AITabProps> = ({
 
   return (
     <div className="tab-container">
+      {/* General Settings Section */}
+      <div className="section-header flex justify-between items-center mb-4">
+        <h3 className="section-title">{t.ai.configuration}</h3>
+      </div>
+      
+      <div className="mb-8">
+         <div className="form-group">
+            <label htmlFor="ai-max-history" className="form-label">Max Chat Context</label>
+            <input 
+                id="ai-max-history"
+                type="number" 
+                className="form-input"
+                value={general.aiMaxHistory || 10}
+                onChange={(e) => {
+                    const val = parseInt(e.target.value);
+                    if (!isNaN(val)) {
+                        onGeneralUpdate({...general, aiMaxHistory: val});
+                    }
+                }}
+                min={1}
+                max={100}
+            />
+         </div>
+      </div>
+
       {/* AI Channels Section */}
       <div className="section-header flex justify-between items-center mb-4">
         <h3 className="section-title">{t.ai.channels}</h3>
