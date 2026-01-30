@@ -47,7 +47,7 @@
 .custom-select-dropdown {
     position: fixed; /* Using fixed because of Portal */
     z-index: 9999;
-    background-color: #0f172a !important; /* Force dark blue-black */
+    background-color: var(--bg-secondary);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-md);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
@@ -61,7 +61,7 @@
     padding: 10px 14px;
     background: transparent;
     border: none;
-    color: #f8fafc !important; /* Force light text */
+    color: var(--text-primary);
     font-size: 13px;
     cursor: pointer;
     transition: background-color 0.2s ease;
@@ -72,7 +72,7 @@
 }
 
 .custom-select-item:hover, .custom-select-item.selected {
-    background-color: #1e293b !important;
+    background-color: var(--bg-tertiary);
 }
 
 .custom-select-item.selected {

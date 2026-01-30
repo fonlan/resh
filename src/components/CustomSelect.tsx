@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
 import './CustomSelect.css';
@@ -31,11 +31,11 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     const [dropdownPosition, setDropdownPosition] = useState<{ top: number, left: number, width: number } | null>(null);
     const containerRef = useRef<HTMLDivElement>(null);
 
-    const updatePosition = React.useCallback(() => {
+    const updatePosition = useCallback(() => {
         if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
             setDropdownPosition({
-                top: rect.bottom + 4, // Add a small gap
+                top: rect.bottom + 4,
                 left: rect.left,
                 width: rect.width
             });
@@ -58,26 +58,72 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     // Handle click outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+            if (!isOpen) return;
+            
+            const target = event.target as Node;
+            const isInsideContainer = containerRef.current && containerRef.current.contains(target);
+            
+            if (!isInsideContainer) {
                 setIsOpen(false);
             }
         };
 
-        if (isOpen) {
-            document.addEventListener('mousedown', handleClickOutside);
-        }
+        document.addEventListener('mousedown', handleClickOutside);
 
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
         };
     }, [isOpen]);
 
-    const handleSelect = (optionValue: string | number) => {
+    const handleSelect = (optionValue: string | number, event: React.MouseEvent) => {
+        event.stopPropagation();
         onChange(optionValue.toString());
         setIsOpen(false);
     };
 
     const selectedOption = options.find(opt => String(opt.value) === String(value));
+
+    const dropdownContent = (
+        <div 
+            className="custom-select-dropdown"
+            style={dropdownPosition ? {
+                top: dropdownPosition.top,
+                left: dropdownPosition.left,
+                width: dropdownPosition.width
+            } : undefined}
+            role="listbox"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+        >
+            {options.length === 0 ? (
+                <div className="custom-select-item" style={{ cursor: 'default', opacity: 0.5 }}>
+                    No options
+                </div>
+            ) : (
+                options.map((option) => (
+                    <div
+                        key={option.value}
+                        className={`custom-select-item ${String(option.value) === String(value) ? 'selected' : ''}`}
+                        onClick={(e) => handleSelect(option.value, e)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onChange(option.value.toString());
+                                setIsOpen(false);
+                            }
+                        }}
+                        role="option"
+                        aria-selected={String(option.value) === String(value)}
+                        tabIndex={0}
+                        title={option.label}
+                    >
+                        {option.label}
+                    </div>
+                ))
+            )}
+        </div>
+    );
 
     return (
         <div 
@@ -108,41 +154,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             </div>
 
             {isOpen && dropdownPosition && createPortal(
-                <div 
-                    className="custom-select-dropdown"
-                    style={{
-                        top: dropdownPosition.top,
-                        left: dropdownPosition.left,
-                        width: dropdownPosition.width
-                    }}
-                    role="listbox"
-                >
-                    {options.length === 0 ? (
-                        <div className="custom-select-item" style={{ cursor: 'default', opacity: 0.5 }}>
-                            No options
-                        </div>
-                    ) : (
-                        options.map((option) => (
-                            <div
-                                key={option.value}
-                                className={`custom-select-item ${String(option.value) === String(value) ? 'selected' : ''}`}
-                                onClick={() => handleSelect(option.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' || e.key === ' ') {
-                                        e.preventDefault();
-                                        handleSelect(option.value);
-                                    }
-                                }}
-                                role="option"
-                                aria-selected={String(option.value) === String(value)}
-                                tabIndex={0}
-                                title={option.label}
-                            >
-                                {option.label}
-                            </div>
-                        ))
-                    )}
-                </div>,
+                dropdownContent,
                 document.body
             )}
         </div>
