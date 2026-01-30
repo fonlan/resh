@@ -171,3 +171,72 @@
 .snippet-suggestion-item:hover {
   background-color: #1e293b !important;
 }
+
+/* Form Styles for Modal Content */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+
+.form-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-ui);
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+  transition: all var(--transition-fast);
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
+
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.form-select {
+  /* Inherit input styles */
+  width: 100%;
+  padding: 10px 12px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-ui);
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+  transition: all var(--transition-fast);
+
+  /* Specific select styles */
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 16px;
+  padding-right: 40px;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+}
