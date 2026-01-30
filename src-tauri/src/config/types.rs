@@ -109,6 +109,8 @@ pub struct AiChannel {
     pub endpoint: Option<String>,
     pub api_key: Option<String>,
     #[serde(default = "default_true")]
+    pub is_active: bool,
+    #[serde(default = "default_true")]
     pub synced: bool,
     #[serde(default = "default_updated_at")]
     #[serde(alias = "updated_at")]

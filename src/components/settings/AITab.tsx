@@ -118,6 +118,7 @@ export const AITab: React.FC<AITabProps> = ({
       endpoint: '',
       apiKey: '',
       isActive: true,
+      synced: true,
     });
     setCopilotAuthData(null);
     setIsPolling(false);
@@ -159,6 +160,7 @@ export const AITab: React.FC<AITabProps> = ({
         endpoint: channelFormData.endpoint,
         apiKey: channelFormData.apiKey,
         isActive: channelFormData.isActive !== undefined ? channelFormData.isActive : true,
+        synced: channelFormData.synced !== undefined ? channelFormData.synced : editingChannel.synced,
         updatedAt: now,
       };
       onAIChannelsUpdate(aiChannels.map((c) => (c.id === editingChannel.id ? updatedChannel : c)));
@@ -170,7 +172,7 @@ export const AITab: React.FC<AITabProps> = ({
         endpoint: channelFormData.endpoint,
         apiKey: channelFormData.apiKey,
         isActive: channelFormData.isActive !== undefined ? channelFormData.isActive : true,
-        synced: true,
+        synced: channelFormData.synced !== undefined ? channelFormData.synced : true,
         updatedAt: now,
       };
       onAIChannelsUpdate([...aiChannels, newChannel]);
@@ -338,6 +340,20 @@ export const AITab: React.FC<AITabProps> = ({
         title={editingChannel ? t.ai.editChannel : t.ai.addChannel}
         onClose={() => setIsChannelFormOpen(false)}
         onSubmit={handleSaveChannel}
+        extraFooterContent={
+          <div className="flex items-center gap-2 mr-auto">
+            <input
+              type="checkbox"
+              id="channel-synced"
+              checked={channelFormData.synced ?? true}
+              onChange={(e) => setChannelFormData({ ...channelFormData, synced: e.target.checked })}
+              className="checkbox"
+            />
+            <label htmlFor="channel-synced" className="text-sm font-medium text-gray-300 cursor-pointer">
+              {t.common.syncThisItem || 'Sync this item'}
+            </label>
+          </div>
+        }
       >
         <div className="form-group">
           <label htmlFor="channel-name" className="form-label">{t.ai.channelForm.name}</label>
