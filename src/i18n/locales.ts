@@ -229,6 +229,18 @@ export const locales = {
       modelForm: {
         name: 'Model Name',
         channel: 'Channel'
+      },
+      tool: {
+        confirmExecution: 'Confirm Execution',
+        autoExecute: 'Auto-execute in {seconds}s',
+        cancel: 'Cancel',
+        runNow: 'Run Now ({seconds}s)',
+        confirmRun: 'Confirm Run',
+        usingTools: 'Using tools: {tools}',
+        codeCopied: 'Code copied',
+        copyCode: 'Copy code',
+        insertToTerminal: 'Insert to terminal',
+        executeCommand: 'Execute Command'
       }
     }
   },
@@ -462,6 +474,18 @@ export const locales = {
       modelForm: {
         name: '模型名称',
         channel: '所属渠道'
+      },
+      tool: {
+        confirmExecution: '确认执行',
+        autoExecute: '{seconds}秒后自动执行',
+        cancel: '取消',
+        runNow: '立即运行 ({seconds}s)',
+        confirmRun: '确认运行',
+        usingTools: '使用工具: {tools}',
+        codeCopied: '代码已复制',
+        copyCode: '复制代码',
+        insertToTerminal: '插入终端',
+        executeCommand: '执行命令'
       }
     }
   }

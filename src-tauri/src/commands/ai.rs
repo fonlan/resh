@@ -116,7 +116,7 @@ async fn execute_tools_and_save(
     tools: Vec<ToolCall>
 ) -> Result<(), String> {
     for call in tools {
-        tracing::info!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
+        tracing::debug!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
         
         let result = match call.function.name.as_str() {
             "get_terminal_text" => {
@@ -325,7 +325,7 @@ pub async fn send_chat_message(
     mode: Option<String>, // "ask" or "agent"
     _ssh_session_id: Option<String>,
 ) -> Result<(), String> {
-    tracing::info!("[AI] send_chat_message called: session_id={}, model_id={}, mode={:?}", 
+    tracing::debug!("[AI] send_chat_message called: session_id={}, model_id={}, mode={:?}", 
         session_id, model_id, mode);
     
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
@@ -369,7 +369,7 @@ pub async fn execute_agent_tools(
     ssh_session_id: Option<String>,
     tool_call_ids: Vec<String>, // List of tool call IDs to confirm execution for
 ) -> Result<(), String> {
-    tracing::info!("[AI] execute_agent_tools called for session {}", session_id);
+    tracing::debug!("[AI] execute_agent_tools called for session {}", session_id);
 
     // 1. Load the last assistant message to find the tool calls
     // Note: We need to trust the frontend provided IDs OR just fetch the last message and verify.
@@ -395,9 +395,9 @@ pub async fn execute_agent_tools(
         return Ok(());
     }
 
-    tracing::info!("[AI] Executing {} tools...", tools_filtered.len());
+    tracing::debug!("[AI] Executing {} tools...", tools_filtered.len());
     execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered).await?;
-    tracing::info!("[AI] Tool execution complete. Running next AI turn...");
+    tracing::debug!("[AI] Tool execution complete. Running next AI turn...");
 
     // Continue the loop (1 turn)
     let tools = Some(create_agent_tools());
@@ -405,13 +405,13 @@ pub async fn execute_agent_tools(
 
     if let Some(calls) = next_tool_calls {
         if !calls.is_empty() {
-             tracing::info!("[AI] Next turn generated {} more tool calls", calls.len());
+             tracing::debug!("[AI] Next turn generated {} more tool calls", calls.len());
              let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
              return Ok(());
         }
     }
 
-    tracing::info!("[AI] Agent turn complete.");
+    tracing::debug!("[AI] Agent turn complete.");
     window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
     Ok(())
 }

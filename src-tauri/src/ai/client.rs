@@ -68,7 +68,7 @@ pub async fn stream_openai_chat(
     messages: Vec<ChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, String>> + Send>>, String> {
-    tracing::info!("[AI Client] Starting OpenAI API request to {}", endpoint);
+    tracing::debug!("[AI Client] Starting OpenAI API request to {}", endpoint);
     tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
         model, messages.len(), tools.is_some());
     
@@ -96,7 +96,7 @@ pub async fn stream_openai_chat(
         format!("{}/chat/completions", endpoint)
     };
 
-    tracing::info!("[AI Client] POST {}", url);
+    tracing::debug!("[AI Client] POST {}", url);
 
     let response = client.post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -109,7 +109,7 @@ pub async fn stream_openai_chat(
             e.to_string()
         })?;
 
-    tracing::info!("[AI Client] Response status: {}", response.status());
+    tracing::debug!("[AI Client] Response status: {}", response.status());
     
     if !response.status().is_success() {
         let text = response.text().await.unwrap_or_default();

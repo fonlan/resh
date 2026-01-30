@@ -20,6 +20,7 @@ interface AISidebarProps {
 }
 
 const CodeBlock = ({ children, className }: { children: React.ReactNode, className?: string }) => {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   
   const codeContent = useMemo(() => {
@@ -50,16 +51,18 @@ const CodeBlock = ({ children, className }: { children: React.ReactNode, classNa
         <span className="ai-code-lang">{language}</span>
         <div className="ai-code-actions">
           <button 
+            type="button"
             className="ai-code-btn" 
             onClick={handleCopy} 
-            title="Copy code"
+            title={t.ai.tool.copyCode}
           >
             {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
           </button>
           <button 
+            type="button"
             className="ai-code-btn" 
             onClick={handleInsert} 
-            title="Insert to terminal"
+            title={t.ai.tool.insertToTerminal}
           >
             <Terminal size={14} />
           </button>
@@ -81,6 +84,7 @@ const ToolConfirmation = ({
   onConfirm: () => void, 
   onCancel: () => void 
 }) => {
+  const { t } = useTranslation();
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isSensitive, setIsSensitive] = useState(false);
   
@@ -92,8 +96,14 @@ const ToolConfirmation = ({
       if (call.function.name === 'run_in_terminal') {
         try {
           const args = JSON.parse(call.function.arguments);
-          if (args.command && sensitiveRegex.test(args.command)) {
-            sensitive = true;
+          if (args.command) {
+            // Remove safe redirections to /dev/null and FD redirections (e.g. 2>&1) from sensitivity check
+            let cleanCommand = args.command.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, '');
+            cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, '');
+            
+            if (sensitiveRegex.test(cleanCommand)) {
+              sensitive = true;
+            }
           }
         } catch (e) {
           sensitive = true;
@@ -134,9 +144,9 @@ const ToolConfirmation = ({
     <div className={`ai-tool-confirm ${isSensitive ? 'sensitive' : ''}`}>
       <div className="ai-tool-header">
         {isSensitive ? (
-          <><AlertTriangle size={16} className="text-red-500" /> Confirm Execution</>
+          <><AlertTriangle size={16} className="text-red-500" /> {t.ai.tool.confirmExecution}</>
         ) : (
-          <><Clock size={16} /> Auto-execute in {countdown}s</>
+          <><Clock size={16} /> {t.ai.tool.autoExecute.replace('{seconds}', String(countdown))}</>
         )}
       </div>
       <div className="ai-tool-list">
@@ -151,7 +161,7 @@ const ToolConfirmation = ({
           return (
             <div key={call.id} className="ai-tool-item">
               <span className="font-mono text-xs opacity-70">
-                {call.function.name === 'run_in_terminal' ? 'Execute Command' : call.function.name}
+                {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
               </span>
               <code className="block mt-1 text-sm bg-black/20 p-1 rounded">{displayArgs}</code>
             </div>
@@ -159,13 +169,13 @@ const ToolConfirmation = ({
         })}
       </div>
       <div className="ai-tool-actions">
-        <button type="button" className="ai-btn-secondary" onClick={onCancel}>Cancel</button>
+        <button type="button" className="ai-btn-secondary" onClick={onCancel}>{t.ai.tool.cancel}</button>
         <button 
           type="button"
           className={`ai-btn-primary ${isSensitive ? 'bg-red-600 hover:bg-red-700' : ''}`} 
           onClick={onConfirm}
         >
-          {isSensitive ? 'Confirm Run' : `Run Now (${countdown}s)`}
+          {isSensitive ? t.ai.tool.confirmRun : t.ai.tool.runNow.replace('{seconds}', String(countdown))}
         </button>
       </div>
     </div>
@@ -586,7 +596,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 <div className="ai-message-content">
                   {msg.tool_calls ? (
                       <div className="text-xs opacity-70 mb-1">
-                          Using tools: {msg.tool_calls.map(tc => tc.function.name).join(', ')}
+                          {t.ai.tool.usingTools.replace('{tools}', msg.tool_calls.map(tc => tc.function.name).join(', '))}
                       </div>
                   ) : null}
                   {msg.content && (
