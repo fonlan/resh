@@ -330,11 +330,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       console.log('[AI] Tool calls received:', event.payload);
       const calls = event.payload;
 
-      // Filter: if ALL calls are get_terminal_text, auto-execute immediately WITHOUT UI
-      const isAllSafe = calls.every(c => c.function.name === 'get_terminal_text');
+      // Filter: if ALL calls are get_terminal_output, auto-execute immediately WITHOUT UI
+      const isAllSafe = calls.every(c => c.function.name === 'get_terminal_output');
 
       if (isAllSafe) {
-        console.log('[AI] All tool calls are safe (get_terminal_text). Auto-executing immediately.');
+        console.log('[AI] All tool calls are safe (terminal read). Auto-executing immediately.');
         
         // Ensure we are using valid IDs
         const model = config?.aiModels.find(m => m.id === selectedModelId);
@@ -746,7 +746,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                               style={{ 
                                 border: '1px solid var(--glass-border)', 
                                 fontStyle: 'italic',
-                                padding: '2px 4px',
+                                padding: '0 4px',
                                 borderRadius: '4px',
                                 background: 'transparent'
                               }}

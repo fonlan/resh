@@ -137,7 +137,7 @@ async fn main() {
             commands::ai::get_ai_sessions,
             commands::ai::get_ai_messages,
             commands::ai::send_chat_message,
-            commands::ai::get_terminal_text,
+            commands::ai::get_terminal_output,
             commands::ai::run_in_terminal,
             commands::ai::execute_agent_tools,
             commands::ai::generate_session_title,

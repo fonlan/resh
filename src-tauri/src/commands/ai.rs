@@ -119,9 +119,9 @@ async fn execute_tools_and_save(
         tracing::debug!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
         
         let result = match call.function.name.as_str() {
-            "get_terminal_text" => {
+            "get_terminal_output" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    match SSHClient::get_terminal_text(ssh_id).await { 
+                    match SSHClient::get_terminal_output(ssh_id).await { 
                         Ok(text) => {
                             String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
                         },
@@ -342,7 +342,10 @@ pub async fn send_chat_message(
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
-    let tools = if is_agent_mode { Some(create_agent_tools()) } else { None };
+    let is_ask_mode = mode.as_deref() == Some("ask");
+    
+    // Both agent and ask mode now support tools
+    let tools = if is_agent_mode || is_ask_mode { Some(create_agent_tools()) } else { None };
 
     let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, tools).await?;
 
@@ -418,10 +421,10 @@ pub async fn execute_agent_tools(
 
 /// Get terminal text for AI to analyze
 #[tauri::command]
-pub async fn get_terminal_text(
+pub async fn get_terminal_output(
     session_id: String,
 ) -> Result<String, String> {
-    let text = SSHClient::get_terminal_text(&session_id).await?;
+    let text = SSHClient::get_terminal_output(&session_id).await?;
     let clean_text = String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string();
     Ok(clean_text)
 }

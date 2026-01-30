@@ -333,7 +333,7 @@ impl SSHClient {
     }
 
     /// Get the current terminal buffer content (last 100KB)
-    pub async fn get_terminal_text(session_id: &str) -> Result<String, String> {
+    pub async fn get_terminal_output(session_id: &str) -> Result<String, String> {
         let sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get(session_id) {
             Ok(session_data.terminal_buffer.clone())

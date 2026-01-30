@@ -154,7 +154,7 @@ pub fn create_agent_tools() -> Vec<ToolDefinition> {
         ToolDefinition {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
-                name: "get_terminal_text".to_string(),
+                name: "get_terminal_output".to_string(),
                 description: "Get the current terminal output text to analyze errors, command results, or system state.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
