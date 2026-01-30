@@ -704,6 +704,13 @@
   padding: 8px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow: hidden; /* Ensure content doesn't overflow the container */
+}
+
+.ai-tool-item code {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 .ai-tool-actions {
