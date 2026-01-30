@@ -1,5 +1,6 @@
 use crate::commands::AppState;
 use crate::ai::client::{stream_openai_chat, ChatMessage, create_agent_tools};
+use crate::ai::prompts::SYSTEM_PROMPT;
 use crate::ssh_manager::ssh::SSHClient;
 use tauri::{State, Window, Emitter};
 use std::sync::Arc;
@@ -158,6 +159,13 @@ pub async fn send_chat_message(
         }).map_err(|e| e.to_string())?;
 
         let mut history = Vec::new();
+        
+        // Add System Prompt first
+        history.push(ChatMessage {
+            role: "system".to_string(),
+            content: SYSTEM_PROMPT.to_string(),
+        });
+
         for row in rows {
             history.push(row.map_err(|e| e.to_string())?);
         }
