@@ -886,10 +886,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             <div className="ai-controls">
               <div className="ai-select-wrapper">
                 <Sliders size={14} className="ai-select-icon" />
-                <CustomSelect 
+                <CustomSelect
                   value={mode}
                   onChange={(val) => handleModeChange(val as 'ask' | 'agent')}
                   disabled={isLoading || !!pendingToolCalls}
+                  placement="top"
                   options={[
                     { value: 'ask', label: 'Ask' },
                     { value: 'agent', label: 'Agent' }
@@ -902,6 +903,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                   value={selectedModelId}
                   onChange={(val) => handleModelChange(val)}
                   disabled={isLoading || !!pendingToolCalls}
+                  placement="top"
                   options={(config?.aiModels || [])
                     .filter(model => {
                       const channel = config?.aiChannels?.find(c => c.id === model.channelId);

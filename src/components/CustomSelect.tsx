@@ -16,6 +16,7 @@ interface CustomSelectProps {
     disabled?: boolean;
     className?: string;
     id?: string;
+    placement?: 'bottom' | 'top';
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -25,7 +26,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     placeholder = "Select...",
     disabled = false,
     className = "",
-    id
+    id,
+    placement = 'bottom'
 }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [dropdownPosition, setDropdownPosition] = useState<{ top: number, left: number, width: number } | null>(null);
@@ -34,13 +36,17 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     const updatePosition = useCallback(() => {
         if (containerRef.current) {
             const rect = containerRef.current.getBoundingClientRect();
+            const dropdownHeight = Math.min(options.length * 36 + 8, 300);
+            const top = placement === 'top'
+                ? rect.top - dropdownHeight - 4
+                : rect.bottom + 4;
             setDropdownPosition({
-                top: rect.bottom + 4,
+                top,
                 left: rect.left,
                 width: rect.width
             });
         }
-    }, []);
+    }, [placement, options.length]);
 
     useEffect(() => {
         if (isOpen) {
