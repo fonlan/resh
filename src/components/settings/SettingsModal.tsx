@@ -84,12 +84,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       return;
     }
 
-    // Clear existing timeouts
+    // Clear existing save timeout
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
-    }
-    if (savedTimeoutRef.current) {
-      clearTimeout(savedTimeoutRef.current);
     }
 
     // Set saving status
@@ -122,9 +119,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
-      }
-      if (savedTimeoutRef.current) {
-        clearTimeout(savedTimeoutRef.current);
       }
     };
   }, [localConfig, saveConfig]);
