@@ -62,6 +62,8 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolDefinition>>,
 }
 
+use crate::config::types::Proxy;
+
 pub async fn stream_openai_chat(
     endpoint: &str,
     api_key: &str,
@@ -69,19 +71,40 @@ pub async fn stream_openai_chat(
     messages: Vec<ChatMessage>,
     tools: Option<Vec<ToolDefinition>>,
     extra_headers: Option<HashMap<String, String>>,
+    proxy: Option<Proxy>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, String>> + Send>>, String> {
     tracing::debug!("[AI Client] Starting OpenAI API request to {}", endpoint);
     tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
         model, messages.len(), tools.is_some());
     
     // Explicitly configure client for robustness
-    let client = Client::builder()
+    let mut client_builder = Client::builder()
         .timeout(Duration::from_secs(60))
-        .connect_timeout(Duration::from_secs(10))
-        .no_proxy() // Try bypassing system proxy first to see if that helps, or maybe we should NOT do this.
-                    // Actually, if the user has a system proxy (e.g. Clash), they need it.
-                    // "unexpected EOF" suggests the connection IS made but dropped.
-                    // Let's NOT use no_proxy() by default, but rely on reqwest default env behavior.
+        .connect_timeout(Duration::from_secs(10));
+
+    if let Some(p) = proxy {
+        let scheme = if p.proxy_type == "socks5" { "socks5" } else { "http" };
+        let auth_part = if let (Some(u), Some(pass)) = (p.username, p.password) {
+            format!("{}:{}@", u, pass)
+        } else {
+            "".to_string()
+        };
+        let proxy_url = format!("{}://{}{}:{}", scheme, auth_part, p.host, p.port);
+        
+        match reqwest::Proxy::all(&proxy_url) {
+            Ok(proxy) => {
+                client_builder = client_builder.proxy(proxy);
+                // Log without auth details
+                let safe_url = format!("{}://***:***@{}:{}", scheme, p.host, p.port);
+                tracing::info!("[AI Client] Using proxy: {}", safe_url);
+            },
+            Err(e) => {
+                tracing::warn!("[AI Client] Failed to create proxy from URL, falling back to direct connection: {}", e);
+            }
+        }
+    }
+
+    let client = client_builder
         .build()
         .map_err(|e| format!("Failed to build client: {}", e))?;
 

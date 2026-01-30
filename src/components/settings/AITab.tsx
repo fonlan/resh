@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
-import { AIChannel, AIModel } from '../../types/config';
+import { AIChannel, AIModel, ProxyConfig } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 interface AITabProps {
   aiChannels: AIChannel[];
   aiModels: AIModel[];
+  proxies: ProxyConfig[];
   onAIChannelsUpdate: (channels: AIChannel[]) => void;
   onAIModelsUpdate: (models: AIModel[]) => void;
 }
@@ -25,6 +26,7 @@ interface DeviceCodeResponse {
 export const AITab: React.FC<AITabProps> = ({
   aiChannels,
   aiModels,
+  proxies,
   onAIChannelsUpdate,
   onAIModelsUpdate,
 }) => {
@@ -112,14 +114,16 @@ export const AITab: React.FC<AITabProps> = ({
 
   const handleAddChannel = () => {
     setEditingChannel(null);
-    setChannelFormData({
+      setChannelFormData({
       name: '',
       type: 'openai',
       endpoint: '',
       apiKey: '',
+      proxyId: null,
       isActive: true,
       synced: true,
     });
+
     setCopilotAuthData(null);
     setIsPolling(false);
     setAuthError(null);
@@ -490,6 +494,23 @@ export const AITab: React.FC<AITabProps> = ({
             onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
           />
           <label htmlFor="channel-active" className="text-sm cursor-pointer">{t.ai.channelForm.active}</label>
+        </div>
+
+        <div className="form-group mt-4 pt-4 border-t border-gray-700">
+          <label htmlFor="channel-proxy" className="form-label">{t.common.proxy}</label>
+          <select
+            id="channel-proxy"
+            className="form-select"
+            value={channelFormData.proxyId || ''}
+            onChange={(e) => setChannelFormData({ ...channelFormData, proxyId: e.target.value === '' ? null : e.target.value })}
+          >
+            <option value="">{t.common.noProxy}</option>
+            {proxies.map(proxy => (
+              <option key={proxy.id} value={proxy.id}>
+                {proxy.name} ({proxy.host}:{proxy.port})
+              </option>
+            ))}
+          </select>
         </div>
       </FormModal>
 

@@ -178,18 +178,30 @@ async fn run_ai_turn(
 ) -> Result<Option<Vec<ToolCall>>, String> {
     
     // 1. Get Config
-    let (endpoint, api_key, model_name, provider) = {
+    let (endpoint, api_key, model_name, provider, proxy) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
         let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
         
+        let proxy = if let Some(proxy_id) = &channel.proxy_id {
+            if let Some(p) = config.proxies.iter().find(|p| p.id == *proxy_id) {
+                Some(p.clone())
+            } else {
+                tracing::warn!("[AI] Configured proxy {} not found, falling back to direct connection", proxy_id);
+                None
+            }
+        } else {
+            None
+        };
+        
         (
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
             channel.provider.clone(),
+            proxy,
         )
     };
     
@@ -235,7 +247,7 @@ async fn run_ai_turn(
     }
 
     // 4. Stream
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers).await?;
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers, proxy).await?;
     
     let mut full_content = String::new();
     let mut tool_accumulator = ToolCallAccumulator::new();
@@ -539,18 +551,30 @@ pub async fn generate_session_title(
     }
 
     // 3. Get model and channel config
-    let (endpoint, api_key, model_name, provider) = {
+    let (endpoint, api_key, model_name, provider, proxy) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
         let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
+
+        let proxy = if let Some(proxy_id) = &channel.proxy_id {
+            if let Some(p) = config.proxies.iter().find(|p| p.id == *proxy_id) {
+                Some(p.clone())
+            } else {
+                tracing::warn!("[AI] Configured proxy {} not found for title generation, falling back to direct connection", proxy_id);
+                None
+            }
+        } else {
+            None
+        };
         
         (
             channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
             channel.provider.clone(),
+            proxy,
         )
     };
     
@@ -606,7 +630,7 @@ pub async fn generate_session_title(
         extra_headers = Some(headers);
     }
 
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers).await?;
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers, proxy).await?;
     let mut title = String::new();
     
     while let Some(event_result) = stream.next().await {

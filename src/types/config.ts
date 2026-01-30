@@ -95,6 +95,7 @@ export interface AIChannel {
   type: 'openai' | 'copilot';
   endpoint?: string;
   apiKey?: string;
+  proxyId?: string | null;
   isActive: boolean;
   synced: boolean;
   updatedAt: string;

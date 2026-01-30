@@ -108,6 +108,7 @@ pub struct AiChannel {
     pub provider: String,
     pub endpoint: Option<String>,
     pub api_key: Option<String>,
+    pub proxy_id: Option<String>,
     #[serde(default = "default_true")]
     pub is_active: bool,
     #[serde(default = "default_true")]

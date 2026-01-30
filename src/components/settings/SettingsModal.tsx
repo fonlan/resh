@@ -336,6 +336,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <AITab
                 aiChannels={localConfig.aiChannels || []}
                 aiModels={localConfig.aiModels || []}
+                proxies={localConfig.proxies || []}
                 onAIChannelsUpdate={handleAIChannelsUpdate}
                 onAIModelsUpdate={handleAIModelsUpdate}
               />
