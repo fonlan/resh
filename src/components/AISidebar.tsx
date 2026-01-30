@@ -5,7 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import './AISidebar.css';
 
@@ -17,6 +17,59 @@ interface AISidebarProps {
   currentServerId?: string;
   currentTabId?: string;
 }
+
+const CodeBlock = ({ children, className }: { children: React.ReactNode, className?: string }) => {
+  const [copied, setCopied] = useState(false);
+  
+  const codeContent = useMemo(() => {
+    if (typeof children === 'string') return children;
+    if (Array.isArray(children)) return children.join('');
+    return String(children);
+  }, [children]).replace(/\n$/, '');
+
+  const language = className ? className.replace('language-', '') : 'text';
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(codeContent);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
+  const handleInsert = () => {
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: codeContent }));
+  };
+
+  return (
+    <div className="ai-code-block">
+      <div className="ai-code-header">
+        <span className="ai-code-lang">{language}</span>
+        <div className="ai-code-actions">
+          <button 
+            className="ai-code-btn" 
+            onClick={handleCopy} 
+            title="Copy code"
+          >
+            {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+          </button>
+          <button 
+            className="ai-code-btn" 
+            onClick={handleInsert} 
+            title="Insert to terminal"
+          >
+            <Terminal size={14} />
+          </button>
+        </div>
+      </div>
+      <pre className="ai-code-content">
+        <code className={className}>{children}</code>
+      </pre>
+    </div>
+  );
+};
 
 export const AISidebar: React.FC<AISidebarProps> = ({
   isOpen,
@@ -336,16 +389,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             {!activeSessionId && (
               <div className="ai-empty-state">
                 <Bot size={48} className="opacity-20 mb-4" />
-                <p>{t.ai.selectServer}</p>
-                {currentServerId && (
-                  <button 
-                    type="button"
-                    className="px-4 py-2 bg-accent-primary text-white rounded hover:bg-accent-hover transition-colors mt-4"
-                    onClick={handleCreateSession}
-                  >
-                    {t.ai.startChat}
-                  </button>
-                )}
+                <p>{currentServerId ? t.ai.typeMessage : t.ai.selectServer}</p>
               </div>
             )}
             
@@ -355,11 +399,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                   <ReactMarkdown 
                     remarkPlugins={[remarkGfm]}
                     components={{
+                      pre({children}) {
+                        return <>{children}</>;
+                      },
                       code({node, inline, className, children, ...props}: any) {
                         return !inline ? (
-                          <pre className={className}>
-                            <code {...props}>{children}</code>
-                          </pre>
+                          <CodeBlock className={className}>
+                            {children}
+                          </CodeBlock>
                         ) : (
                           <code className={className} {...props}>
                             {children}
