@@ -135,7 +135,7 @@ export const AITab: React.FC<AITabProps> = ({
       try {
         const token = await invoke<string>('poll_copilot_auth', { deviceCode: data.device_code });
         // Success!
-        setChannelFormData(prev => ({ ...prev, apiKey: token }));
+        setChannelFormData(prev => ({ ...prev, apiKey: token, isActive: true }));
         setCopilotAuthData(null);
         setIsPolling(false);
       } catch (e: any) {
@@ -206,15 +206,24 @@ export const AITab: React.FC<AITabProps> = ({
 
     const now = new Date().toISOString();
 
+    // Determine active state: Copilot channels must be authenticated (have apiKey) to be active
+    const type = (channelFormData.type as 'openai' | 'copilot') || 'openai';
+    const apiKey = channelFormData.apiKey;
+    let isActive = channelFormData.isActive !== undefined ? channelFormData.isActive : true;
+
+    if (type === 'copilot' && !apiKey) {
+      isActive = false;
+    }
+
     if (editingChannel) {
       const updatedChannel: AIChannel = {
         ...editingChannel,
         name: channelFormData.name || 'New Channel',
-        type: (channelFormData.type as 'openai' | 'copilot') || 'openai',
+        type,
         endpoint: channelFormData.endpoint,
         apiKey: channelFormData.apiKey,
         proxyId: channelFormData.proxyId,
-        isActive: channelFormData.isActive !== undefined ? channelFormData.isActive : true,
+        isActive,
         synced: channelFormData.synced !== undefined ? channelFormData.synced : editingChannel.synced,
         updatedAt: now,
       };
@@ -223,11 +232,11 @@ export const AITab: React.FC<AITabProps> = ({
       const newChannel: AIChannel = {
         id: generateId(),
         name: channelFormData.name || 'New Channel',
-        type: (channelFormData.type as 'openai' | 'copilot') || 'openai',
+        type,
         endpoint: channelFormData.endpoint,
         apiKey: channelFormData.apiKey,
         proxyId: channelFormData.proxyId,
-        isActive: channelFormData.isActive !== undefined ? channelFormData.isActive : true,
+        isActive,
         synced: channelFormData.synced !== undefined ? channelFormData.synced : true,
         updatedAt: now,
       };
@@ -429,7 +438,13 @@ export const AITab: React.FC<AITabProps> = ({
             className="form-select"
             value={channelFormData.type || 'openai'}
             onChange={(e) => {
-              setChannelFormData({ ...channelFormData, type: e.target.value as any });
+              const newType = e.target.value as any;
+              setChannelFormData({ 
+                ...channelFormData, 
+                type: newType,
+                apiKey: '', // Clear API key on type change
+                isActive: newType === 'copilot' ? false : (channelFormData.isActive ?? true)
+              });
               // Reset auth state when switching types
               setCopilotAuthData(null);
               setIsPolling(false);
@@ -544,6 +559,7 @@ export const AITab: React.FC<AITabProps> = ({
             className="checkbox"
             checked={channelFormData.isActive ?? true}
             onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
+            disabled={channelFormData.type === 'copilot' && !channelFormData.apiKey}
           />
           <label htmlFor="channel-active" className="text-sm cursor-pointer">{t.ai.channelForm.active}</label>
         </div>
