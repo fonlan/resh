@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
 import { AIChannel, AIModel, ProxyConfig } from '../../types/config';
 import { generateId } from '../../utils/idGenerator';
@@ -48,6 +49,55 @@ export const AITab: React.FC<AITabProps> = ({
   const [editingModel, setEditingModel] = useState<AIModel | null>(null);
   const [modelFormData, setModelFormData] = useState<Partial<AIModel>>({});
   const [modelToDelete, setModelToDelete] = useState<string | null>(null);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [showModelSuggestions, setShowModelSuggestions] = useState(false);
+  const [dropdownPosition, setDropdownPosition] = useState<{ top: number, left: number, width: number } | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Update position when showing suggestions
+  useEffect(() => {
+    if (showModelSuggestions && inputRef.current) {
+        const updatePos = () => {
+            if (inputRef.current) {
+                const rect = inputRef.current.getBoundingClientRect();
+                setDropdownPosition({
+                    top: rect.bottom,
+                    left: rect.left,
+                    width: rect.width
+                });
+            }
+        };
+        updatePos();
+        // Listen to both window resize and scroll (capturing phase to catch modal scroll)
+        window.addEventListener('resize', updatePos);
+        window.addEventListener('scroll', updatePos, true);
+        
+        return () => {
+            window.removeEventListener('resize', updatePos);
+            window.removeEventListener('scroll', updatePos, true);
+        };
+    }
+  }, [showModelSuggestions]);
+
+  // Reset fetched models when channel changes
+  React.useEffect(() => {
+    setFetchedModels([]);
+  }, [modelFormData.channelId]);
+
+  const handleFetchModels = async () => {
+    if (!modelFormData.channelId || fetchedModels.length > 0 || isFetchingModels) return;
+    
+    setIsFetchingModels(true);
+    try {
+      const models = await invoke<string[]>('fetch_ai_models', { channelId: modelFormData.channelId });
+      setFetchedModels(models);
+    } catch (e) {
+      console.error("Failed to fetch models", e);
+    } finally {
+      setIsFetchingModels(false);
+    }
+  };
 
   // --- Copilot Handlers ---
   const startCopilotAuth = async () => {
@@ -294,7 +344,7 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
 
       {/* AI Models Section */}
-      <div className="section-header flex justify-between items-center mb-4">
+      <div className="section-header flex justify-between items-center mb-4" style={{ marginTop: '32px' }}>
         <h3 className="section-title">{t.ai.models}</h3>
         <button type="button" onClick={handleAddModel} className="btn btn-primary">
           <Plus size={16} />
@@ -523,17 +573,67 @@ export const AITab: React.FC<AITabProps> = ({
         onClose={() => setIsModelFormOpen(false)}
         onSubmit={handleSaveModel}
       >
-        <div className="form-group">
-          <label htmlFor="model-name" className="form-label">{t.ai.modelForm.name}</label>
-          <input
-            id="model-name"
-            type="text"
-            className="form-input"
-            value={modelFormData.name || ''}
-            onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
-            placeholder="e.g. gpt-4, gpt-3.5-turbo"
-          />
-        </div>
+          <div className="form-group relative">
+            <label htmlFor="model-name" className="form-label">{t.ai.modelForm.name}</label>
+            <div className="relative">
+              <input
+                id="model-name"
+                ref={inputRef}
+                type="text"
+                className="form-input pr-8"
+                value={modelFormData.name || ''}
+                onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
+                placeholder="e.g. gpt-4, gpt-3.5-turbo"
+                onFocus={() => {
+                   handleFetchModels();
+                   setShowModelSuggestions(true);
+                }}
+                onBlur={() => setTimeout(() => setShowModelSuggestions(false), 200)}
+                autoComplete="off"
+              />
+              {isFetchingModels && (
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                  <Loader2 size={16} className="animate-spin text-gray-400" />
+                </div>
+              )}
+              
+              {showModelSuggestions && fetchedModels.length > 0 && dropdownPosition && createPortal(
+                <ul 
+                  className="snippet-group-suggestions fixed"
+                  style={{
+                      top: dropdownPosition.top,
+                      left: dropdownPosition.left,
+                      width: dropdownPosition.width,
+                      marginTop: '4px',
+                      maxHeight: '200px',
+                      zIndex: 9999
+                  }}
+                >
+                  {fetchedModels
+                    .filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase()))
+                    .map(model => (
+                    <li 
+                      key={model} 
+                      className="snippet-suggestion-item"
+                      onMouseDown={(e) => {
+                        e.preventDefault(); 
+                        setModelFormData({ ...modelFormData, name: model });
+                        setShowModelSuggestions(false);
+                      }}
+                    >
+                      {model}
+                    </li>
+                  ))}
+                  {fetchedModels.filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase())).length === 0 && (
+                     <li className="snippet-suggestion-item" style={{ cursor: 'default', opacity: 0.5 }}>
+                        No matches found
+                     </li>
+                  )}
+                </ul>,
+                document.body
+              )}
+            </div>
+          </div>
         <div className="form-group">
           <label htmlFor="model-channel" className="form-label">{t.ai.modelForm.channel}</label>
           <select

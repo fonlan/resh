@@ -1,5 +1,5 @@
 use crate::commands::AppState;
-use crate::ai::client::{stream_openai_chat, ChatMessage, create_agent_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
+use crate::ai::client::{stream_openai_chat, fetch_models, ChatMessage, create_agent_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
 use crate::ai::prompts::SYSTEM_PROMPT;
 use crate::ai::copilot;
 use crate::ssh_manager::ssh::SSHClient;
@@ -303,6 +303,78 @@ async fn run_ai_turn(
 }
 
 // --- Commands ---
+
+#[tauri::command]
+pub async fn fetch_ai_models(
+    state: State<'_, Arc<AppState>>,
+    channel_id: String,
+) -> Result<Vec<String>, String> {
+    let (endpoint, api_key, provider, proxy) = {
+        let config = state.config.lock().await;
+        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+            .ok_or_else(|| "Channel not found".to_string())?;
+        
+        let proxy = if let Some(proxy_id) = &channel.proxy_id {
+            if let Some(p) = config.proxies.iter().find(|p| p.id == *proxy_id) {
+                Some(p.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        
+        (
+            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel.api_key.clone().unwrap_or_default(),
+            channel.provider.clone(),
+            proxy,
+        )
+    };
+
+    if api_key.is_empty() {
+        return Err("API key is not configured".to_string());
+    }
+
+    let mut final_api_key = api_key;
+    let mut extra_headers = None;
+    let mut final_endpoint = endpoint;
+
+    if provider == "copilot" {
+        let token_resp = copilot::get_copilot_token(&final_api_key).await?;
+        final_api_key = token_resp.token;
+        final_endpoint = "https://api.githubcopilot.com".to_string(); 
+        
+        let mut headers = HashMap::new();
+        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
+        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        extra_headers = Some(headers);
+    }
+
+    let models = fetch_models(&final_endpoint, &final_api_key, extra_headers, proxy).await?;
+
+    let mut model_ids: Vec<String> = models.into_iter().filter(|m| {
+        if provider == "copilot" {
+             // Filter for type=chat in capabilities or top-level
+             if let Some(cap) = m.extra.get("capabilities") {
+                 if let Some(t) = cap.get("type").and_then(|v| v.as_str()) {
+                     return t == "chat";
+                 }
+             }
+             // Also check top-level type just in case
+             if let Some(t) = m.extra.get("type").and_then(|v| v.as_str()) {
+                 return t == "chat";
+             }
+             false 
+        } else {
+            true
+        }
+    }).map(|m| m.id).collect();
+    
+    model_ids.sort();
+    Ok(model_ids)
+}
 
 #[tauri::command]
 pub async fn start_copilot_auth() -> Result<copilot::DeviceCodeResponse, String> {

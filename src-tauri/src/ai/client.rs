@@ -64,6 +64,77 @@ pub struct ChatRequest {
 
 use crate::config::types::Proxy;
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Model {
+    pub id: String,
+    #[serde(flatten)]
+    pub extra: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ModelListResponse {
+    pub data: Vec<Model>,
+}
+
+pub async fn fetch_models(
+    endpoint: &str,
+    api_key: &str,
+    extra_headers: Option<HashMap<String, String>>,
+    proxy: Option<Proxy>,
+) -> Result<Vec<Model>, String> {
+    tracing::debug!("[AI Client] Fetching models from {}", endpoint);
+
+    let mut client_builder = Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10));
+
+    if let Some(p) = proxy {
+        let scheme = if p.proxy_type == "socks5" { "socks5" } else { "http" };
+        let auth_part = if let (Some(u), Some(pass)) = (p.username, p.password) {
+            format!("{}:{}@", u, pass)
+        } else {
+            "".to_string()
+        };
+        let proxy_url = format!("{}://{}{}:{}", scheme, auth_part, p.host, p.port);
+        
+        match reqwest::Proxy::all(&proxy_url) {
+            Ok(proxy) => {
+                client_builder = client_builder.proxy(proxy);
+            },
+            Err(e) => {
+                tracing::warn!("[AI Client] Failed to create proxy: {}", e);
+            }
+        }
+    }
+
+    let client = client_builder.build().map_err(|e| e.to_string())?;
+
+    let url = if endpoint.ends_with("/") {
+        format!("{}models", endpoint)
+    } else {
+        format!("{}/models", endpoint)
+    };
+
+    let mut request_builder = client.get(&url)
+        .header("Authorization", format!("Bearer {}", api_key));
+
+    if let Some(headers) = extra_headers {
+        for (k, v) in headers {
+            request_builder = request_builder.header(k, v);
+        }
+    }
+
+    let response = request_builder.send().await.map_err(|e| e.to_string())?;
+
+    if !response.status().is_success() {
+        let text = response.text().await.unwrap_or_default();
+        return Err(format!("API Error: {}", text));
+    }
+
+    let list_response: ModelListResponse = response.json().await.map_err(|e| e.to_string())?;
+    Ok(list_response.data)
+}
+
 pub async fn stream_openai_chat(
     endpoint: &str,
     api_key: &str,
