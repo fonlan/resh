@@ -5,7 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall } from '../types/ai';
 import './AISidebar.css';
@@ -686,27 +686,33 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
           <div className="ai-input-area">
             <div className="ai-controls">
-              <select 
-                className="ai-select"
-                value={mode}
-                onChange={(e) => setMode(e.target.value as 'ask' | 'agent')}
-                disabled={isLoading || !!pendingToolCalls}
-              >
-                <option value="ask">Ask</option>
-                <option value="agent">Agent</option>
-              </select>
-              <select
-                className="ai-select"
-                value={selectedModelId}
-                onChange={(e) => setSelectedModelId(e.target.value)}
-                disabled={isLoading || !!pendingToolCalls}
-              >
-                {(config?.aiModels || []).map(model => {
-                   const channel = config?.aiChannels?.find(c => c.id === model.channelId);
-                   const label = channel ? `${channel.name} - ${model.name}` : model.name;
-                   return <option key={model.id} value={model.id}>{label}</option>;
-                })}
-              </select>
+              <div className="ai-select-wrapper">
+                <Sliders size={14} className="ai-select-icon" />
+                <select 
+                  className="ai-select"
+                  value={mode}
+                  onChange={(e) => setMode(e.target.value as 'ask' | 'agent')}
+                  disabled={isLoading || !!pendingToolCalls}
+                >
+                  <option value="ask">Ask</option>
+                  <option value="agent">Agent</option>
+                </select>
+              </div>
+              <div className="ai-select-wrapper ai-select-wrapper-model">
+                <Sparkles size={14} className="ai-select-icon" />
+                <select
+                  className="ai-select"
+                  value={selectedModelId}
+                  onChange={(e) => setSelectedModelId(e.target.value)}
+                  disabled={isLoading || !!pendingToolCalls}
+                >
+                  {(config?.aiModels || []).map(model => {
+                     const channel = config?.aiChannels?.find(c => c.id === model.channelId);
+                     const label = channel ? `${channel.name} - ${model.name}` : model.name;
+                     return <option key={model.id} value={model.id}>{label}</option>;
+                  })}
+                </select>
+              </div>
             </div>
             <div className="ai-input-container">
               <textarea

@@ -82,6 +82,7 @@ export interface GeneralSettings {
   confirmExitApp: boolean;
   debugEnabled: boolean;
   snippetsSidebarLocked: boolean;
+  aiSidebarLocked: boolean;
   maxRecentServers: number;
   recentServerIds: string[];
   recordingMode: 'raw' | 'text';

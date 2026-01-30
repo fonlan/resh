@@ -34,7 +34,6 @@ export const MainWindow: React.FC = () => {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
-  const [isAILocked, setIsAILocked] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId
@@ -215,6 +214,19 @@ export const MainWindow: React.FC = () => {
     await saveConfig(newConfig);
   }, [config, saveConfig]);
 
+  const handleToggleAILock = useCallback(async () => {
+    if (!config) return;
+    const currentLocked = config.general.aiSidebarLocked;
+    const newConfig = {
+      ...config,
+      general: {
+        ...config.general,
+        aiSidebarLocked: !currentLocked
+      }
+    };
+    await saveConfig(newConfig);
+  }, [config, saveConfig]);
+
   const prefetchSettings = useCallback(() => {
     import('./settings/SettingsModal');
   }, []);
@@ -365,8 +377,8 @@ export const MainWindow: React.FC = () => {
         <AISidebar
           isOpen={isAIOpen}
           onClose={() => setIsAIOpen(false)}
-          isLocked={isAILocked}
-          onToggleLock={() => setIsAILocked(!isAILocked)}
+          isLocked={config?.general.aiSidebarLocked || false}
+          onToggleLock={handleToggleAILock}
           currentServerId={tabs.find(t => t.id === activeTabId)?.serverId}
           currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
         />
