@@ -170,7 +170,7 @@ pub async fn stream_openai_chat(
                 client_builder = client_builder.proxy(proxy);
                 // Log without auth details
                 let safe_url = format!("{}://***:***@{}:{}", scheme, p.host, p.port);
-                tracing::info!("[AI Client] Using proxy: {}", safe_url);
+                tracing::debug!("[AI Client] Using proxy: {}", safe_url);
             },
             Err(e) => {
                 tracing::warn!("[AI Client] Failed to create proxy from URL, falling back to direct connection: {}", e);
@@ -194,8 +194,6 @@ pub async fn stream_openai_chat(
     } else {
         format!("{}/chat/completions", endpoint)
     };
-
-    tracing::debug!("[AI Client] POST {}", url);
 
     let mut request_builder = client.post(&url)
         .header("Authorization", format!("Bearer {}", api_key))

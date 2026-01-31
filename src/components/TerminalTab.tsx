@@ -76,7 +76,9 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const handleResize = useCallback((cols: number, rows: number) => {
     if (sessionIdRef.current) {
       invoke('resize_terminal', { params: { session_id: sessionIdRef.current, cols, rows } })
-        .catch(err => console.error('Terminal resize failed:', err));
+        .catch(() => {
+          // Terminal resize failed
+        });
     }
   }, []);
 
@@ -254,7 +256,9 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       if (closedUnlistener) closedUnlistener();
       const currentSid = sessionIdRef.current;
       if (currentSid) {
-        invoke('close_session', { session_id: currentSid }).catch(err => console.error(`Failed to close session ${currentSid}:`, err));
+        invoke('close_session', { session_id: currentSid }).catch(() => {
+          // Failed to close session
+        });
         onSessionChange?.(null);
       }
     };
@@ -301,7 +305,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       try {
         await invoke('export_terminal_log', { content, defaultPath });
       } catch (err) {
-        console.error('Failed to export logs:', err);
+        // Failed to export logs
       }
     };
 
@@ -320,7 +324,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         try {
           await invoke('start_recording', { sessionId: sessionIdRef.current, filePath: path, mode });
         } catch (err) {
-          console.error('Failed to start recording:', err);
+          // Failed to start recording
         }
       }
     };
@@ -330,7 +334,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         try {
           await invoke('stop_recording', { sessionId: sessionIdRef.current });
         } catch (err) {
-          console.error('Failed to stop recording:', err);
+          // Failed to stop recording
         }
       }
     };
@@ -352,8 +356,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           session_id: sessionId,
           cols: terminal.cols,
           rows: terminal.rows,
-        },
-      }).catch((err) => console.error('Initial terminal resize failed:', err));
+          },
+        }).catch(() => {
+          // Initial terminal resize failed
+        });
     }
   }, [isConnected, terminal, sessionId]);
 

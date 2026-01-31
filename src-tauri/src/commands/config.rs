@@ -38,6 +38,7 @@ pub async fn save_config(
     
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
+    tracing::debug!("Local config saved to {:?}", local_path);
 
     // Update log level
     crate::logger::set_log_level(config.general.debug_enabled);
@@ -58,14 +59,17 @@ pub async fn save_config(
         // Better to await to ensure sync completes before returning success if it's "save and sync"
         let mut local_copy = config.clone();
         if let Err(e) = sync_manager.sync(&mut local_copy, removed_ids).await {
-            tracing::error!("Sync failed: {}", e);
+            tracing::warn!("Automatic sync failed: {}", e);
             // We don't necessarily want to fail the save if sync fails, 
             // but maybe return a specific error or warning?
             // For now, let's just log and continue.
         } else {
             *current_config = local_copy;
             state.config_manager.save_config(&current_config, &local_path)?;
+            tracing::info!("Config saved and synced successfully");
         }
+    } else {
+        tracing::info!("Config saved locally");
     }
 
     Ok(())

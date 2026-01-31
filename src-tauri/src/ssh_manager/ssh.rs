@@ -326,6 +326,7 @@ impl SSHClient {
     pub async fn disconnect(session_id: &str) -> Result<(), String> {
         let mut sessions = SESSIONS.lock().await;
         if let Some(_) = sessions.remove(session_id) {
+             info!("[SSH] Session {} disconnected and removed.", session_id);
              Ok(())
         } else {
             Err("Session not found".to_string())

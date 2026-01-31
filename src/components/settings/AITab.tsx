@@ -107,7 +107,7 @@ export const AITab: React.FC<AITabProps> = ({
       const models = await invoke<string[]>('fetch_ai_models', { channelId: modelFormData.channelId });
       setFetchedModels(models);
     } catch (e) {
-      console.error("Failed to fetch models", e);
+      // Failed to fetch models
     } finally {
       setIsFetchingModels(false);
     }

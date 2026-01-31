@@ -96,7 +96,6 @@ export const MainWindow: React.FC = () => {
     const server = currentConfig.servers.find(s => s.id === serverId);
     
     if (!server) {
-      console.error('[MainWindow] Server not found for ID:', serverId);
       return;
     }
 
@@ -182,7 +181,7 @@ export const MainWindow: React.FC = () => {
         setRecordingTabs(prev => new Set(prev).add(tabId));
       }
     } catch (error) {
-      console.error('Failed to select save path:', error);
+      // Failed to select save path
     }
   }, [tabs, config]);
 

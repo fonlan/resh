@@ -9,7 +9,7 @@ export const WindowControls: React.FC = () => {
     try {
       await getCurrentWebviewWindow().minimize();
     } catch (err) {
-      console.error('Failed to minimize window:', err);
+      // Failed to minimize window
     }
   };
 
@@ -17,7 +17,7 @@ export const WindowControls: React.FC = () => {
     try {
       await getCurrentWebviewWindow().toggleMaximize();
     } catch (err) {
-      console.error('Failed to maximize window:', err);
+      // Failed to maximize window
     }
   };
 
@@ -25,7 +25,7 @@ export const WindowControls: React.FC = () => {
     try {
       await getCurrentWebviewWindow().close();
     } catch (err) {
-      console.error('Failed to close window:', err);
+      // Failed to close window
     }
   };
 

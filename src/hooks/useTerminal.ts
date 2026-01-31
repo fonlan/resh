@@ -74,8 +74,8 @@ export const useTerminal = (
         if (term.hasSelection()) {
             const selection = term.getSelection();
             if (selection) {
-                navigator.clipboard.writeText(selection).catch(err => {
-                    console.error('Failed to copy selection:', err);
+                navigator.clipboard.writeText(selection).catch(() => {
+                    // Failed to copy
                 });
             }
         }
@@ -94,13 +94,12 @@ export const useTerminal = (
                 Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))
             );
             
-            navigator.clipboard.writeText(text).catch(e => {
-                console.error('OSC 52 write failed:', e);
+            navigator.clipboard.writeText(text).catch(() => {
+                // OSC 52 write failed
             });
             
             return true;
         } catch (e) {
-            console.warn('Failed to parse OSC 52:', e);
             return false;
         }
     });
@@ -117,7 +116,7 @@ export const useTerminal = (
                     term.loadAddon(webglAddon);
                     webglAddonRef.current = webglAddon;
                 } catch (e) {
-                    console.warn('WebGL renderer could not be loaded, falling back to canvas', e);
+                    // WebGL renderer could not be loaded
                 }
             }
         }
@@ -135,7 +134,7 @@ export const useTerminal = (
             fitAddon.fit();
             onResizeRef.current?.(term.cols, term.rows);
         } catch (e) {
-            console.warn('Fit failed', e);
+            // Fit failed
         }
       }
     }, 100);

@@ -431,7 +431,13 @@ pub async fn start_copilot_auth() -> Result<copilot::DeviceCodeResponse, String>
 
 #[tauri::command]
 pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
-    copilot::poll_access_token(&device_code).await
+    match copilot::poll_access_token(&device_code).await {
+        Ok(token) => {
+            tracing::info!("[AI] GitHub Copilot authentication successful");
+            Ok(token)
+        },
+        Err(e) => Err(e)
+    }
 }
 
 #[tauri::command]

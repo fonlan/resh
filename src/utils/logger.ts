@@ -12,16 +12,11 @@ class Logger {
   private async log(level: LogLevel, message: string, ...args: any[]) {
     const formattedMessage = `[${this.context}] ${message} ${args.length ? JSON.stringify(args) : ''}`;
     
-    // Always log to console in development
-    if ((import.meta as any).env.DEV) {
-      console[level === 'trace' ? 'debug' : level](formattedMessage);
-    }
-
     // Send to backend
     try {
       await invoke('log_event', { level, message: formattedMessage });
     } catch (e) {
-      console.error('Failed to send log to backend:', e);
+      // Failed to send log to backend
     }
   }
 

@@ -39,7 +39,7 @@ const CodeBlock = ({ children, className }: { children: React.ReactNode, classNa
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy:', err);
+      // Failed to copy
     }
   };
 
@@ -114,30 +114,20 @@ const ToolConfirmation = ({
             let cleanCommand = originalCommand.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, ' ');
             cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, ' ');
             
-            console.log('[AI ToolConfirm] Original command:', originalCommand);
-            console.log('[AI ToolConfirm] Cleaned command:', cleanCommand);
-            
             // Check for always dangerous commands
             if (alwaysDangerous.test(cleanCommand)) {
-              console.log('[AI ToolConfirm] Detected always-dangerous command');
               sensitive = true;
             } 
             // Check for potentially dangerous commands
             else if (potentiallyDangerous.test(cleanCommand)) {
-              console.log('[AI ToolConfirm] Detected potentially-dangerous command');
               sensitive = true;
             }
             // Check for curl/wget piped to shell
             else if (dangerousWhenPiped.test(cleanCommand)) {
-              console.log('[AI ToolConfirm] Detected curl/wget piped to shell');
               sensitive = true;
-            }
-            else {
-              console.log('[AI ToolConfirm] Command is safe');
             }
           }
         } catch (e) {
-          console.error('[AI ToolConfirm] Failed to parse command arguments:', e);
           sensitive = true;
         }
       }
@@ -147,10 +137,7 @@ const ToolConfirmation = ({
     
     // Auto-execute if NOT sensitive
     if (!sensitive) {
-      console.log('[AI ToolConfirm] Starting 5s countdown for auto-execution');
       setCountdown(5);
-    } else {
-      console.log('[AI ToolConfirm] Sensitive command detected, requiring manual confirmation');
     }
   }, [toolCalls]);
 
@@ -158,7 +145,6 @@ const ToolConfirmation = ({
     if (countdown === null || confirmedRef.current) return;
     
     if (countdown <= 0) {
-      console.log('[AI] Auto-executing tool calls...');
       // Ensure we only call onConfirm once
       confirmedRef.current = true;
       onConfirm();
@@ -229,7 +215,7 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy message:', err);
+      // Failed to copy
     }
   };
 
@@ -402,7 +388,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   // Clear active session when switching servers
   useEffect(() => {
-    // console.log('[AISidebar] Server context changed to:', currentServerId);
     if (currentServerId || currentServerId === undefined) {
       selectSession(null);
     }
@@ -443,7 +428,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         await deleteSession(currentServerId, sessionId);
         setSessionToDelete(null);
       } catch (err) {
-        console.error('Failed to delete session:', err);
+        // Failed to delete session
       }
     }
   };
@@ -454,7 +439,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         await clearSessions(currentServerId);
         setIsClearingHistory(false);
       } catch (err) {
-        console.error('Failed to clear history:', err);
+        // Failed to clear history
       }
     }
   };
@@ -464,25 +449,21 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (!activeSessionId) return;
 
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
-      console.log('[AI] Request started');
       setPendingToolCalls(null);
       newAssistantMessage(activeSessionId);
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
-      console.log('[AI] Response chunk received:', event.payload.length, 'chars');
       setLoading(false);
       appendResponse(activeSessionId, event.payload);
     });
 
     const reasoningListener = listen<string>(`ai-reasoning-${activeSessionId}`, (event) => {
-      console.log('[AI] Reasoning chunk received:', event.payload.length, 'chars');
       setLoading(false);
       appendReasoning(activeSessionId, event.payload);
     });
 
     const toolCallListener = listen<ToolCall[]>(`ai-tool-call-${activeSessionId}`, (event) => {
-      console.log('[AI] Tool calls received:', event.payload);
       const calls = event.payload;
 
       // Update store with tool calls so they appear in the message bubble
@@ -492,12 +473,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       const isAllSafe = calls.every(c => c.function.name === 'get_terminal_output');
 
       if (isAllSafe) {
-        console.log('[AI] All tool calls are safe (terminal read). Auto-executing immediately.');
-        
         // Ensure we are using valid IDs
         const model = config?.aiModels.find(m => m.id === selectedModelId);
         if (!model) {
-             console.error('Model not found for auto-execution');
              setLoading(false);
              return;
         }
@@ -510,7 +488,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           mode,
           currentTabId,
           calls.map(c => c.id)
-        ).catch(err => console.error('Failed to auto-execute safe tools:', err));
+        ).catch(() => {
+          // Failed to auto-execute safe tools
+        });
         
         // Do NOT set pendingToolCalls
         setLoading(true); 
@@ -523,35 +503,30 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       }
     });
 
-    const errorListener = listen<string>(`ai-error-${activeSessionId}`, (event) => {
-      console.error('[AI] Error received:', event.payload);
+    const errorListener = listen<string>(`ai-error-${activeSessionId}`, () => {
       setLoading(false);
       setPendingToolCalls(null);
       // TODO: Show error in UI
     });
 
     const doneListener = listen<string>(`ai-done-${activeSessionId}`, async () => {
-      console.log('[AI] Response complete');
       setLoading(false);
 
       // Auto-generate title for new sessions after first response
       const currentSession = sessions.find(s => s.id === activeSessionId);
       if (currentSession && currentSession.title === 'New Chat') {
-        console.log('[AI] Generating title for new session...');
         try {
           const model = config?.aiModels.find(m => m.id === selectedModelId);
           const channelId = model?.channelId || '';
           
           await aiService.generateTitle(activeSessionId, selectedModelId, channelId);
-          console.log('[AI] Title generated successfully');
           
           // Reload sessions to get the updated title
           if (currentServerId) {
             await loadSessions(currentServerId);
           }
         } catch (err) {
-          console.error('[AI] Failed to generate title:', err);
-          // Don't show error to user, it's not critical
+          // Failed to generate title
         }
       }
     });
@@ -604,7 +579,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         await createSession(currentServerId, selectedModelId);
         setShowHistory(false);
       } catch (err) {
-        console.error('Failed to create session:', err);
+        // Failed to create session
       }
     }
   }, [currentServerId, selectedModelId, createSession]);
@@ -619,7 +594,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       try {
         sessionId = await createSession(currentServerId, selectedModelId);
       } catch (err) {
-        console.error('Failed to create session:', err);
         return;
       }
     }
@@ -641,15 +615,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       const model = config?.aiModels.find(m => m.id === selectedModelId);
       const channelId = model?.channelId || '';
       
-      console.log('[AI] Sending message:', {
-        sessionId,
-        modelId: selectedModelId,
-        channelId,
-        mode,
-        currentTabId,
-        content: content.substring(0, 50)
-      });
-      
       await aiService.sendMessage(
         sessionId, 
         content, 
@@ -659,9 +624,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         currentTabId
       );
       
-      console.log('[AI] Message sent successfully');
     } catch (err) {
-      console.error('[AI] Failed to send message:', err);
       setLoading(false);
     }
   }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setLoading, config, mode, currentTabId, isLoading, pendingToolCalls]);
@@ -669,7 +632,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
 
-    console.log('[AI] Confirming tool execution for session:', activeSessionId);
     setLoading(true);
     const callsToExecute = pendingToolCalls.map(c => c.id);
     setPendingToolCalls(null); // Hide confirmation
@@ -678,7 +640,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       const model = config?.aiModels.find(m => m.id === selectedModelId);
       const channelId = model?.channelId || '';
 
-      console.log('[AI] Invoking execute_agent_tools...');
       await aiService.executeAgentTools(
         activeSessionId,
         selectedModelId,
@@ -687,9 +648,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         currentTabId,
         callsToExecute
       );
-      console.log('[AI] Tool execution command sent successfully');
     } catch (err) {
-      console.error('Failed to execute tools:', err);
       setLoading(false);
     }
   }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setLoading]);
@@ -711,7 +670,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       try {
         await aiService.cancelMessage(activeSessionId);
       } catch (err) {
-        console.error('Failed to cancel message:', err);
+        // Failed to cancel message
       }
     }
 
@@ -732,7 +691,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         };
         await saveConfig(newConfig);
       } catch (err) {
-        console.error('Failed to save AI mode:', err);
+        // Failed to save AI mode
       }
     }
   };
@@ -750,7 +709,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         };
         await saveConfig(newConfig);
       } catch (err) {
-        console.error('Failed to save AI model:', err);
+        // Failed to save AI model
       }
     }
   };

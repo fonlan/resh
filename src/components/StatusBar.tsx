@@ -30,7 +30,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
         onContextMenu={(e) => {
           e.preventDefault();
           if (leftText) {
-            navigator.clipboard.writeText(leftText).catch(err => console.error('Failed to copy status text:', err));
+            navigator.clipboard.writeText(leftText).catch(() => {
+              // Failed to copy
+            });
           }
         }}
         style={{ cursor: 'pointer' }}

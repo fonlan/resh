@@ -88,12 +88,15 @@ pub async fn connect_to_server(
             }
             
             if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
-                tracing::error!("Failed to emit terminal event: {}", e);
+                // If the window is closed, we expect emit to fail eventually.
+                // Log at debug level to avoid spamming info/error logs.
+                tracing::debug!("Failed to emit terminal event for {}: {}", session_id, e);
             }
         }
         
         // Notify frontend that connection is closed
         if let Some(session_id) = current_session_id {
+            tracing::info!("SSH Session {} loop ended (connection closed)", session_id);
             // Ensure recording is stopped
             {
                 let mut sessions = RECORDING_SESSIONS.lock().await;
@@ -101,12 +104,13 @@ pub async fn connect_to_server(
             }
             
             if let Err(e) = window_clone.emit(&format!("connection-closed:{}", session_id), ()) {
-                tracing::error!("Failed to emit connection-closed event: {}", e);
+                tracing::debug!("Failed to emit connection-closed event: {}", e);
             }
         }
     });
 
     let session_id = SSHClient::connect(params, tx).await?;
+    tracing::info!("SSH Session {} established", session_id);
 
     Ok(ConnectResponse { session_id })
 }

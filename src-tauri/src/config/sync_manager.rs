@@ -59,7 +59,11 @@ impl SyncManager {
         // 3. Merge logic: Local -> Remote (only synced items)
         let mut new_remote_sync_config = remote_sync_config.clone();
         self.merge_local_to_remote(local_config, &mut new_remote_sync_config);
-        tracing::debug!("After merge_local_to_remote: New Remote has {} snippets", new_remote_sync_config.snippets.len());
+        tracing::debug!("Merge complete. Local -> Remote: {} servers, {} snippets, {} channels", 
+            new_remote_sync_config.servers.len(), 
+            new_remote_sync_config.snippets.len(),
+            new_remote_sync_config.ai_channels.len()
+        );
 
         // 4. Upload new sync.json to WebDAV
         let sync_json = serde_json::to_vec_pretty(&new_remote_sync_config)

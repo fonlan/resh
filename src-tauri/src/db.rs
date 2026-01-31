@@ -9,6 +9,7 @@ pub struct DatabaseManager {
 impl DatabaseManager {
     pub fn new(app_data_dir: PathBuf) -> Result<Self> {
         let db_path = app_data_dir.join("config.db");
+        tracing::debug!("Opening database at {:?}", db_path);
         let conn = Connection::open(db_path)?;
 
         // Enable foreign keys

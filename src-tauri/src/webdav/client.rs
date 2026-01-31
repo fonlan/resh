@@ -28,7 +28,7 @@ impl WebDAVClient {
                 }
                 client_builder = client_builder.proxy(p);
             } else {
-                eprintln!("Invalid proxy configuration: {}", proxy_url);
+                tracing::warn!("Invalid WebDAV proxy configuration: {}", proxy_url);
             }
         }
 
