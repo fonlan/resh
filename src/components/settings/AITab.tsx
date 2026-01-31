@@ -330,22 +330,41 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
       
       <div className="mb-8">
-         <div className="form-group">
-            <label htmlFor="ai-max-history" className="form-label">Max Chat Context</label>
-            <input 
-                id="ai-max-history"
-                type="number" 
-                className="form-input"
-                value={general.aiMaxHistory || 10}
-                onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    if (!isNaN(val)) {
-                        onGeneralUpdate({...general, aiMaxHistory: val});
-                    }
-                }}
-                min={1}
-                max={100}
-            />
+         <div className="form-row">
+            <div className="form-group flex-1">
+               <label htmlFor="ai-max-history" className="form-label">{t.ai.maxChatContext}</label>
+               <input 
+                   id="ai-max-history"
+                   type="number" 
+                   className="form-input"
+                   value={general.aiMaxHistory || 10}
+                   onChange={(e) => {
+                       const val = parseInt(e.target.value);
+                       if (!isNaN(val)) {
+                           onGeneralUpdate({...general, aiMaxHistory: val});
+                       }
+                   }}
+                   min={1}
+                   max={100}
+               />
+            </div>
+            <div className="form-group flex-1">
+               <label htmlFor="ai-timeout" className="form-label">{t.ai.requestTimeout}</label>
+               <input 
+                   id="ai-timeout"
+                   type="number" 
+                   className="form-input"
+                   value={general.aiTimeout || 120}
+                   onChange={(e) => {
+                       const val = parseInt(e.target.value);
+                       if (!isNaN(val)) {
+                           onGeneralUpdate({...general, aiTimeout: val});
+                       }
+                   }}
+                   min={1}
+                   max={600}
+               />
+            </div>
          </div>
       </div>
 

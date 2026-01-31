@@ -346,7 +346,7 @@ async fn run_ai_turn(
 ) -> Result<Option<Vec<ToolCall>>, String> {
     
     // 1. Get Config
-    let (endpoint, api_key, model_name, provider, proxy) = {
+    let (endpoint, api_key, model_name, provider, proxy, timeout) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
@@ -370,6 +370,7 @@ async fn run_ai_turn(
             model.name.clone(),
             channel.provider.clone(),
             proxy,
+            Some(config.general.ai_timeout as u64),
         )
     };
     
@@ -404,7 +405,7 @@ async fn run_ai_turn(
     }
 
     // 4. Stream
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers, proxy).await?;
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers, proxy, timeout).await?;
     
     let mut full_content = String::new();
     let mut full_reasoning = String::new();
@@ -489,7 +490,7 @@ pub async fn fetch_ai_models(
     state: State<'_, Arc<AppState>>,
     channel_id: String,
 ) -> Result<Vec<String>, String> {
-    let (endpoint, api_key, provider, proxy) = {
+    let (endpoint, api_key, provider, proxy, timeout) = {
         let config = state.config.lock().await;
         let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
@@ -509,6 +510,7 @@ pub async fn fetch_ai_models(
             channel.api_key.clone().unwrap_or_default(),
             channel.provider.clone(),
             proxy,
+            Some(config.general.ai_timeout as u64),
         )
     };
 
@@ -532,7 +534,7 @@ pub async fn fetch_ai_models(
         extra_headers = Some(headers);
     }
 
-    let models = fetch_models(&final_endpoint, &final_api_key, extra_headers, proxy).await?;
+    let models = fetch_models(&final_endpoint, &final_api_key, extra_headers, proxy, timeout).await?;
 
     let mut model_ids: Vec<String> = models.into_iter().filter(|m| {
         if provider == "copilot" {
@@ -944,7 +946,7 @@ pub async fn generate_session_title(
     }
 
     // 3. Get model and channel config
-    let (endpoint, api_key, model_name, provider, proxy) = {
+    let (endpoint, api_key, model_name, provider, proxy, timeout) = {
         let config = state.config.lock().await;
         let model = config.ai_models.iter().find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
@@ -968,6 +970,7 @@ pub async fn generate_session_title(
             model.name.clone(),
             channel.provider.clone(),
             proxy,
+            Some(config.general.ai_timeout as u64),
         )
     };
     
@@ -1023,7 +1026,7 @@ pub async fn generate_session_title(
         extra_headers = Some(headers);
     }
 
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers, proxy).await?;
+    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers, proxy, timeout).await?;
     let mut title = String::new();
     
     while let Some(event_result) = stream.next().await {

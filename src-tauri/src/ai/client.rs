@@ -84,11 +84,14 @@ pub async fn fetch_models(
     api_key: &str,
     extra_headers: Option<HashMap<String, String>>,
     proxy: Option<Proxy>,
+    timeout: Option<u64>,
 ) -> Result<Vec<Model>, String> {
     tracing::debug!("[AI Client] Fetching models from {}", endpoint);
 
+    let timeout_duration = Duration::from_secs(timeout.unwrap_or(30));
+
     let mut client_builder = Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(timeout_duration)
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(p) = proxy {
@@ -146,14 +149,17 @@ pub async fn stream_openai_chat(
     tools: Option<Vec<ToolDefinition>>,
     extra_headers: Option<HashMap<String, String>>,
     proxy: Option<Proxy>,
+    timeout: Option<u64>,
 ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, String>> + Send>>, String> {
     tracing::debug!("[AI Client] Starting OpenAI API request to {}", endpoint);
     tracing::debug!("[AI Client] Model: {}, Messages: {}, Tools: {}", 
         model, messages.len(), tools.is_some());
     
+    let timeout_duration = Duration::from_secs(timeout.unwrap_or(120));
+
     // Explicitly configure client for robustness
     let mut client_builder = Client::builder()
-        .timeout(Duration::from_secs(60))
+        .timeout(timeout_duration)
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(p) = proxy {

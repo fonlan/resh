@@ -85,6 +85,7 @@ export interface GeneralSettings {
   aiSidebarLocked: boolean;
   aiMode: 'ask' | 'agent';
   aiMaxHistory: number;
+  aiTimeout: number;
   maxRecentServers: number;
   recentServerIds: string[];
   recordingMode: 'raw' | 'text';
