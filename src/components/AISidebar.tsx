@@ -361,19 +361,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load mode & model from config
+  // Load mode & model from config, with fallback to default model
   useEffect(() => {
     if (config?.general.aiMode) {
       setMode(config.general.aiMode as 'ask' | 'agent');
     }
     if (config?.general.aiModelId) {
       setSelectedModelId(config.general.aiModelId);
-    }
-  }, [config?.general.aiMode, config?.general.aiModelId]);
-
-  // Set default model
-  useEffect(() => {
-    if (config?.aiModels && config.aiModels.length > 0 && !selectedModelId) {
+    } else if (config?.aiModels && config.aiModels.length > 0 && !selectedModelId) {
       const firstEnabledModel = config.aiModels.find(model => {
         const channel = config.aiChannels?.find(c => c.id === model.channelId);
         return model.enabled && channel?.isActive;
@@ -382,7 +377,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         setSelectedModelId(firstEnabledModel.id);
       }
     }
-  }, [config?.aiModels, config?.aiChannels, selectedModelId]);
+  }, [config?.general.aiMode, config?.general.aiModelId, config?.aiModels, config?.aiChannels, selectedModelId]);
 
   // Load sessions and restore active session when server changes
   useEffect(() => {
