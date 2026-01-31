@@ -685,8 +685,23 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (activeSessionId) {
       setGenerating(activeSessionId, false);
       markSessionStopped(activeSessionId);
+
+      const currentSession = sessions.find(s => s.id === activeSessionId);
+      if (currentSession && currentSession.title === 'New Chat') {
+        try {
+          const model = config?.aiModels.find(m => m.id === selectedModelId);
+          const channelId = model?.channelId || '';
+
+          await aiService.generateTitle(activeSessionId, selectedModelId, channelId);
+
+          if (currentServerId) {
+            await loadSessions(currentServerId);
+          }
+        } catch (err) {
+        }
+      }
     }
-  }, [activeSessionId, isLoading, pendingToolCalls, setGenerating, storeSetPendingToolCalls, markSessionStopped]);
+  }, [activeSessionId, isLoading, pendingToolCalls, setGenerating, storeSetPendingToolCalls, markSessionStopped, sessions, selectedModelId, config, currentServerId, loadSessions]);
 
   const handleModeChange = async (newMode: 'ask' | 'agent') => {
     setMode(newMode);
