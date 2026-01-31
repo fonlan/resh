@@ -204,9 +204,14 @@ async fn execute_tools_and_save(
     state: &Arc<AppState>, 
     session_id: &str, 
     ssh_session_id: Option<&str>,
-    tools: Vec<ToolCall>
+    tools: Vec<ToolCall>,
+    cancellation_token: CancellationToken,
 ) -> Result<(), String> {
     for call in tools {
+        if cancellation_token.is_cancelled() {
+            tracing::info!("[AI] Tool execution cancelled for session: {}", session_id);
+            return Err("CANCELLED".to_string());
+        }
         tracing::debug!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
         
         let result = match call.function.name.as_str() {
@@ -240,6 +245,11 @@ async fn execute_tools_and_save(
                             let mut elapsed = 0u64;
                             
                             loop {
+                                if cancellation_token.is_cancelled() {
+                                    tracing::info!("[run_in_terminal tool] execution cancelled for session: {:?}", ssh_session_id);
+                                    SSHClient::stop_command_recording(ssh_id).await.ok();
+                                    return Err("CANCELLED".to_string());
+                                }
                                 interval.tick().await;
                                 elapsed += 100;
                                 
@@ -761,14 +771,15 @@ pub async fn execute_agent_tools(
     }
 
     tracing::debug!("[AI] Executing {} tools...", tools_filtered.len());
-    execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered).await?;
+
+    let token = CancellationToken::new();
+    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
+    
+    execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered, token.clone()).await?;
     tracing::debug!("[AI] Tool execution complete. Running next AI turn...");
 
     // Continue the loop (1 turn)
     let tools = Some(create_tools(is_agent_mode));
-    
-    let token = CancellationToken::new();
-    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
     
     let result = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools, token).await;
     
