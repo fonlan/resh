@@ -470,12 +470,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
-      setLoading(false);
       appendResponse(activeSessionId, event.payload);
     });
 
     const reasoningListener = listen<string>(`ai-reasoning-${activeSessionId}`, (event) => {
-      setLoading(false);
       appendReasoning(activeSessionId, event.payload);
     });
 
