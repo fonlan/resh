@@ -8,6 +8,8 @@ interface AIState {
   activeSessionIdByServer: Record<string, string | null>;
   messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
+  isGenerating: Record<string, boolean>;
+  pendingToolCalls: Record<string, ToolCall[] | null>;
   
   loadSessions: (serverId: string) => Promise<void>;
   createSession: (serverId: string, modelId?: string) => Promise<string>;
@@ -18,6 +20,8 @@ interface AIState {
   appendReasoning: (sessionId: string, reasoning: string) => void;
   appendToolCalls: (sessionId: string, toolCalls: ToolCall[]) => void;
   setLoading: (loading: boolean) => void;
+  setGenerating: (sessionId: string, generating: boolean) => void;
+  setPendingToolCalls: (sessionId: string, toolCalls: ToolCall[] | null) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
   clearSessions: (serverId: string) => Promise<void>;
 }
@@ -28,8 +32,18 @@ export const useAIStore = create<AIState>((set, get) => ({
   activeSessionIdByServer: {},
   messages: {},
   isLoading: false,
+  isGenerating: {},
+  pendingToolCalls: {},
 
   setLoading: (loading) => set({ isLoading: loading }),
+  
+  setGenerating: (sessionId, generating) => set(state => ({
+    isGenerating: { ...state.isGenerating, [sessionId]: generating }
+  })),
+
+  setPendingToolCalls: (sessionId, toolCalls) => set(state => ({
+    pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: toolCalls }
+  })),
 
   loadSessions: async (serverId) => {
     set({ isLoading: true });
@@ -55,8 +69,24 @@ export const useAIStore = create<AIState>((set, get) => ({
     }));
     if (sessionId) {
       const msgs = await aiService.getMessages(sessionId);
+      
+      // Check for pending tool calls in history
+      let pending = null;
+      if (msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg.role === 'assistant' && lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
+          const hasVisibleTools = lastMsg.tool_calls.some(tc => 
+            tc.function.name !== 'get_terminal_output'
+          );
+          if (hasVisibleTools) {
+            pending = lastMsg.tool_calls;
+          }
+        }
+      }
+
       set(state => ({
-        messages: { ...state.messages, [sessionId]: msgs }
+        messages: { ...state.messages, [sessionId]: msgs },
+        pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: pending }
       }));
     }
   },
@@ -148,6 +178,18 @@ export const useAIStore = create<AIState>((set, get) => ({
         activeSessionIdByServer: { ...s.activeSessionIdByServer, [serverId]: null }
       }));
     }
+    
+    // Clean up session-specific state
+    set(s => {
+      const isGenerating = { ...s.isGenerating };
+      const pendingToolCalls = { ...s.pendingToolCalls };
+      const messages = { ...s.messages };
+      delete isGenerating[sessionId];
+      delete pendingToolCalls[sessionId];
+      delete messages[sessionId];
+      return { isGenerating, pendingToolCalls, messages };
+    });
+
     await get().loadSessions(serverId);
   },
 
@@ -156,7 +198,10 @@ export const useAIStore = create<AIState>((set, get) => ({
     set(state => ({ 
       activeSessionId: null, 
       sessions: [],
-      activeSessionIdByServer: { ...state.activeSessionIdByServer, [serverId]: null }
+      activeSessionIdByServer: { ...state.activeSessionIdByServer, [serverId]: null },
+      isGenerating: {},
+      pendingToolCalls: {},
+      messages: {}
     }));
     await get().loadSessions(serverId);
   },

@@ -329,7 +329,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     activeSessionId, 
     activeSessionIdByServer,
     messages, 
-    isLoading,
+    isGenerating,
+    pendingToolCalls: pendingToolCallsMap,
     loadSessions,
     createSession,
     selectSession,
@@ -338,7 +339,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     appendResponse,
     appendReasoning,
     appendToolCalls,
-    setLoading,
+    setGenerating,
+    setPendingToolCalls: storeSetPendingToolCalls,
     deleteSession,
     clearSessions
   } = useAIStore();
@@ -349,9 +351,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [mode, setMode] = useState<'ask' | 'agent'>(config?.general.aiMode as 'ask' | 'agent' || 'ask');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
-  const [pendingToolCalls, setPendingToolCalls] = useState<ToolCall[] | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
+
+  const isLoading = activeSessionId ? isGenerating[activeSessionId] || false : false;
+  const pendingToolCalls = activeSessionId ? pendingToolCallsMap[activeSessionId] || null : null;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -399,21 +403,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     activeSessionId ? messages[activeSessionId] || [] : [], 
     [activeSessionId, messages]
   );
-
-  // Restore pending tool calls from history when session changes
-  useEffect(() => {
-    if (activeSessionId && currentMessages.length > 0 && !isLoading && !pendingToolCalls) {
-      const lastMsg = currentMessages[currentMessages.length - 1];
-      if (lastMsg.role === 'assistant' && lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
-        const hasVisibleTools = lastMsg.tool_calls.some(tc => 
-          tc.function.name !== 'get_terminal_output'
-        );
-        if (hasVisibleTools) {
-          setPendingToolCalls(lastMsg.tool_calls);
-        }
-      }
-    }
-  }, [activeSessionId, currentMessages, isLoading, pendingToolCalls]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -465,7 +454,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (!activeSessionId) return;
 
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
-      setPendingToolCalls(null);
+      storeSetPendingToolCalls(activeSessionId, null);
       newAssistantMessage(activeSessionId);
     });
 
@@ -490,7 +479,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         // Ensure we are using valid IDs
         const model = config?.aiModels.find(m => m.id === selectedModelId);
         if (!model) {
-             setLoading(false);
+             setGenerating(activeSessionId, false);
              return;
         }
         const channelId = model.channelId || '';
@@ -507,24 +496,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         });
         
         // Do NOT set pendingToolCalls
-        setLoading(true); 
+        setGenerating(activeSessionId, true); 
       } else {
         // Here we have run_in_terminal calls. 
         // We set pendingToolCalls to show the UI.
         // The UI (ToolConfirmation) handles the countdown for non-sensitive commands.
-        setLoading(false);
-        setPendingToolCalls(calls);
+        setGenerating(activeSessionId, false);
+        storeSetPendingToolCalls(activeSessionId, calls);
       }
     });
 
     const errorListener = listen<string>(`ai-error-${activeSessionId}`, () => {
-      setLoading(false);
-      setPendingToolCalls(null);
+      setGenerating(activeSessionId, false);
+      storeSetPendingToolCalls(activeSessionId, null);
       // TODO: Show error in UI
     });
 
     const doneListener = listen<string>(`ai-done-${activeSessionId}`, async () => {
-      setLoading(false);
+      setGenerating(activeSessionId, false);
 
       // Auto-generate title for new sessions after first response
       const currentSession = sessions.find(s => s.id === activeSessionId);
@@ -553,7 +542,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -623,7 +612,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     // Optimistic update
     addMessage(sessionId, { role: 'user', content });
-    setLoading(true);
+    setGenerating(sessionId, true);
 
     try {
       const model = config?.aiModels.find(m => m.id === selectedModelId);
@@ -639,16 +628,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       );
       
     } catch (err) {
-      setLoading(false);
+      setGenerating(sessionId, false);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setLoading, config, mode, currentTabId, isLoading, pendingToolCalls]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
 
-    setLoading(true);
+    setGenerating(activeSessionId, true);
     const callsToExecute = pendingToolCalls.map(c => c.id);
-    setPendingToolCalls(null); // Hide confirmation
+    storeSetPendingToolCalls(activeSessionId, null); // Hide confirmation
 
     try {
       const model = config?.aiModels.find(m => m.id === selectedModelId);
@@ -663,20 +652,22 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         callsToExecute
       );
     } catch (err) {
-      setLoading(false);
+      setGenerating(activeSessionId, false);
     }
-  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setLoading]);
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setGenerating, storeSetPendingToolCalls]);
 
   const handleCancelTools = useCallback(() => {
-    setPendingToolCalls(null);
-    setLoading(false);
+    if (activeSessionId) {
+      storeSetPendingToolCalls(activeSessionId, null);
+      setGenerating(activeSessionId, false);
+    }
     // Optionally insert a "Cancelled" system message
-  }, [setLoading]);
+  }, [activeSessionId, storeSetPendingToolCalls, setGenerating]);
 
   const handleStopGeneration = useCallback(async () => {
     // 1. Clear frontend pending tools
-    if (pendingToolCalls) {
-      setPendingToolCalls(null);
+    if (activeSessionId && pendingToolCalls) {
+      storeSetPendingToolCalls(activeSessionId, null);
     }
 
     // 2. Cancel backend processing if active
@@ -689,8 +680,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
 
     // 3. Ensure loading is turned off
-    setLoading(false);
-  }, [activeSessionId, isLoading, pendingToolCalls, setLoading]);
+    if (activeSessionId) {
+      setGenerating(activeSessionId, false);
+    }
+  }, [activeSessionId, isLoading, pendingToolCalls, setGenerating, storeSetPendingToolCalls]);
 
   const handleModeChange = async (newMode: 'ask' | 'agent') => {
     setMode(newMode);
