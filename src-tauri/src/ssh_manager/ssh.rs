@@ -380,6 +380,66 @@ impl SSHClient {
         }
     }
 
+    /// Send interrupt signal (Ctrl+C) to the terminal
+    pub async fn send_interrupt(session_id: &str) -> Result<(), String> {
+        let result = {
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(&[3u8][..]).await // 3 = ETX (Ctrl+C)
+            } else {
+                return Err("Session not found".to_string());
+            }
+        };
+
+        if result.is_err() {
+            info!("[SSH] Send interrupt failed, attempting to reconnect session {}...", session_id);
+            if let Err(e) = Self::reconnect(session_id).await {
+                error!("[SSH] Reconnection failed: {}", e);
+                return Err(format!("Connection lost and reconnection failed: {}", e));
+            }
+
+            // Retry sending
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(&[3u8][..]).await.map_err(|e| format!("Failed to send interrupt after reconnect: {}", e))?;
+            } else {
+                return Err("Session lost during reconnect".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Send arbitrary input (characters, escape sequences) to the terminal
+    pub async fn send_terminal_input(session_id: &str, input: &str) -> Result<(), String> {
+        let result = {
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(input.as_bytes()).await
+            } else {
+                return Err("Session not found".to_string());
+            }
+        };
+
+        if result.is_err() {
+            info!("[SSH] Send input failed, attempting to reconnect session {}...", session_id);
+            if let Err(e) = Self::reconnect(session_id).await {
+                error!("[SSH] Reconnection failed: {}", e);
+                return Err(format!("Connection lost and reconnection failed: {}", e));
+            }
+
+            // Retry sending
+            let mut sessions = SESSIONS.lock().await;
+            if let Some(session_data) = sessions.get_mut(session_id) {
+                session_data.channel.data(input.as_bytes()).await.map_err(|e| format!("Failed to send input after reconnect: {}", e))?;
+            } else {
+                return Err("Session lost during reconnect".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
     /// Update the terminal buffer with new data
     pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<(), String> {
         const MAX_BUFFER_SIZE: usize = 100_000;

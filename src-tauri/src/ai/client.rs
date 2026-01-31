@@ -294,6 +294,37 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                 }),
             },
         });
+
+        tools.push(ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "send_interrupt".to_string(),
+                description: "Send Ctrl+C (ETX, character code 3) to interrupt a running program. Use this when a TUI program (like htop, vim, less, iftop) is blocking and needs to be terminated. Returns confirmation of the interrupt being sent.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
+        });
+
+        tools.push(ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "send_terminal_input".to_string(),
+                description: "Send arbitrary characters or escape sequences to the terminal. Use this to send key presses like 'q' to quit a TUI program, or special keys like escape sequences. Useful for dismissing prompts or navigating TUI applications.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "input": {
+                            "type": "string",
+                            "description": "The characters or escape sequence to send (e.g., 'q' to quit, '\\x1b' for Escape, '\\n' for Enter)"
+                        }
+                    },
+                    "required": ["input"]
+                }),
+            },
+        });
     }
 
     tools

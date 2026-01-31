@@ -274,6 +274,34 @@ async fn execute_tools_and_save(
                     "Error: No active terminal session linked to this chat.".to_string()
                 }
             },
+            "send_interrupt" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    match SSHClient::send_interrupt(ssh_id).await {
+                        Ok(_) => "Interrupt signal (Ctrl+C) sent successfully".to_string(),
+                        Err(e) => format!("Error sending interrupt: {}", e)
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            },
+            "send_terminal_input" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                        if let Some(input) = args["input"].as_str() {
+                            match SSHClient::send_terminal_input(ssh_id, input).await {
+                                Ok(_) => format!("Input '{}' sent successfully", input.escape_debug()),
+                                Err(e) => format!("Error sending input: {}", e)
+                            }
+                        } else {
+                            "Error: Missing 'input' argument".to_string()
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            },
             _ => format!("Error: Unknown tool {}", call.function.name)
         };
 
@@ -799,13 +827,31 @@ pub async fn run_in_terminal(
     }
     
     let output = SSHClient::stop_command_recording(&session_id).await?;
-    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output)).to_string();
+    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
     
     if clean_output.is_empty() {
         return Err("Command timed out or produced no output".to_string());
     }
     
     Ok(clean_output)
+}
+
+/// Send Ctrl+C interrupt signal to terminate a running program
+#[tauri::command]
+pub async fn send_interrupt(session_id: String) -> Result<String, String> {
+    match SSHClient::send_interrupt(&session_id).await {
+        Ok(_) => Ok("Interrupt signal (Ctrl+C) sent successfully".to_string()),
+        Err(e) => Err(format!("Error sending interrupt: {}", e))
+    }
+}
+
+/// Send arbitrary input/keystrokes to the terminal
+#[tauri::command]
+pub async fn send_terminal_input(session_id: String, input: String) -> Result<String, String> {
+    match SSHClient::send_terminal_input(&session_id, &input).await {
+        Ok(_) => Ok(format!("Input '{}' sent successfully", input.escape_debug())),
+        Err(e) => Err(format!("Error sending input: {}", e))
+    }
 }
 
 /// Generate a title for an AI session based on the first conversation round
