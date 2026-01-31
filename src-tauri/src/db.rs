@@ -44,6 +44,7 @@ impl DatabaseManager {
                 session_id TEXT NOT NULL,
                 role TEXT NOT NULL,
                 content TEXT NOT NULL,
+                reasoning_content TEXT,
                 tool_calls TEXT,
                 tool_call_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -54,6 +55,11 @@ impl DatabaseManager {
 
         // Migration: Ensure tool_call_id column exists for existing tables
         let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN tool_call_id TEXT", []);
+        // Migration: Ensure reasoning_content column exists
+        let _ = conn.execute(
+            "ALTER TABLE ai_messages ADD COLUMN reasoning_content TEXT",
+            [],
+        );
 
         Ok(())
     }

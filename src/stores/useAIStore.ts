@@ -14,6 +14,7 @@ interface AIState {
   addMessage: (sessionId: string, message: ChatMessage) => void;
   newAssistantMessage: (sessionId: string) => void;
   appendResponse: (sessionId: string, content: string) => void;
+  appendReasoning: (sessionId: string, reasoning: string) => void;
   appendToolCalls: (sessionId: string, toolCalls: ToolCall[]) => void;
   setLoading: (loading: boolean) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
@@ -92,6 +93,23 @@ export const useAIStore = create<AIState>((set, get) => ({
         // Create new assistant message
         return {
           messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content }] }
+        };
+      }
+    });
+  },
+
+  appendReasoning: (sessionId, reasoning) => {
+    set(state => {
+      const current = state.messages[sessionId] || [];
+      const last = current[current.length - 1];
+      
+      if (last && last.role === 'assistant') {
+        const updated = [...current];
+        updated[updated.length - 1] = { ...last, reasoning_content: (last.reasoning_content || '') + reasoning };
+        return { messages: { ...state.messages, [sessionId]: updated } };
+      } else {
+        return {
+          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', reasoning_content: reasoning }] }
         };
       }
     });

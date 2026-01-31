@@ -748,3 +748,57 @@
 .ai-btn-secondary:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+/* Reasoning Section */
+.ai-reasoning-section {
+  width: 100%;
+}
+
+.ai-reasoning-toggle {
+  display: flex;
+  align-items: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 0;
+  transition: color var(--transition-fast);
+}
+
+.ai-reasoning-toggle:hover {
+  color: var(--accent-primary);
+}
+
+.ai-reasoning-content {
+  line-height: 1.6;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: var(--font-serif, "Georgia", "Times New Roman", serif);
+  font-style: italic;
+  background: rgba(0, 0, 0, 0.15);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 4px;
+  padding: 10px 14px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
+  position: relative;
+  white-space: pre-wrap; /* Ensure newlines in reasoning are preserved */
+}
+
+.ai-streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  margin-left: 2px;
+  color: var(--accent-primary);
+  animation: cursor-blink 1s infinite;
+  vertical-align: middle;
+  font-weight: bold;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}

@@ -27,6 +27,8 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
@@ -35,6 +37,7 @@ pub struct ChatMessage {
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     Content(String),
+    Reasoning(String),
     ToolCall(serde_json::Value),
     Done,
 }
@@ -234,6 +237,8 @@ pub async fn stream_openai_chat(
                         let delta = &json["choices"][0]["delta"];
                         if let Some(content) = delta["content"].as_str() {
                             Ok(StreamEvent::Content(content.to_string()))
+                        } else if let Some(reasoning) = delta["reasoning_content"].as_str() {
+                            Ok(StreamEvent::Reasoning(reasoning.to_string()))
                         } else if let Some(tool_calls) = delta["tool_calls"].as_array() {
                             // Pass the whole tool_calls array to be processed by caller
                             Ok(StreamEvent::ToolCall(serde_json::Value::Array(tool_calls.clone())))

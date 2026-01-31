@@ -23,8 +23,8 @@ async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bo
     
     // Get the last N messages
     let mut stmt = conn.prepare(
-        "SELECT role, content, tool_calls, tool_call_id FROM (
-            SELECT role, content, tool_calls, tool_call_id, created_at 
+        "SELECT role, content, reasoning_content, tool_calls, tool_call_id FROM (
+            SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
             FROM ai_messages 
             WHERE session_id = ?1 
             ORDER BY created_at DESC 
@@ -35,8 +35,9 @@ async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bo
     let rows = stmt.query_map(params![session_id, max_history], |row| {
          let role: String = row.get(0)?;
          let content_raw: String = row.get(1)?;
-         let tool_calls_json: Option<String> = row.get(2).ok();
-         let tool_call_id: Option<String> = row.get(3).ok();
+         let reasoning_raw: Option<String> = row.get(2)?;
+         let tool_calls_json: Option<String> = row.get(3).ok();
+         let tool_call_id: Option<String> = row.get(4).ok();
          
          let content = if content_raw.is_empty() { None } else { Some(content_raw) };
 
@@ -49,6 +50,7 @@ async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bo
         Ok(ChatMessage {
             role,
             content,
+            reasoning_content: reasoning_raw,
             tool_calls,
             tool_call_id, 
         })
@@ -68,6 +70,7 @@ async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bo
     msgs.push(ChatMessage {
         role: "system".to_string(),
         content: Some(full_system_prompt),
+        reasoning_content: None,
         tool_calls: None,
         tool_call_id: None,
     });
@@ -262,6 +265,7 @@ async fn run_ai_turn(
     let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers, proxy).await?;
     
     let mut full_content = String::new();
+    let mut full_reasoning = String::new();
     let mut tool_accumulator = ToolCallAccumulator::new();
     let mut has_tool_calls = false;
 
@@ -271,6 +275,12 @@ async fn run_ai_turn(
                 if !chunk.is_empty() {
                     full_content.push_str(&chunk);
                     window.emit(&format!("ai-response-{}", session_id), chunk).map_err(|e| e.to_string())?;
+                }
+            },
+            Ok(StreamEvent::Reasoning(chunk)) => {
+                if !chunk.is_empty() {
+                    full_reasoning.push_str(&chunk);
+                    window.emit(&format!("ai-reasoning-{}", session_id), chunk).map_err(|e| e.to_string())?;
                 }
             },
             Ok(StreamEvent::ToolCall(json)) => {
@@ -302,11 +312,11 @@ async fn run_ai_turn(
             None
         };
 
-        // Only insert if we have content or tool calls
-        if !full_content.is_empty() || final_tool_calls.is_some() {
+        // Only insert if we have content or tool calls or reasoning
+        if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty() {
                 conn.execute(
-                "INSERT INTO ai_messages (id, session_id, role, content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![ai_msg_id, session_id, "assistant", full_content, tool_calls_json],
+                "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json],
             ).map_err(|e| e.to_string())?;
         }
     }
@@ -730,12 +740,14 @@ pub async fn generate_session_title(
         ChatMessage {
             role: "system".to_string(),
             content: Some(system_prompt.to_string()),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         },
         ChatMessage {
             role: "user".to_string(),
             content: Some(user_content),
+            reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
         },

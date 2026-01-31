@@ -5,7 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2 } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -218,8 +218,9 @@ const ToolConfirmation = ({
   );
 };
 
-const MessageBubble = ({ msg, t, isPending }: { msg: ChatMessage, t: any, isPending?: boolean }) => {
+const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
   const [copied, setCopied] = useState(false);
+  const [showReasoning, setShowReasoning] = useState(true);
 
   const handleCopy = async () => {
     if (!msg.content) return;
@@ -241,6 +242,25 @@ const MessageBubble = ({ msg, t, isPending }: { msg: ChatMessage, t: any, isPend
     <div className={`ai-message ${msg.role}`}>
       <div className="ai-message-wrapper">
         <div className="ai-message-content">
+          {msg.reasoning_content && (
+            <div className="ai-reasoning-section mb-2">
+              <button 
+                type="button" 
+                className="ai-reasoning-toggle"
+                onClick={() => setShowReasoning(!showReasoning)}
+              >
+                {showReasoning ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                <BrainCircuit size={14} className="ml-1 mr-1 text-blue-400" />
+                <span>{t.ai.thinkingProcess}</span>
+              </button>
+              {showReasoning && (
+                <div className="ai-reasoning-content">
+                  {msg.reasoning_content}
+                  {isLast && isLoading && !msg.content && <span className="ai-streaming-cursor">|</span>}
+                </div>
+              )}
+            </div>
+          )}
           {visibleToolCalls.length > 0 ? (
             <div className="ai-tool-confirm mb-2">
               <div className="ai-tool-header">
@@ -329,6 +349,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     addMessage,
     newAssistantMessage,
     appendResponse,
+    appendReasoning,
     appendToolCalls,
     setLoading,
     deleteSession,
@@ -454,6 +475,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       appendResponse(activeSessionId, event.payload);
     });
 
+    const reasoningListener = listen<string>(`ai-reasoning-${activeSessionId}`, (event) => {
+      console.log('[AI] Reasoning chunk received:', event.payload.length, 'chars');
+      setLoading(false);
+      appendReasoning(activeSessionId, event.payload);
+    });
+
     const toolCallListener = listen<ToolCall[]>(`ai-tool-call-${activeSessionId}`, (event) => {
       console.log('[AI] Tool calls received:', event.payload);
       const calls = event.payload;
@@ -532,11 +559,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     return () => {
       startedListener.then(unlisten => unlisten());
       responseListener.then(unlisten => unlisten());
+      reasoningListener.then(unlisten => unlisten());
       toolCallListener.then(unlisten => unlisten());
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setLoading, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -883,22 +911,27 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               const isPending = !!(pendingToolCalls && msg.tool_calls && pendingToolCalls.length > 0 && 
                   msg.tool_calls.some(tc => pendingToolCalls.some(ptc => ptc.id === tc.id)));
               
-              // Filter out completely empty assistant messages (no content and no visible tool calls)
-              // But keep them if they might contain pending tools that are handled by the bottom component
               if (msg.role === 'assistant') {
                 const hasContent = msg.content && msg.content.trim().length > 0;
+                const hasReasoning = msg.reasoning_content && msg.reasoning_content.trim().length > 0;
                 const hasVisibleTools = msg.tool_calls && msg.tool_calls.some(tc => 
                   tc.function.name !== 'get_terminal_output'
                 );
                 
-                // If it has no content and no visible tools, don't render it
-                // Note: Pending tools are rendered separately at the bottom, so we don't need to worry about hiding them here
-                if (!hasContent && !hasVisibleTools) {
+                // Keep the message if it has content, tools, or reasoning process
+                if (!hasContent && !hasVisibleTools && !hasReasoning) {
                   return null;
                 }
               }
 
-              return <MessageBubble key={`${activeSessionId}-${idx}`} msg={msg} t={t} isPending={isPending} />;
+              return <MessageBubble 
+                key={`${activeSessionId}-${idx}`} 
+                msg={msg} 
+                t={t} 
+                isPending={isPending} 
+                isLast={idx === currentMessages.length - 1}
+                isLoading={isLoading}
+              />;
             })}
             
             {pendingToolCalls && (
