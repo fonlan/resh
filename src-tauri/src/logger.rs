@@ -39,7 +39,20 @@ pub fn init_logging(app_data_dir: PathBuf, debug_enabled: bool) {
             } else {
                 Level::INFO
             };
-            metadata.level() <= &max_level
+            // Suppress verbose debug logs from third-party libraries
+            if metadata.level() <= &max_level {
+                let target = metadata.target();
+                if target.starts_with("russh::cipher")
+                    || target.starts_with("hyper::proto::h1::decode")
+                {
+                    // Only allow WARN and above for these verbose modules
+                    metadata.level() <= &Level::WARN
+                } else {
+                    true
+                }
+            } else {
+                false
+            }
         }));
 
     // Registry without a global EnvFilter to allow layers to decide their own levels

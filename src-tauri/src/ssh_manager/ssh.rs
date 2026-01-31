@@ -45,6 +45,8 @@ struct SessionData {
     command_recorder: Option<String>,
     last_output_len: usize,
     recording_prompt: Option<String>,
+    command_finished: bool,
+    last_exit_code: Option<i32>,
 }
 
 lazy_static! {
@@ -84,6 +86,8 @@ impl SSHClient {
                 command_recorder: None,
                 last_output_len: 0,
                 recording_prompt: None,
+                command_finished: false,
+                last_exit_code: None,
             });
         }
         
@@ -356,8 +360,9 @@ impl SSHClient {
             session_data.command_recorder = Some(String::new());
             session_data.last_output_len = session_data.terminal_buffer.len();
             session_data.recording_prompt = Self::extract_prompt(&session_data.terminal_buffer);
-            tracing::debug!("[start_command_recording] terminal_buffer len={}, extracted prompt={:?}", 
-                session_data.terminal_buffer.len(), session_data.recording_prompt);
+            session_data.command_finished = false;
+            session_data.last_exit_code = None;
+
             Ok(())
         } else {
             Err("Session not found".to_string())
@@ -401,43 +406,50 @@ impl SSHClient {
         }
     }
 
-    /// Check if command execution appears completed (prompt detected or significant output received)
+    /// Check if command execution appears completed (prompt detected or completion marker)
     pub async fn check_command_completed(session_id: &str) -> Result<bool, String> {
         let sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get(session_id) {
             if session_data.command_recorder.is_none() {
-                tracing::debug!("[check_command_completed] command_recorder is None, returning true");
+
                 return Ok(true);
             }
+
             let current_buffer = &session_data.terminal_buffer;
-            let new_content = if current_buffer.len() > session_data.last_output_len {
-                Some(&current_buffer[session_data.last_output_len..])
+            let recording_start = session_data.last_output_len;
+            let new_content = if current_buffer.len() > recording_start {
+                &current_buffer[recording_start..]
             } else {
-                None
+                ""
             };
-            tracing::debug!("[check_command_completed] new_content len={:?}", new_content.map(|s| s.len()));
-            if let Some(new_content) = new_content {
-                if let Some(ref prompt) = session_data.recording_prompt {
-                    if new_content.contains(prompt) && new_content.len() > prompt.len() {
-                        tracing::debug!("[check_command_completed] found recording prompt, returning true");
-                        return Ok(true);
-                    }
-                }
-                let lines: Vec<&str> = new_content.lines().collect();
-                if lines.len() >= 2 {
-                    let last_line = lines.last().unwrap().trim_end();
-                    tracing::debug!("[check_command_completed] last_line={}", last_line);
-                    if last_line.ends_with('$') || last_line.ends_with('#') || last_line.ends_with('>') {
-                        tracing::debug!("[check_command_completed] found shell prompt, returning true");
-                        return Ok(true);
-                    }
-                }
-                if new_content.contains("\nuser@") || new_content.contains("\nroot@") {
-                    tracing::debug!("[check_command_completed] found login prompt, returning true");
+
+
+
+            // Priority 1: Completion marker detection
+            if new_content.contains("DONE_MARKER") {
+
+                return Ok(true);
+            }
+
+            // Priority 2: Shell prompt detection
+            let lines: Vec<&str> = new_content.lines().collect();
+            if let Some(last_line) = lines.last() {
+                let cleaned: String = strip_ansi_escapes::strip(last_line).into_iter().map(|c| c as char).collect();
+                let trimmed = cleaned.trim_end();
+
+                if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('>')
+                   || trimmed.ends_with('%') || trimmed.is_empty() {
+
                     return Ok(true);
                 }
             }
-            tracing::debug!("[check_command_completed] not completed, returning false");
+
+            // Check if buffer grew (command produced output)
+            if new_content.contains("inet ") || new_content.contains("link/ether") {
+
+                return Ok(true);
+            }
+
             Ok(false)
         } else {
             Err("Session not found".to_string())
@@ -510,8 +522,8 @@ impl SSHClient {
         
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
-            let is_recording = session_data.command_recorder.is_some();
-            let data_len = data.len();
+
+
             session_data.terminal_buffer.push_str(data);
             
             if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
@@ -521,8 +533,6 @@ impl SSHClient {
 
             if let Some(recorder) = session_data.command_recorder.as_mut() {
                 recorder.push_str(data);
-                tracing::debug!("[update_terminal_buffer] recording={} data_len={} recorder_len={}", 
-                    is_recording, data_len, recorder.len());
             }
             
             Ok(())

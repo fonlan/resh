@@ -820,9 +820,25 @@ pub async fn run_in_terminal(
     let timeout = timeout_seconds.unwrap_or(30);
     
     SSHClient::start_command_recording(&session_id).await?;
-    
+
+    // Send the actual command with newline
     let command_with_newline = format!("{}\n", command);
-    SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await?;
+
+    match SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await {
+        Ok(_) => {},
+        Err(e) => tracing::error!("[run_in_terminal] send_command failed: {}", e),
+    }
+
+    // Give the command time to start executing and produce output
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    // Add a marker command that outputs a unique pattern when the previous command finishes
+    let marker = format!("echo DONE_MARKER\n");
+
+    match SSHClient::send_input(&session_id, marker.as_bytes()).await {
+        Ok(_) => {},
+        Err(e) => tracing::error!("[run_in_terminal] send_marker failed: {}", e),
+    }
     
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
@@ -832,17 +848,17 @@ pub async fn run_in_terminal(
         interval.tick().await;
         elapsed += CHECK_INTERVAL_MS;
         
-        tracing::debug!("[run_in_terminal] elapsed={}ms timeout={}s", elapsed, timeout);
+
         
         if elapsed >= timeout * 1000 {
-            tracing::warn!("[run_in_terminal] timeout reached after {}ms", elapsed);
+
             break;
         }
 
         let is_completed = SSHClient::check_command_completed(&session_id).await?;
-        tracing::debug!("[run_in_terminal] is_completed={}", is_completed);
+
         if is_completed {
-            tracing::info!("[run_in_terminal] command completed after {}ms", elapsed);
+
             break;
         }
     }
