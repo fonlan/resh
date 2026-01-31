@@ -13,66 +13,102 @@ use tokio_util::sync::CancellationToken;
 
 // --- Helper Functions ---
 
-fn validate_and_clean_history(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
+fn validate_and_clean_history(history: Vec<ChatMessage>, model_name: &str) -> Vec<ChatMessage> {
+    let is_glm_model = model_name.to_lowercase().starts_with("glm");
+    validate_and_clean_history_for_glm(history, is_glm_model)
+}
+
+fn validate_and_clean_history_for_glm(history: Vec<ChatMessage>, _is_glm_model: bool) -> Vec<ChatMessage> {
+    tracing::debug!("[AI] GLM validation input: {} messages", history.len());
+    
     let mut cleaned = Vec::new();
     let mut i = 0;
-    
-    // First pass: remove orphan tool messages at the beginning
-    while i < history.len() && history[i].role == "tool" {
-        i += 1;
-    }
-    
+    let mut last_user_content = String::new();
+    let input_roles: Vec<String> = history.iter().map(|m| m.role.clone()).collect();
+    tracing::debug!("[AI] Input roles: {:?}", input_roles);
+
     while i < history.len() {
         let msg = &history[i];
-        
-        if msg.role == "assistant" && msg.tool_calls.is_some() {
-            let tool_calls = msg.tool_calls.as_ref().unwrap();
-            let mut tool_msgs = Vec::new();
-            let mut j = i + 1;
-            
-            // Collect subsequent tool messages
-            while j < history.len() && history[j].role == "tool" {
-                tool_msgs.push(history[j].clone());
-                j += 1;
-            }
-            
-            // Check if all tool calls are satisfied
-            let mut all_satisfied = true;
-            for call in tool_calls {
-                if !tool_msgs.iter().any(|m| m.tool_call_id.as_ref() == Some(&call.id)) {
-                    all_satisfied = false;
-                    break;
+        let current_role = msg.role.as_str();
+
+        if current_role == "tool" {
+            let content = msg.content.clone().unwrap_or_default();
+            if !content.trim().is_empty() {
+                if !last_user_content.is_empty() {
+                    last_user_content.push_str("\n\n");
                 }
+                last_user_content.push_str(&content);
             }
-            
-            if !all_satisfied {
-                // If not satisfied, remove tool_calls to keep history valid for OpenAI.
-                let mut new_msg = msg.clone();
-                new_msg.tool_calls = None;
-                // Ensure message is not empty if tool_calls were the only thing
-                if new_msg.content.is_none() || new_msg.content.as_ref().unwrap().is_empty() {
-                    new_msg.content = Some("...".to_string());
-                }
-                cleaned.push(new_msg);
-                i = j; // Skip the tool messages that followed (they are orphans now)
-                continue;
-            } else {
-                // Valid sequence
-                cleaned.push(msg.clone());
-                cleaned.extend(tool_msgs);
-                i = j;
-                continue;
-            }
-        } else if msg.role == "tool" {
-            // Orphan tool message
             i += 1;
-            continue;
+        } else if current_role == "assistant" {
+            if let Some(tc) = &msg.tool_calls {
+                if !tc.is_empty() {
+                    if !last_user_content.is_empty() {
+                        cleaned.push(ChatMessage {
+                            role: "user".to_string(),
+                            content: Some(last_user_content.clone()),
+                            reasoning_content: None,
+                            tool_calls: None,
+                            tool_call_id: None,
+                        });
+                    }
+                    last_user_content = format!("[Tool calls made: {}]", tc.len());
+                    if let Some(content) = &msg.content {
+                        if !content.trim().is_empty() {
+                            last_user_content.push_str(&format!("\n\n{}", content));
+                        }
+                    }
+                } else {
+                    if !last_user_content.is_empty() {
+                        last_user_content.push_str("\n\n");
+                    }
+                    last_user_content.push_str(&msg.content.clone().unwrap_or_default());
+                }
+            } else {
+                if !last_user_content.is_empty() {
+                    last_user_content.push_str("\n\n");
+                }
+                last_user_content.push_str(&msg.content.clone().unwrap_or_default());
+            }
+            i += 1;
+        } else if current_role == "user" {
+            if !last_user_content.is_empty() {
+                cleaned.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: Some(last_user_content.clone()),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: None,
+                });
+            }
+            let content = msg.content.clone().unwrap_or_default();
+            if content.trim().is_empty() {
+                last_user_content = " ".to_string();
+            } else {
+                last_user_content = content;
+            }
+            i += 1;
+        } else if current_role == "system" {
+            cleaned.push(msg.clone());
+            i += 1;
+        } else {
+            i += 1;
         }
-        
-        cleaned.push(msg.clone());
-        i += 1;
+    }
+
+    if !last_user_content.is_empty() {
+        cleaned.push(ChatMessage {
+            role: "user".to_string(),
+            content: Some(last_user_content),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+        });
     }
     
+    let output_roles: Vec<String> = cleaned.iter().map(|m| m.role.clone()).collect();
+    tracing::debug!("[AI] GLM validation output: {:?}, count: {}", output_roles, cleaned.len());
+
     cleaned
 }
 
@@ -380,7 +416,10 @@ async fn run_ai_turn(
 
     // 2. Load History with mode awareness
     let history = load_history(state, &session_id, is_agent_mode).await?;
-    let history = validate_and_clean_history(history);
+    let history = validate_and_clean_history(history, &model_name);
+    tracing::debug!("[AI] Cleaned history for GLM, messages: {}, roles: {:?}", 
+        history.len(),
+        history.iter().map(|m| m.role.clone()).collect::<Vec<_>>());
 
     // 3. Prepare headers and token if Copilot
     let mut final_api_key = api_key;
@@ -1005,7 +1044,7 @@ pub async fn generate_session_title(
             tool_call_id: None,
         },
     ];
-    let title_messages = validate_and_clean_history(title_messages);
+    let title_messages = validate_and_clean_history(title_messages, &model_name);
 
     // 5. Call LLM to generate title
     let mut final_api_key = api_key;
