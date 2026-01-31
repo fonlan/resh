@@ -9,6 +9,7 @@ use uuid::Uuid;
 use rusqlite::params;
 use futures::StreamExt;
 use std::collections::HashMap;
+use tokio_util::sync::CancellationToken;
 
 // --- Helper Functions ---
 
@@ -202,6 +203,7 @@ async fn run_ai_turn(
     channel_id: String,
     is_agent_mode: bool,
     tools: Option<Vec<ToolDefinition>>,
+    cancellation_token: CancellationToken,
 ) -> Result<Option<Vec<ToolCall>>, String> {
     
     // 1. Get Config
@@ -270,6 +272,10 @@ async fn run_ai_turn(
     let mut has_tool_calls = false;
 
     while let Some(event_result) = stream.next().await {
+        if cancellation_token.is_cancelled() {
+            tracing::info!("[AI] Request cancelled by user for session: {}", session_id);
+            return Err("CANCELLED".to_string());
+        }
         match event_result {
             Ok(StreamEvent::Content(chunk)) => {
                 if !chunk.is_empty() {
@@ -325,6 +331,18 @@ async fn run_ai_turn(
 }
 
 // --- Commands ---
+
+#[tauri::command]
+pub async fn cancel_ai_chat(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<(), String> {
+    tracing::info!("[AI] Cancelling chat for session: {}", session_id);
+    if let Some(token) = state.ai_cancellation_tokens.get(&session_id) {
+        token.cancel();
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub async fn fetch_ai_models(
@@ -540,7 +558,14 @@ pub async fn send_chat_message(
     // Both agent and ask mode now support tools
     let tools = if is_agent_mode || is_ask_mode { Some(create_tools(is_agent_mode)) } else { None };
 
-    let tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools).await?;
+    let token = CancellationToken::new();
+    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
+
+    let result = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools, token).await;
+    
+    state.ai_cancellation_tokens.remove(&session_id);
+    
+    let tool_calls = result?;
 
     if let Some(calls) = tool_calls {
         if !calls.is_empty() {
@@ -605,7 +630,15 @@ pub async fn execute_agent_tools(
 
     // Continue the loop (1 turn)
     let tools = Some(create_tools(is_agent_mode));
-    let next_tool_calls = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools).await?;
+    
+    let token = CancellationToken::new();
+    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
+    
+    let result = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools, token).await;
+    
+    state.ai_cancellation_tokens.remove(&session_id);
+    
+    let next_tool_calls = result?;
 
     if let Some(calls) = next_tool_calls {
         if !calls.is_empty() {

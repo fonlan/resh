@@ -7,11 +7,15 @@ use std::sync::Arc;
 use tauri::State;
 use tokio::sync::Mutex;
 
+use dashmap::DashMap;
+use tokio_util::sync::CancellationToken;
+
 pub struct AppState {
     pub config_manager: ConfigManager,
     pub password_manager: MasterPasswordManager,
     pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
+    pub ai_cancellation_tokens: DashMap<String, CancellationToken>,
 }
 
 #[tauri::command]

@@ -56,6 +56,7 @@ async fn main() {
                 password_manager: master_password_manager,
                 db_manager,
                 config: Mutex::new(local_config.clone()),
+                ai_cancellation_tokens: dashmap::DashMap::new(),
             });
 
             // Apply window state
@@ -137,6 +138,7 @@ async fn main() {
             commands::ai::get_ai_sessions,
             commands::ai::get_ai_messages,
             commands::ai::send_chat_message,
+            commands::ai::cancel_ai_chat,
             commands::ai::get_terminal_output,
             commands::ai::run_in_terminal,
             commands::ai::execute_agent_tools,

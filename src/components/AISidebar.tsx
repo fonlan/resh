@@ -5,7 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit, Square } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -700,6 +700,25 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     // Optionally insert a "Cancelled" system message
   }, [setLoading]);
 
+  const handleStopGeneration = useCallback(async () => {
+    // 1. Clear frontend pending tools
+    if (pendingToolCalls) {
+      setPendingToolCalls(null);
+    }
+
+    // 2. Cancel backend processing if active
+    if (activeSessionId && isLoading) {
+      try {
+        await aiService.cancelMessage(activeSessionId);
+      } catch (err) {
+        console.error('Failed to cancel message:', err);
+      }
+    }
+
+    // 3. Ensure loading is turned off
+    setLoading(false);
+  }, [activeSessionId, isLoading, pendingToolCalls, setLoading]);
+
   const handleModeChange = async (newMode: 'ask' | 'agent') => {
     setMode(newMode);
     if (config) {
@@ -1006,14 +1025,25 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 disabled={!!pendingToolCalls}
                 rows={1}
               />
-              <button 
-                type="button"
-                className="ai-send-btn"
-                onClick={handleSendMessage}
-                disabled={!inputValue.trim() || isLoading || !selectedModelId || !!pendingToolCalls}
-              >
-                <Send size={14} />
-              </button>
+              {(isLoading || !!pendingToolCalls) ? (
+                <button 
+                  type="button"
+                  className="ai-send-btn stop"
+                  onClick={handleStopGeneration}
+                  title={t.ai.stopGeneration}
+                >
+                  <Square size={14} fill="currentColor" />
+                </button>
+              ) : (
+                <button 
+                  type="button"
+                  className="ai-send-btn"
+                  onClick={handleSendMessage}
+                  disabled={!inputValue.trim() || !selectedModelId}
+                >
+                  <Send size={14} />
+                </button>
+              )}
             </div>
           </div>
         </>

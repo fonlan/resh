@@ -28,6 +28,9 @@ export const aiService = {
       sshSessionId
     }),
 
+  cancelMessage: (sessionId: string) =>
+    invoke('cancel_ai_chat', { sessionId }),
+
   executeAgentTools: (
     sessionId: String,
     modelId: String,
