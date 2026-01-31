@@ -21,7 +21,7 @@ interface TerminalTabProps {
   authentications: Authentication[];
   proxies: ProxyConfig[];
   terminalSettings?: TerminalSettings;
-  theme?: 'light' | 'dark' | 'system';
+  theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   onSessionChange?: (sessionId: string | null) => void;
 }
 
@@ -86,6 +86,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const containerBg = useMemo(() => {
     if (theme === 'light') return '#ffffff';
     if (theme === 'dark') return '#000000';
+    if (theme === 'orange') return '#1c1917';
+    if (theme === 'green') return '#0a0f0d';
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? '#000000' : '#ffffff';
   }, [theme]);
 

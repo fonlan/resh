@@ -11,7 +11,7 @@ export interface GeneralTabProps {
 export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate }) => {
   const { t } = useTranslation();
 
-  const handleThemeChange = (theme: 'light' | 'dark' | 'system') => {
+  const handleThemeChange = (theme: 'light' | 'dark' | 'orange' | 'green' | 'system') => {
     onGeneralUpdate({ ...general, theme });
   };
 
@@ -45,11 +45,13 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             <CustomSelect
               id="theme-select"
               value={general.theme}
-              onChange={(val) => handleThemeChange(val as 'light' | 'dark' | 'system')}
+              onChange={(val) => handleThemeChange(val as 'light' | 'dark' | 'orange' | 'green' | 'system')}
               options={[
                 { value: 'system', label: t.system },
                 { value: 'light', label: t.light },
-                { value: 'dark', label: t.dark }
+                { value: 'dark', label: t.dark },
+                { value: 'orange', label: t.orange },
+                { value: 'green', label: t.green }
               ]}
             />
           </div>

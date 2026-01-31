@@ -74,7 +74,7 @@ export interface WebDAVSettings {
 }
 
 export interface GeneralSettings {
-  theme: 'light' | 'dark' | 'system';
+  theme: 'light' | 'dark' | 'orange' | 'green' | 'system';
   language: 'en' | 'zh-CN';
   terminal: TerminalSettings;
   webdav: WebDAVSettings;

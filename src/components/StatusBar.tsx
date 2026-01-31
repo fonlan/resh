@@ -5,19 +5,19 @@ import { useConfig } from '../hooks/useConfig';
 interface StatusBarProps {
   leftText: string;
   rightText: string;
-  theme?: 'light' | 'dark' | 'system';
+  theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   connected: boolean;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme, connected }) => {
   const { config } = useConfig();
   // Determine colors based on theme
-  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark = theme === 'dark' || theme === 'orange' || theme === 'green' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   
   const style = {
-    backgroundColor: isDark ? '#1a1a1a' : '#f0f0f0',
-    color: isDark ? '#d4d4d4' : '#333333',
-    borderColor: isDark ? '#333' : '#ddd',
+    backgroundColor: theme === 'orange' ? '#292524' : (theme === 'green' ? '#121a16' : (isDark ? '#1a1a1a' : '#f0f0f0')),
+    color: theme === 'orange' ? '#fafaf9' : (theme === 'green' ? '#f0fdf4' : (isDark ? '#d4d4d4' : '#333333')),
+    borderColor: theme === 'orange' ? '#44403c' : (theme === 'green' ? '#1c2621' : (isDark ? '#333' : '#ddd')),
     fontFamily: config?.general.terminal.fontFamily || 'Consolas, monospace'
   };
 

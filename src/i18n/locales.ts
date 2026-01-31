@@ -15,6 +15,8 @@ export const locales = {
     system: 'System',
     light: 'Light',
     dark: 'Dark',
+    orange: 'Sunset Orange',
+    green: 'Sage Forest',
     cursorStyles: {
       block: 'Block',
       underline: 'Underline',
@@ -269,6 +271,8 @@ export const locales = {
     system: '跟随系统',
     light: '浅色',
     dark: '深色',
+    orange: '落日橙',
+    green: '鼠尾草',
     cursorStyles: {
       block: '方块',
       underline: '下划线',

@@ -9,7 +9,7 @@ import { debounce } from '../utils/common';
 export const useTerminal = (
   containerId: string, 
   settings?: TerminalSettings, 
-  theme?: 'light' | 'dark' | 'system',
+  theme?: 'light' | 'dark' | 'orange' | 'green' | 'system',
   onData?: (data: string) => void,
   onResize?: (cols: number, rows: number) => void
 ) => {
@@ -34,11 +34,15 @@ export const useTerminal = (
     if (!container) return;
 
     // Determine actual theme
-    let actualTheme: 'light' | 'dark' = 'dark';
+    let actualTheme: 'light' | 'dark' | 'orange' | 'green' = 'dark';
     if (theme === 'system') {
       actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     } else if (theme === 'light') {
       actualTheme = 'light';
+    } else if (theme === 'orange') {
+      actualTheme = 'orange';
+    } else if (theme === 'green') {
+      actualTheme = 'green';
     }
 
     const term = new Terminal({
@@ -49,6 +53,10 @@ export const useTerminal = (
       scrollback: settings?.scrollback || 5000,
       theme: actualTheme === 'light' ? {
         background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
+      } : actualTheme === 'orange' ? {
+        background: '#1c1917', foreground: '#fafaf9', cursor: '#f97316', cursorAccent: '#1c1917', selectionBackground: 'rgba(249, 115, 22, 0.3)',
+      } : actualTheme === 'green' ? {
+        background: '#0a0f0d', foreground: '#f0fdf4', cursor: '#86efac', cursorAccent: '#0a0f0d', selectionBackground: 'rgba(134, 239, 172, 0.3)',
       } : {
         background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
       },
@@ -166,15 +174,23 @@ export const useTerminal = (
     }
 
     // Determine actual theme
-    let actualTheme: 'light' | 'dark' = 'dark';
+    let actualTheme: 'light' | 'dark' | 'orange' | 'green' = 'dark';
     if (theme === 'system') {
       actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     } else if (theme === 'light') {
       actualTheme = 'light';
+    } else if (theme === 'orange') {
+      actualTheme = 'orange';
+    } else if (theme === 'green') {
+      actualTheme = 'green';
     }
 
     term.options.theme = actualTheme === 'light' ? {
         background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
+    } : actualTheme === 'orange' ? {
+        background: '#1c1917', foreground: '#fafaf9', cursor: '#f97316', cursorAccent: '#1c1917', selectionBackground: 'rgba(249, 115, 22, 0.3)',
+    } : actualTheme === 'green' ? {
+        background: '#0a0f0d', foreground: '#f0fdf4', cursor: '#86efac', cursorAccent: '#0a0f0d', selectionBackground: 'rgba(134, 239, 172, 0.3)',
     } : {
         background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
     };

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-export function useTheme(theme?: 'light' | 'dark' | 'system') {
+export function useTheme(theme?: 'light' | 'dark' | 'orange' | 'green' | 'system') {
   const prevThemeRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -11,7 +11,7 @@ export function useTheme(theme?: 'light' | 'dark' | 'system') {
     }
 
     const root = document.documentElement;
-    root.classList.remove('theme-light', 'theme-dark', 'theme-system');
+    root.classList.remove('theme-light', 'theme-dark', 'theme-orange', 'theme-green', 'theme-system');
 
     if (theme === 'system') {
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
