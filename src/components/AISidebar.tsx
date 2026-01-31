@@ -341,6 +341,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     appendToolCalls,
     setGenerating,
     setPendingToolCalls: storeSetPendingToolCalls,
+    markSessionStopped,
+    clearSessionStopped,
     deleteSession,
     clearSessions
   } = useAIStore();
@@ -598,6 +600,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     if (!sessionId) return;
 
+    // Clear the stopped flag when sending a new message
+    clearSessionStopped(sessionId);
+
     const content = inputValue;
     setInputValue('');
     if (textareaRef.current) {
@@ -625,12 +630,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     } catch (err) {
       setGenerating(sessionId, false);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls, clearSessionStopped]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
 
     setGenerating(activeSessionId, true);
+    clearSessionStopped(activeSessionId); // Clear stopped flag when tools are confirmed
     const callsToExecute = pendingToolCalls.map(c => c.id);
     storeSetPendingToolCalls(activeSessionId, null); // Hide confirmation
 
@@ -649,18 +655,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     } catch (err) {
       setGenerating(activeSessionId, false);
     }
-  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setGenerating, storeSetPendingToolCalls]);
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setGenerating, storeSetPendingToolCalls, clearSessionStopped]);
 
   const handleCancelTools = useCallback(() => {
     if (activeSessionId) {
       storeSetPendingToolCalls(activeSessionId, null);
       setGenerating(activeSessionId, false);
+      markSessionStopped(activeSessionId); // Mark as stopped when tools are cancelled
     }
     // Optionally insert a "Cancelled" system message
-  }, [activeSessionId, storeSetPendingToolCalls, setGenerating]);
+  }, [activeSessionId, storeSetPendingToolCalls, setGenerating, markSessionStopped]);
 
   const handleStopGeneration = useCallback(async () => {
-    // 1. Clear frontend pending tools
+    // 1. Clear frontend pending tools and mark session as stopped
     if (activeSessionId && pendingToolCalls) {
       storeSetPendingToolCalls(activeSessionId, null);
     }
@@ -674,11 +681,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       }
     }
 
-    // 3. Ensure loading is turned off
+    // 3. Ensure loading is turned off and mark as stopped
     if (activeSessionId) {
       setGenerating(activeSessionId, false);
+      markSessionStopped(activeSessionId);
     }
-  }, [activeSessionId, isLoading, pendingToolCalls, setGenerating, storeSetPendingToolCalls]);
+  }, [activeSessionId, isLoading, pendingToolCalls, setGenerating, storeSetPendingToolCalls, markSessionStopped]);
 
   const handleModeChange = async (newMode: 'ask' | 'agent') => {
     setMode(newMode);

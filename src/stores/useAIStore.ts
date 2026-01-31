@@ -10,6 +10,7 @@ interface AIState {
   isLoading: boolean;
   isGenerating: Record<string, boolean>;
   pendingToolCalls: Record<string, ToolCall[] | null>;
+  stoppedSessions: Set<string>; // Track sessions that were manually stopped
   
   loadSessions: (serverId: string) => Promise<void>;
   createSession: (serverId: string, modelId?: string) => Promise<string>;
@@ -22,6 +23,8 @@ interface AIState {
   setLoading: (loading: boolean) => void;
   setGenerating: (sessionId: string, generating: boolean) => void;
   setPendingToolCalls: (sessionId: string, toolCalls: ToolCall[] | null) => void;
+  markSessionStopped: (sessionId: string) => void;
+  clearSessionStopped: (sessionId: string) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
   clearSessions: (serverId: string) => Promise<void>;
 }
@@ -34,6 +37,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   isLoading: false,
   isGenerating: {},
   pendingToolCalls: {},
+  stoppedSessions: new Set<string>(),
 
   setLoading: (loading) => set({ isLoading: loading }),
   
@@ -44,6 +48,18 @@ export const useAIStore = create<AIState>((set, get) => ({
   setPendingToolCalls: (sessionId, toolCalls) => set(state => ({
     pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: toolCalls }
   })),
+
+  markSessionStopped: (sessionId) => set(state => {
+    const newStoppedSessions = new Set(state.stoppedSessions);
+    newStoppedSessions.add(sessionId);
+    return { stoppedSessions: newStoppedSessions };
+  }),
+
+  clearSessionStopped: (sessionId) => set(state => {
+    const newStoppedSessions = new Set(state.stoppedSessions);
+    newStoppedSessions.delete(sessionId);
+    return { stoppedSessions: newStoppedSessions };
+  }),
 
   loadSessions: async (serverId) => {
     set({ isLoading: true });
@@ -70,9 +86,12 @@ export const useAIStore = create<AIState>((set, get) => ({
     if (sessionId) {
       const msgs = await aiService.getMessages(sessionId);
       
+      // Check if this session was manually stopped - if so, don't restore pending tool calls
+      const isStopped = get().stoppedSessions.has(sessionId);
+      
       // Check for pending tool calls in history
       let pending = null;
-      if (msgs.length > 0) {
+      if (!isStopped && msgs.length > 0) {
         const lastMsg = msgs[msgs.length - 1];
         if (lastMsg.role === 'assistant' && lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
           const hasVisibleTools = lastMsg.tool_calls.some(tc => 
@@ -184,10 +203,12 @@ export const useAIStore = create<AIState>((set, get) => ({
       const isGenerating = { ...s.isGenerating };
       const pendingToolCalls = { ...s.pendingToolCalls };
       const messages = { ...s.messages };
+      const stoppedSessions = new Set(s.stoppedSessions);
       delete isGenerating[sessionId];
       delete pendingToolCalls[sessionId];
       delete messages[sessionId];
-      return { isGenerating, pendingToolCalls, messages };
+      stoppedSessions.delete(sessionId);
+      return { isGenerating, pendingToolCalls, messages, stoppedSessions };
     });
 
     await get().loadSessions(serverId);
@@ -201,7 +222,8 @@ export const useAIStore = create<AIState>((set, get) => ({
       activeSessionIdByServer: { ...state.activeSessionIdByServer, [serverId]: null },
       isGenerating: {},
       pendingToolCalls: {},
-      messages: {}
+      messages: {},
+      stoppedSessions: new Set<string>()
     }));
     await get().loadSessions(serverId);
   },
