@@ -41,7 +41,9 @@ struct SessionData {
     tx: mpsc::Sender<(String, Vec<u8>)>,
     cols: u32,
     rows: u32,
-    terminal_buffer: String, // Store recent terminal output for AI
+    terminal_buffer: String,
+    command_recorder: Option<String>,
+    last_output_len: usize,
 }
 
 lazy_static! {
@@ -78,6 +80,8 @@ impl SSHClient {
                 cols: initial_cols,
                 rows: initial_rows,
                 terminal_buffer: String::new(),
+                command_recorder: None,
+                last_output_len: 0,
             });
         }
         
@@ -343,18 +347,54 @@ impl SSHClient {
         }
     }
 
+    /// Start recording output for a single command
+    pub async fn start_command_recording(session_id: &str) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.command_recorder = Some(String::new());
+            session_data.last_output_len = session_data.terminal_buffer.len();
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Stop recording and get the recorded output since start_command_recording was called
+    pub async fn stop_command_recording(session_id: &str) -> Result<String, String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            let recorded = session_data.command_recorder.take().unwrap_or_default();
+            Ok(recorded)
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Check if currently recording a command
+    pub async fn is_recording(session_id: &str) -> Result<bool, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            Ok(session_data.command_recorder.is_some())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
     /// Update the terminal buffer with new data
     pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<(), String> {
-        const MAX_BUFFER_SIZE: usize = 100_000; // Keep last 100KB
+        const MAX_BUFFER_SIZE: usize = 100_000;
         
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
             session_data.terminal_buffer.push_str(data);
             
-            // Trim to keep only recent data
             if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
                 let excess = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
                 session_data.terminal_buffer = session_data.terminal_buffer[excess..].to_string();
+            }
+
+            if let Some(recorder) = session_data.command_recorder.as_mut() {
+                recorder.push_str(data);
             }
             
             Ok(())

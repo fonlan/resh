@@ -277,13 +277,17 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "run_in_terminal".to_string(),
-                description: "Execute a command in the terminal. Use this to fix issues, install packages, or perform system operations.".to_string(),
+                description: "Execute a command in the terminal. Waits for command to complete or timeout, then returns the command output. Use this to fix issues, install packages, or perform system operations.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
                             "description": "The shell command to execute"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "description": "Timeout in seconds (default: 30). Maximum time to wait for command completion."
                         }
                     },
                     "required": ["command"]

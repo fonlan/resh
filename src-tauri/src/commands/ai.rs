@@ -226,10 +226,43 @@ async fn execute_tools_and_save(
                 if let Some(ssh_id) = ssh_session_id {
                     if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
                         if let Some(cmd) = args["command"].as_str() {
+                            let timeout = args.get("timeoutSeconds").and_then(|v| v.as_u64()).unwrap_or(30);
+                            
+                            SSHClient::start_command_recording(ssh_id).await?;
+                            
                             let cmd_nl = format!("{}\n", cmd);
-                            match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
-                                Ok(_) => "Command sent.".to_string(),
-                                Err(e) => format!("Error sending command: {}", e)
+                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                                let _ = SSHClient::stop_command_recording(ssh_id).await;
+                                break;
+                            }
+                            
+                            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+                            let mut elapsed = 0u64;
+                            
+                            loop {
+                                interval.tick().await;
+                                elapsed += 100;
+                                
+                                if elapsed >= timeout * 1000 {
+                                    break;
+                                }
+                                
+                                let is_recording = SSHClient::is_recording(ssh_id).await?;
+                                if !is_recording {
+                                    break;
+                                }
+                            }
+                            
+                            match SSHClient::stop_command_recording(ssh_id).await {
+                                Ok(output) => {
+                                    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(output.as_bytes())).to_string();
+                                    if clean_output.is_empty() {
+                                        "Command timed out or produced no output".to_string()
+                                    } else {
+                                        clean_output
+                                    }
+                                },
+                                Err(e) => format!("Error getting output: {}", e)
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -733,15 +766,46 @@ pub async fn get_terminal_output(
     Ok(clean_text)
 }
 
-/// Run command in terminal (for AI agent mode)
+/// Run command in terminal and wait for output (for AI agent mode)
 #[tauri::command]
 pub async fn run_in_terminal(
     session_id: String,
     command: String,
+    timeout_seconds: Option<u64>,
 ) -> Result<String, String> {
+    let timeout = timeout_seconds.unwrap_or(30);
+    
+    SSHClient::start_command_recording(&session_id).await?;
+    
     let command_with_newline = format!("{}\n", command);
     SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await?;
-    Ok(format!("Command sent: {}", command))
+    
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+    let mut elapsed = 0u64;
+    const CHECK_INTERVAL_MS: u64 = 100;
+    
+    loop {
+        interval.tick().await;
+        elapsed += CHECK_INTERVAL_MS;
+        
+        if elapsed >= timeout * 1000 {
+            break;
+        }
+
+        let is_recording = SSHClient::is_recording(&session_id).await?;
+        if !is_recording {
+            break;
+        }
+    }
+    
+    let output = SSHClient::stop_command_recording(&session_id).await?;
+    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output)).to_string();
+    
+    if clean_output.is_empty() {
+        return Err("Command timed out or produced no output".to_string());
+    }
+    
+    Ok(clean_output)
 }
 
 /// Generate a title for an AI session based on the first conversation round
