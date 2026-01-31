@@ -243,12 +243,17 @@ async fn execute_tools_and_save(
                                 interval.tick().await;
                                 elapsed += 100;
                                 
+                                tracing::debug!("[run_in_terminal tool] elapsed={}ms timeout={}s", elapsed, timeout);
+                                
                                 if elapsed >= timeout * 1000 {
+                                    tracing::warn!("[run_in_terminal tool] timeout reached after {}ms", elapsed);
                                     break;
                                 }
                                 
-                                let is_recording = SSHClient::is_recording(ssh_id).await?;
-                                if !is_recording {
+                                let is_completed = SSHClient::check_command_completed(ssh_id).await?;
+                                tracing::debug!("[run_in_terminal tool] is_completed={}", is_completed);
+                                if is_completed {
+                                    tracing::info!("[run_in_terminal tool] command completed after {}ms", elapsed);
                                     break;
                                 }
                             }
@@ -816,12 +821,17 @@ pub async fn run_in_terminal(
         interval.tick().await;
         elapsed += CHECK_INTERVAL_MS;
         
+        tracing::debug!("[run_in_terminal] elapsed={}ms timeout={}s", elapsed, timeout);
+        
         if elapsed >= timeout * 1000 {
+            tracing::warn!("[run_in_terminal] timeout reached after {}ms", elapsed);
             break;
         }
 
-        let is_recording = SSHClient::is_recording(&session_id).await?;
-        if !is_recording {
+        let is_completed = SSHClient::check_command_completed(&session_id).await?;
+        tracing::debug!("[run_in_terminal] is_completed={}", is_completed);
+        if is_completed {
+            tracing::info!("[run_in_terminal] command completed after {}ms", elapsed);
             break;
         }
     }
