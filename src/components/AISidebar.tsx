@@ -327,6 +327,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const { 
     sessions, 
     activeSessionId, 
+    activeSessionIdByServer,
     messages, 
     isLoading,
     loadSessions,
@@ -379,19 +380,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [config?.aiModels, config?.aiChannels, selectedModelId]);
 
-  // Load sessions when server changes
+  // Load sessions and restore active session when server changes
   useEffect(() => {
     if (currentServerId && isOpen) {
       loadSessions(currentServerId);
-    }
-  }, [currentServerId, isOpen, loadSessions]);
-
-  // Clear active session when switching servers
-  useEffect(() => {
-    if (currentServerId || currentServerId === undefined) {
+      
+      const sid = activeSessionIdByServer[currentServerId] || null;
+      if (sid !== activeSessionId) {
+        selectSession(sid);
+      }
+    } else if (!currentServerId) {
       selectSession(null);
     }
-  }, [currentServerId, selectSession]);
+  }, [currentServerId, isOpen, loadSessions, selectSession, activeSessionId, activeSessionIdByServer]);
 
   // Scroll to bottom on new messages
   const currentMessages = useMemo(() => 
@@ -399,9 +400,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     [activeSessionId, messages]
   );
 
+  // Restore pending tool calls from history when session changes
+  useEffect(() => {
+    if (activeSessionId && currentMessages.length > 0 && !isLoading && !pendingToolCalls) {
+      const lastMsg = currentMessages[currentMessages.length - 1];
+      if (lastMsg.role === 'assistant' && lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
+        const hasVisibleTools = lastMsg.tool_calls.some(tc => 
+          tc.function.name !== 'get_terminal_output'
+        );
+        if (hasVisibleTools) {
+          setPendingToolCalls(lastMsg.tool_calls);
+        }
+      }
+    }
+  }, [activeSessionId, currentMessages, isLoading, pendingToolCalls]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages.length, isLoading, pendingToolCalls]);
+  }, [currentMessages, isLoading, pendingToolCalls]);
 
   // Focus textarea when sidebar opens or when tools are resolved
   useEffect(() => {
@@ -837,7 +853,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                    key={session.id}
                    className={`ai-history-item ${activeSessionId === session.id ? 'active' : ''}`}
                    onClick={() => {
-                     selectSession(session.id);
+                     selectSession(session.id, currentServerId);
                      setShowHistory(false);
                    }}
                  >

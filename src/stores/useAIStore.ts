@@ -5,12 +5,13 @@ import { aiService } from '../services/aiService';
 interface AIState {
   sessions: AISession[];
   activeSessionId: string | null;
+  activeSessionIdByServer: Record<string, string | null>;
   messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   
   loadSessions: (serverId: string) => Promise<void>;
   createSession: (serverId: string, modelId?: string) => Promise<string>;
-  selectSession: (sessionId: string | null) => Promise<void>;
+  selectSession: (sessionId: string | null, serverId?: string) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   newAssistantMessage: (sessionId: string) => void;
   appendResponse: (sessionId: string, content: string) => void;
@@ -24,6 +25,7 @@ interface AIState {
 export const useAIStore = create<AIState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
+  activeSessionIdByServer: {},
   messages: {},
   isLoading: false,
 
@@ -42,12 +44,15 @@ export const useAIStore = create<AIState>((set, get) => ({
   createSession: async (serverId, modelId) => {
     const id = await aiService.createSession(serverId, modelId);
     await get().loadSessions(serverId);
-    await get().selectSession(id);
+    await get().selectSession(id, serverId);
     return id;
   },
 
-  selectSession: async (sessionId) => {
-    set({ activeSessionId: sessionId });
+  selectSession: async (sessionId, serverId) => {
+    set(state => ({ 
+      activeSessionId: sessionId,
+      activeSessionIdByServer: serverId ? { ...state.activeSessionIdByServer, [serverId]: sessionId } : state.activeSessionIdByServer
+    }));
     if (sessionId) {
       const msgs = await aiService.getMessages(sessionId);
       set(state => ({
@@ -134,15 +139,25 @@ export const useAIStore = create<AIState>((set, get) => ({
 
   deleteSession: async (serverId, sessionId) => {
     await aiService.deleteSession(sessionId);
-    if (get().activeSessionId === sessionId) {
+    const state = get();
+    if (state.activeSessionId === sessionId) {
       set({ activeSessionId: null });
+    }
+    if (state.activeSessionIdByServer[serverId] === sessionId) {
+      set(s => ({
+        activeSessionIdByServer: { ...s.activeSessionIdByServer, [serverId]: null }
+      }));
     }
     await get().loadSessions(serverId);
   },
 
   clearSessions: async (serverId) => {
     await aiService.deleteAllSessions(serverId);
-    set({ activeSessionId: null, sessions: [] });
+    set(state => ({ 
+      activeSessionId: null, 
+      sessions: [],
+      activeSessionIdByServer: { ...state.activeSessionIdByServer, [serverId]: null }
+    }));
     await get().loadSessions(serverId);
   },
 }));

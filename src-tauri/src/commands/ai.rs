@@ -13,6 +13,69 @@ use tokio_util::sync::CancellationToken;
 
 // --- Helper Functions ---
 
+fn validate_and_clean_history(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
+    let mut cleaned = Vec::new();
+    let mut i = 0;
+    
+    // First pass: remove orphan tool messages at the beginning
+    while i < history.len() && history[i].role == "tool" {
+        i += 1;
+    }
+    
+    while i < history.len() {
+        let msg = &history[i];
+        
+        if msg.role == "assistant" && msg.tool_calls.is_some() {
+            let tool_calls = msg.tool_calls.as_ref().unwrap();
+            let mut tool_msgs = Vec::new();
+            let mut j = i + 1;
+            
+            // Collect subsequent tool messages
+            while j < history.len() && history[j].role == "tool" {
+                tool_msgs.push(history[j].clone());
+                j += 1;
+            }
+            
+            // Check if all tool calls are satisfied
+            let mut all_satisfied = true;
+            for call in tool_calls {
+                if !tool_msgs.iter().any(|m| m.tool_call_id.as_ref() == Some(&call.id)) {
+                    all_satisfied = false;
+                    break;
+                }
+            }
+            
+            if !all_satisfied {
+                // If not satisfied, remove tool_calls to keep history valid for OpenAI.
+                let mut new_msg = msg.clone();
+                new_msg.tool_calls = None;
+                // Ensure message is not empty if tool_calls were the only thing
+                if new_msg.content.is_none() || new_msg.content.as_ref().unwrap().is_empty() {
+                    new_msg.content = Some("...".to_string());
+                }
+                cleaned.push(new_msg);
+                i = j; // Skip the tool messages that followed (they are orphans now)
+                continue;
+            } else {
+                // Valid sequence
+                cleaned.push(msg.clone());
+                cleaned.extend(tool_msgs);
+                i = j;
+                continue;
+            }
+        } else if msg.role == "tool" {
+            // Orphan tool message
+            i += 1;
+            continue;
+        }
+        
+        cleaned.push(msg.clone());
+        i += 1;
+    }
+    
+    cleaned
+}
+
 async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bool) -> Result<Vec<ChatMessage>, String> {
     let max_history = {
         let config = state.config.lock().await;
@@ -240,6 +303,7 @@ async fn run_ai_turn(
 
     // 2. Load History with mode awareness
     let history = load_history(state, &session_id, is_agent_mode).await?;
+    let history = validate_and_clean_history(history);
 
     // 3. Prepare headers and token if Copilot
     let mut final_api_key = api_key;
@@ -791,6 +855,7 @@ pub async fn generate_session_title(
             tool_call_id: None,
         },
     ];
+    let title_messages = validate_and_clean_history(title_messages);
 
     // 5. Call LLM to generate title
     let mut final_api_key = api_key;
