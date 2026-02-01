@@ -344,7 +344,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     markSessionStopped,
     clearSessionStopped,
     deleteSession,
-    clearSessions
+    clearSessions,
+    addCompleteMessage
   } = useAIStore();
 
   const [width, setWidth] = useState(350);
@@ -403,7 +404,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages, isLoading, pendingToolCalls]);
+  }, [currentMessages, isLoading, pendingToolCalls, addCompleteMessage]);
 
   // Focus textarea when sidebar opens or when tools are resolved
   useEffect(() => {
@@ -453,6 +454,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
       storeSetPendingToolCalls(activeSessionId, null);
       newAssistantMessage(activeSessionId);
+    });
+
+    // Handle MessageBatch events (minimax-style multiple messages in one response)
+    const messageBatchListener = listen<ChatMessage[]>(`ai-message-batch-${activeSessionId}`, (event) => {
+      const messages = event.payload;
+      // Add each message as a separate bubble
+      messages.forEach(msg => {
+        addCompleteMessage(activeSessionId, msg);
+      });
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
@@ -533,13 +543,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     return () => {
       startedListener.then(unlisten => unlisten());
+      messageBatchListener.then(unlisten => unlisten());
       responseListener.then(unlisten => unlisten());
       reasoningListener.then(unlisten => unlisten());
       toolCallListener.then(unlisten => unlisten());
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, addCompleteMessage, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {

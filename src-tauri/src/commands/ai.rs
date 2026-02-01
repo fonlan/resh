@@ -450,6 +450,7 @@ async fn run_ai_turn(
     let mut full_reasoning = String::new();
     let mut tool_accumulator = ToolCallAccumulator::new();
     let mut has_tool_calls = false;
+    let mut has_message_batch = false;
 
     while let Some(event_result) = stream.next().await {
         if cancellation_token.is_cancelled() {
@@ -473,6 +474,51 @@ async fn run_ai_turn(
                 has_tool_calls = true;
                 tool_accumulator.update(&json);
             },
+            Ok(StreamEvent::MessageBatch(messages)) => {
+                has_message_batch = true;
+                let message_batch_json = serde_json::to_value(&messages).map_err(|e| e.to_string())?;
+                window.emit(&format!("ai-message-batch-{}", session_id), message_batch_json).map_err(|e| e.to_string())?;
+
+                for msg in messages {
+                    let msg_content = msg.content.clone().unwrap_or_default();
+                    let msg_reasoning = msg.reasoning_content.clone().unwrap_or_default();
+                    let msg_tool_calls = msg.tool_calls.clone();
+
+                    let content_for_emit = msg_content.clone();
+                    let reasoning_for_emit = msg_reasoning.clone();
+
+                    if !content_for_emit.is_empty() {
+                        window.emit(&format!("ai-response-{}", session_id), content_for_emit).map_err(|e| e.to_string())?;
+                    }
+
+                    if !reasoning_for_emit.is_empty() {
+                        window.emit(&format!("ai-reasoning-{}", session_id), reasoning_for_emit).map_err(|e| e.to_string())?;
+                    }
+
+                    if let Some(tool_calls) = &msg_tool_calls {
+                        has_tool_calls = true;
+                        let tool_calls_json = serde_json::to_value(tool_calls).map_err(|e| e.to_string())?;
+                        window.emit(&format!("ai-tool-call-{}", session_id), tool_calls_json).map_err(|e| e.to_string())?;
+                    }
+
+                    full_content.push_str(&msg_content);
+                    full_reasoning.push_str(&msg_reasoning);
+
+                    let ai_msg_id = Uuid::new_v4().to_string();
+                    let conn = state.db_manager.get_connection();
+                    let conn = conn.lock().unwrap();
+                    let tool_calls_json = if let Some(tc) = &msg_tool_calls {
+                        Some(serde_json::to_string(tc).unwrap())
+                    } else {
+                        None
+                    };
+
+                    conn.execute(
+                        "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![ai_msg_id, session_id, msg.role, msg_content, msg_reasoning, tool_calls_json],
+                    ).map_err(|e| e.to_string())?;
+                }
+            },
             Ok(StreamEvent::Done) => {},
             Err(e) => {
                 window.emit(&format!("ai-error-{}", session_id), e.clone()).map_err(|e| e.to_string())?;
@@ -486,6 +532,11 @@ async fn run_ai_turn(
     } else {
         None
     };
+
+    // Skip final save if MessageBatch was handled (messages already saved in loop)
+    if has_message_batch {
+        return Ok(final_tool_calls);
+    }
 
     // Save Assistant Message
     let ai_msg_id = Uuid::new_v4().to_string();

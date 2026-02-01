@@ -27,6 +27,7 @@ interface AIState {
   clearSessionStopped: (sessionId: string) => void;
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
   clearSessions: (serverId: string) => Promise<void>;
+  addCompleteMessage: (sessionId: string, message: ChatMessage) => void;
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -263,5 +264,14 @@ export const useAIStore = create<AIState>((set, get) => ({
       stoppedSessions: new Set<string>()
     }));
     await get().loadSessions(serverId);
+  },
+
+  addCompleteMessage: (sessionId: string, message: ChatMessage) => {
+    set(state => {
+      const current = state.messages[sessionId] || [];
+      return {
+        messages: { ...state.messages, [sessionId]: [...current, message] }
+      };
+    });
   },
 }));

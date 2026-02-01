@@ -39,7 +39,27 @@ pub enum StreamEvent {
     Content(String),
     Reasoning(String),
     ToolCall(serde_json::Value),
+    MessageBatch(Vec<ChatMessage>), // Support for multiple messages in one response (e.g., minimax)
     Done,
+}
+
+/// Extract thinking content from <thinking> tags in content
+fn extract_thinking_tags(content: &str) -> (String, String) {
+    if content.contains("<thinking>") && content.contains("</thinking>") {
+        let thinking_pattern = regex::Regex::new(r"(?s)<thinking>(.*?)</thinking>").unwrap();
+        if let Some(captures) = thinking_pattern.captures(content) {
+            if let Some(thinking_match) = captures.get(1) {
+                let thinking = thinking_match.as_str().trim().to_string();
+                let cleaned_content = content
+                    .replace("<thinking>", "")
+                    .replace("</thinking>", "")
+                    .trim()
+                    .to_string();
+                return (thinking, cleaned_content);
+            }
+        }
+    }
+    (String::new(), content.to_string())
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -238,16 +258,71 @@ pub async fn stream_openai_chat(
                 }
                 match serde_json::from_str::<serde_json::Value>(&event.data) {
                     Ok(json) => {
+                        // Detect minimax format: choices contain message objects with role field
+                        if let Some(choices) = json["choices"].as_array() {
+                            let is_minimax_format = choices.iter().any(|choice| {
+                                let message = &choice["message"];
+                                message.is_object() && message.get("role").is_some()
+                            });
+
+                            if is_minimax_format {
+                                let mut messages: Vec<ChatMessage> = Vec::new();
+                                for choice in choices {
+                                    if let Some(message_obj) = choice["message"].as_object() {
+                                        let role = message_obj.get("role").and_then(|r| r.as_str()).unwrap_or("assistant").to_string();
+
+                                        // Extract content and handle <thinking> tags
+                                        let raw_content = message_obj.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                        let (thinking_content, cleaned_content) = extract_thinking_tags(&raw_content);
+
+                                        let reasoning = message_obj.get("reasoning_content")
+                                            .and_then(|r| r.as_str())
+                                            .map(|s| s.to_string())
+                                            .or(Some(thinking_content))
+                                            .filter(|s| !s.is_empty());
+
+                                        let tool_calls = message_obj.get("tool_calls")
+                                            .and_then(|tc| tc.as_array())
+                                            .map(|arr| {
+                                                arr.iter().filter_map(|tc| {
+                                                    Some(ToolCall {
+                                                        id: tc.get("id")?.as_str()?.to_string(),
+                                                        tool_type: tc.get("type")?.as_str()?.to_string(),
+                                                        function: FunctionCall {
+                                                            name: tc.get("function")?.get("name")?.as_str()?.to_string(),
+                                                            arguments: tc.get("function")?.get("arguments")?.as_str()?.to_string(),
+                                                        }
+                                                    })
+                                                }).collect()
+                                            });
+
+                                        if reasoning.is_some() || !cleaned_content.is_empty() || tool_calls.is_some() {
+                                            messages.push(ChatMessage {
+                                                role,
+                                                content: if cleaned_content.is_empty() { None } else { Some(cleaned_content) },
+                                                reasoning_content: reasoning,
+                                                tool_calls,
+                                                tool_call_id: None,
+                                            });
+                                        }
+                                    }
+                                }
+
+                                if !messages.is_empty() {
+                                    return Ok(StreamEvent::MessageBatch(messages));
+                                }
+                            }
+                        }
+
+                        // Standard OpenAI-style delta processing
                         let delta = &json["choices"][0]["delta"];
                         if let Some(content) = delta["content"].as_str() {
                             Ok(StreamEvent::Content(content.to_string()))
                         } else if let Some(reasoning) = delta["reasoning_content"].as_str() {
                             Ok(StreamEvent::Reasoning(reasoning.to_string()))
                         } else if let Some(tool_calls) = delta["tool_calls"].as_array() {
-                            // Pass the whole tool_calls array to be processed by caller
                             Ok(StreamEvent::ToolCall(serde_json::Value::Array(tool_calls.clone())))
                         } else {
-                            // Keepalive or empty delta
                             Ok(StreamEvent::Content("".to_string()))
                         }
                     },
