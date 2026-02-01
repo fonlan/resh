@@ -9,7 +9,6 @@ pub struct ClientHandler {
 }
 
 impl ClientHandler {
-    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             session_id: None,
