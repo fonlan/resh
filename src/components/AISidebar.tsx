@@ -210,16 +210,15 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
   const reasoningContentRef = useRef<HTMLDivElement>(null);
   const prevReasoningLength = useRef(msg.reasoning_content?.length || 0);
 
-  // 自动滚动思考内容到底部
   useEffect(() => {
     if (showReasoning && reasoningContentRef.current) {
       const element = reasoningContentRef.current;
       const currentLength = msg.reasoning_content?.length || 0;
 
-      // 只在内容增加时滚动到底部
       if (currentLength >= prevReasoningLength.current) {
-        element.scrollIntoView({ behavior: 'auto', block: 'end' });
-        element.scrollTop = element.scrollHeight;
+        requestAnimationFrame(() => {
+          element.scrollTop = element.scrollHeight;
+        });
       }
 
       prevReasoningLength.current = currentLength;
@@ -379,8 +378,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const pendingToolCalls = activeSessionId ? pendingToolCallsMap[activeSessionId] || null : null;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const isAtBottomRef = useRef(true);
 
   // Load mode & model from config, with fallback to default model
   useEffect(() => {
@@ -414,15 +414,43 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [currentServerId, isOpen, loadSessions, selectSession, activeSessionId, activeSessionIdByServer]);
 
-  // Scroll to bottom on new messages
   const currentMessages = useMemo(() => 
     activeSessionId ? messages[activeSessionId] || [] : [], 
     [activeSessionId, messages]
   );
 
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    if (messagesContainerRef.current) {
+      const container = messagesContainerRef.current;
+      if (behavior === 'smooth') {
+        container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+      } else {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      const atBottom = scrollHeight - scrollTop - clientHeight < 50;
+      isAtBottomRef.current = atBottom;
+    }
+  }, []);
+
+  const lastMessageContentLength = useMemo(() => {
+    const lastMsg = currentMessages[currentMessages.length - 1];
+    return lastMsg?.role === 'assistant' ? (lastMsg.content?.length || 0) + (lastMsg.reasoning_content?.length || 0) : 0;
+  }, [currentMessages]);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [currentMessages, isLoading, pendingToolCalls, addCompleteMessage]);
+    if (lastMessageContentLength > 0 && (isAtBottomRef.current || isLoading)) {
+      const rafId = requestAnimationFrame(() => {
+        scrollToBottom(isLoading ? 'auto' : 'smooth');
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+  }, [lastMessageContentLength, isLoading, scrollToBottom]);
 
   // Focus textarea when sidebar opens or when tools are resolved
   useEffect(() => {
@@ -930,7 +958,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         </div>
       ) : (
         <>
-          <div className="ai-messages">
+          <div 
+            className={`ai-messages ${isLoading ? 'generating' : ''}`} 
+            ref={messagesContainerRef}
+            onScroll={handleScroll}
+          >
             {!activeSessionId && (
               <div className="ai-empty-state">
                 <Bot size={48} className="opacity-20 mb-4" />
@@ -988,7 +1020,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
           </div>
 
           <div className="ai-input-area">

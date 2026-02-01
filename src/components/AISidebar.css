@@ -110,6 +110,11 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  scroll-behavior: smooth;
+}
+
+.ai-messages.generating {
+  scroll-behavior: auto !important;
 }
 
 .ai-message {
