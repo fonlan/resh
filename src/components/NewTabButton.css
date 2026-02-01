@@ -182,7 +182,7 @@
 .dropdown-list {
   padding: 6px;
   overflow-y: auto;
-  max-height: 280px;
+  max-height: 400px;
 }
 
 .dropdown-item {
