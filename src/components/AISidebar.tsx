@@ -207,6 +207,24 @@ const ToolConfirmation = ({
 const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
   const [copied, setCopied] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
+  const reasoningContentRef = useRef<HTMLDivElement>(null);
+  const prevReasoningLength = useRef(msg.reasoning_content?.length || 0);
+
+  // 自动滚动思考内容到底部
+  useEffect(() => {
+    if (showReasoning && reasoningContentRef.current) {
+      const element = reasoningContentRef.current;
+      const currentLength = msg.reasoning_content?.length || 0;
+
+      // 只在内容增加时滚动到底部
+      if (currentLength >= prevReasoningLength.current) {
+        element.scrollIntoView({ behavior: 'auto', block: 'end' });
+        element.scrollTop = element.scrollHeight;
+      }
+
+      prevReasoningLength.current = currentLength;
+    }
+  }, [msg.reasoning_content, showReasoning]);
 
   const handleCopy = async () => {
     if (!msg.content) return;
@@ -240,7 +258,7 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
                 <span>{t.ai.thinkingProcess}</span>
               </button>
               {showReasoning && (
-                <div className="ai-reasoning-content">
+                <div className="ai-reasoning-content" ref={reasoningContentRef}>
                   {msg.reasoning_content}
                   {isLast && isLoading && !msg.content && <span className="ai-streaming-cursor">|</span>}
                 </div>
