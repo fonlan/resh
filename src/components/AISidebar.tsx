@@ -411,6 +411,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       }
     } else if (!currentServerId) {
       selectSession(null);
+      setShowHistory(false);
     }
   }, [currentServerId, isOpen, loadSessions, selectSession, activeSessionId, activeSessionIdByServer]);
 
@@ -861,6 +862,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             className={`ai-action-btn ${showHistory ? 'active' : ''}`}
             onClick={() => setShowHistory(!showHistory)}
             title={t.ai.history}
+            disabled={!currentServerId}
           >
             <History size={16} />
           </button>
