@@ -573,16 +573,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     };
   }, [isResizing]);
 
-  const handleCreateSession = useCallback(async () => {
+  const handleCreateSession = useCallback(() => {
     if (currentServerId) {
-      try {
-        await createSession(currentServerId, selectedModelId);
-        setShowHistory(false);
-      } catch (err) {
-        // Failed to create session
-      }
+      selectSession(null, currentServerId);
+      setShowHistory(false);
     }
-  }, [currentServerId, selectedModelId, createSession]);
+  }, [currentServerId, selectSession]);
 
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading || !!pendingToolCalls) return;
@@ -627,10 +623,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         currentTabId
       );
       
+      if (currentServerId) {
+        loadSessions(currentServerId);
+      }
     } catch (err) {
       setGenerating(sessionId, false);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls, clearSessionStopped]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls, clearSessionStopped, loadSessions]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;

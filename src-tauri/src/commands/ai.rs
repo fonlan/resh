@@ -681,7 +681,10 @@ pub async fn get_ai_sessions(
     let conn = conn.lock().unwrap();
     
     let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, model_id FROM ai_sessions WHERE server_id = ?1 ORDER BY created_at DESC"
+        "SELECT id, title, created_at, model_id FROM ai_sessions 
+         WHERE server_id = ?1 
+         AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)
+         ORDER BY created_at DESC"
     ).map_err(|e| e.to_string())?;
     
     let rows = stmt.query_map(params![server_id], |row| {

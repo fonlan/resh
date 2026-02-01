@@ -62,6 +62,12 @@ impl DatabaseManager {
             [],
         );
 
+        let _ = conn.execute(
+            "DELETE FROM ai_sessions 
+             WHERE NOT EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)",
+            [],
+        );
+
         Ok(())
     }
 
