@@ -154,6 +154,7 @@
   line-height: 1.5;
   width: 100%;
   word-wrap: break-word;
+  overflow-x: auto;
 }
 
 .ai-message-copy-btn {
@@ -307,6 +308,36 @@
 .ai-message-content ol {
   padding-left: 20px;
   margin: 8px 0;
+}
+
+.ai-message-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  border: 1px solid var(--glass-border);
+  font-size: 12px;
+}
+
+.ai-message-content th,
+.ai-message-content td {
+  padding: 6px 10px;
+  border: 1px solid var(--glass-border);
+  text-align: left;
+}
+
+.ai-message-content th {
+  background: rgba(255, 255, 255, 0.05);
+  font-weight: 600;
+}
+
+.ai-message.user .ai-message-content table,
+.ai-message.user .ai-message-content th,
+.ai-message.user .ai-message-content td {
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.ai-message.user .ai-message-content th {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .ai-input-area {
