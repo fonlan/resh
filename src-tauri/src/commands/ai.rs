@@ -1,26 +1,33 @@
-use crate::commands::AppState;
-use crate::ai::client::{stream_openai_chat, fetch_models, ChatMessage, create_tools, StreamEvent, ToolCall, FunctionCall, ToolDefinition};
-use crate::ai::prompts::SYSTEM_PROMPT;
+use crate::ai::client::{
+    create_tools, fetch_models, stream_openai_chat, ChatMessage, FunctionCall, StreamEvent,
+    ToolCall, ToolDefinition,
+};
 use crate::ai::copilot;
+use crate::ai::prompts::SYSTEM_PROMPT;
+use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
-use tauri::{State, Window, Emitter};
-use std::sync::Arc;
-use uuid::Uuid;
-use rusqlite::params;
 use futures::StreamExt;
+use rusqlite::params;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::{Emitter, State, Window};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 // --- Helper Functions ---
 
 fn validate_and_clean_history(history: Vec<ChatMessage>, model_name: &str) -> Vec<ChatMessage> {
     let is_glm_model = model_name.to_lowercase().starts_with("glm");
-    validate_and_clean_history_for_glm(history, is_glm_model)
+    if is_glm_model {
+        validate_and_clean_history_for_glm(history)
+    } else {
+        history
+    }
 }
 
-fn validate_and_clean_history_for_glm(history: Vec<ChatMessage>, _is_glm_model: bool) -> Vec<ChatMessage> {
+fn validate_and_clean_history_for_glm(history: Vec<ChatMessage>) -> Vec<ChatMessage> {
     tracing::debug!("[AI] GLM validation input: {} messages", history.len());
-    
+
     let mut cleaned = Vec::new();
     let mut i = 0;
     let mut last_user_content = String::new();
@@ -105,14 +112,22 @@ fn validate_and_clean_history_for_glm(history: Vec<ChatMessage>, _is_glm_model: 
             tool_call_id: None,
         });
     }
-    
+
     let output_roles: Vec<String> = cleaned.iter().map(|m| m.role.clone()).collect();
-    tracing::debug!("[AI] GLM validation output: {:?}, count: {}", output_roles, cleaned.len());
+    tracing::debug!(
+        "[AI] GLM validation output: {:?}, count: {}",
+        output_roles,
+        cleaned.len()
+    );
 
     cleaned
 }
 
-async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bool) -> Result<Vec<ChatMessage>, String> {
+async fn load_history(
+    state: &Arc<AppState>,
+    session_id: &str,
+    is_agent_mode: bool,
+) -> Result<Vec<ChatMessage>, String> {
     let max_history = {
         let config = state.config.lock().await;
         config.general.ai_max_history
@@ -120,44 +135,52 @@ async fn load_history(state: &Arc<AppState>, session_id: &str, is_agent_mode: bo
 
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    
+
     // Get the last N messages
-    let mut stmt = conn.prepare(
-        "SELECT role, content, reasoning_content, tool_calls, tool_call_id FROM (
+    let mut stmt = conn
+        .prepare(
+            "SELECT role, content, reasoning_content, tool_calls, tool_call_id FROM (
             SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
             FROM ai_messages 
             WHERE session_id = ?1 
             ORDER BY created_at DESC 
             LIMIT ?2
-        ) ORDER BY created_at ASC"
-    ).map_err(|e| e.to_string())?;
-    
-    let rows = stmt.query_map(params![session_id, max_history], |row| {
-         let role: String = row.get(0)?;
-         let content_raw: String = row.get(1)?;
-         let reasoning_raw: Option<String> = row.get(2)?;
-         let tool_calls_json: Option<String> = row.get(3).ok();
-         let tool_call_id: Option<String> = row.get(4).ok();
-         
-         let content = if content_raw.is_empty() { None } else { Some(content_raw) };
+        ) ORDER BY created_at ASC",
+        )
+        .map_err(|e| e.to_string())?;
 
-         let tool_calls = if let Some(json) = tool_calls_json {
-             serde_json::from_str(&json).unwrap_or(None)
-         } else {
-             None
-         };
+    let rows = stmt
+        .query_map(params![session_id, max_history], |row| {
+            let role: String = row.get(0)?;
+            let content_raw: String = row.get(1)?;
+            let reasoning_raw: Option<String> = row.get(2)?;
+            let tool_calls_json: Option<String> = row.get(3).ok();
+            let tool_call_id: Option<String> = row.get(4).ok();
 
-        Ok(ChatMessage {
-            role,
-            content,
-            reasoning_content: reasoning_raw,
-            tool_calls,
-            tool_call_id, 
+            let content = if content_raw.is_empty() {
+                None
+            } else {
+                Some(content_raw)
+            };
+
+            let tool_calls = if let Some(json) = tool_calls_json {
+                serde_json::from_str(&json).unwrap_or(None)
+            } else {
+                None
+            };
+
+            Ok(ChatMessage {
+                role,
+                content,
+                reasoning_content: reasoning_raw,
+                tool_calls,
+                tool_call_id,
+            })
         })
-    }).map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
 
     let mut msgs = Vec::new();
-    
+
     // Customize system prompt based on mode
     let mode_desc = if is_agent_mode {
         "You are currently in AGENT mode. You can read terminal output AND execute commands to solve problems."
@@ -187,15 +210,22 @@ struct ToolCallAccumulator {
 
 impl ToolCallAccumulator {
     fn new() -> Self {
-        Self { calls: HashMap::new() }
+        Self {
+            calls: HashMap::new(),
+        }
     }
 
     fn update(&mut self, json: &serde_json::Value) {
         if let Some(arr) = json.as_array() {
             for call in arr {
                 if let Some(index) = call["index"].as_u64() {
-                    let entry = self.calls.entry(index).or_insert((None, None, String::new(), String::new()));
-                    
+                    let entry = self.calls.entry(index).or_insert((
+                        None,
+                        None,
+                        String::new(),
+                        String::new(),
+                    ));
+
                     if let Some(id) = call["id"].as_str() {
                         entry.0 = Some(id.to_string());
                     }
@@ -219,7 +249,7 @@ impl ToolCallAccumulator {
         let mut result = Vec::new();
         let mut indices: Vec<_> = self.calls.keys().collect();
         indices.sort();
-        
+
         for index in indices {
             if let Some((Some(id), Some(t), name, args)) = self.calls.get(index) {
                 result.push(ToolCall {
@@ -237,8 +267,8 @@ impl ToolCallAccumulator {
 }
 
 async fn execute_tools_and_save(
-    state: &Arc<AppState>, 
-    session_id: &str, 
+    state: &Arc<AppState>,
+    session_id: &str,
     ssh_session_id: Option<&str>,
     tools: Vec<ToolCall>,
     cancellation_token: CancellationToken,
@@ -248,38 +278,49 @@ async fn execute_tools_and_save(
             tracing::info!("[AI] Tool execution cancelled for session: {}", session_id);
             return Err("CANCELLED".to_string());
         }
-        tracing::debug!("[AI] Executing tool: {} args: {}", call.function.name, call.function.arguments);
-        
+        tracing::debug!(
+            "[AI] Executing tool: {} args: {}",
+            call.function.name,
+            call.function.arguments
+        );
+
         let result = match call.function.name.as_str() {
             "get_terminal_output" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    match SSHClient::get_terminal_output(ssh_id).await { 
+                    match SSHClient::get_terminal_output(ssh_id).await {
                         Ok(text) => {
                             String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
-                        },
-                        Err(e) => format!("Error: {}", e)
+                        }
+                        Err(e) => format!("Error: {}", e),
                     }
                 } else {
                     "Error: No active terminal session linked to this chat.".to_string()
                 }
-            },
+            }
             "run_in_terminal" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
                         if let Some(cmd) = args["command"].as_str() {
-                            let timeout = args.get("timeoutSeconds").and_then(|v| v.as_u64()).unwrap_or(30);
-                            
+                            let timeout = args
+                                .get("timeoutSeconds")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(30);
+
                             SSHClient::start_command_recording(ssh_id).await?;
-                            
+
                             let cmd_nl = format!("{}\n", cmd);
-                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await
+                            {
                                 let _ = SSHClient::stop_command_recording(ssh_id).await;
                                 break;
                             }
-                            
-                            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+
+                            let mut interval =
+                                tokio::time::interval(tokio::time::Duration::from_millis(100));
                             let mut elapsed = 0u64;
-                            
+
                             loop {
                                 if cancellation_token.is_cancelled() {
                                     tracing::info!("[run_in_terminal tool] execution cancelled for session: {:?}", ssh_session_id);
@@ -288,32 +329,49 @@ async fn execute_tools_and_save(
                                 }
                                 interval.tick().await;
                                 elapsed += 100;
-                                
-                                tracing::debug!("[run_in_terminal tool] elapsed={}ms timeout={}s", elapsed, timeout);
-                                
+
+                                tracing::debug!(
+                                    "[run_in_terminal tool] elapsed={}ms timeout={}s",
+                                    elapsed,
+                                    timeout
+                                );
+
                                 if elapsed >= timeout * 1000 {
-                                    tracing::warn!("[run_in_terminal tool] timeout reached after {}ms", elapsed);
+                                    tracing::warn!(
+                                        "[run_in_terminal tool] timeout reached after {}ms",
+                                        elapsed
+                                    );
                                     break;
                                 }
-                                
-                                let is_completed = SSHClient::check_command_completed(ssh_id).await?;
-                                tracing::debug!("[run_in_terminal tool] is_completed={}", is_completed);
+
+                                let is_completed =
+                                    SSHClient::check_command_completed(ssh_id).await?;
+                                tracing::debug!(
+                                    "[run_in_terminal tool] is_completed={}",
+                                    is_completed
+                                );
                                 if is_completed {
-                                    tracing::info!("[run_in_terminal tool] command completed after {}ms", elapsed);
+                                    tracing::info!(
+                                        "[run_in_terminal tool] command completed after {}ms",
+                                        elapsed
+                                    );
                                     break;
                                 }
                             }
-                            
+
                             match SSHClient::stop_command_recording(ssh_id).await {
                                 Ok(output) => {
-                                    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(output.as_bytes())).to_string();
+                                    let clean_output = String::from_utf8_lossy(
+                                        &strip_ansi_escapes::strip(output.as_bytes()),
+                                    )
+                                    .to_string();
                                     if clean_output.is_empty() {
                                         "Command timed out or produced no output".to_string()
                                     } else {
                                         clean_output
                                     }
-                                },
-                                Err(e) => format!("Error getting output: {}", e)
+                                }
+                                Err(e) => format!("Error getting output: {}", e),
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -324,24 +382,28 @@ async fn execute_tools_and_save(
                 } else {
                     "Error: No active terminal session linked to this chat.".to_string()
                 }
-            },
+            }
             "send_interrupt" => {
                 if let Some(ssh_id) = ssh_session_id {
                     match SSHClient::send_interrupt(ssh_id).await {
                         Ok(_) => "Interrupt signal (Ctrl+C) sent successfully".to_string(),
-                        Err(e) => format!("Error sending interrupt: {}", e)
+                        Err(e) => format!("Error sending interrupt: {}", e),
                     }
                 } else {
                     "Error: No active terminal session linked to this chat.".to_string()
                 }
-            },
+            }
             "send_terminal_input" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
                         if let Some(input) = args["input"].as_str() {
                             match SSHClient::send_terminal_input(ssh_id, input).await {
-                                Ok(_) => format!("Input '{}' sent successfully", input.escape_debug()),
-                                Err(e) => format!("Error sending input: {}", e)
+                                Ok(_) => {
+                                    format!("Input '{}' sent successfully", input.escape_debug())
+                                }
+                                Err(e) => format!("Error sending input: {}", e),
                             }
                         } else {
                             "Error: Missing 'input' argument".to_string()
@@ -352,8 +414,8 @@ async fn execute_tools_and_save(
                 } else {
                     "Error: No active terminal session linked to this chat.".to_string()
                 }
-            },
-            _ => format!("Error: Unknown tool {}", call.function.name)
+            }
+            _ => format!("Error: Unknown tool {}", call.function.name),
         };
 
         // Save Tool Output
@@ -380,28 +442,39 @@ async fn run_ai_turn(
     tools: Option<Vec<ToolDefinition>>,
     cancellation_token: CancellationToken,
 ) -> Result<Option<Vec<ToolCall>>, String> {
-    
     // 1. Get Config
     let (endpoint, api_key, model_name, provider, proxy, timeout) = {
         let config = state.config.lock().await;
-        let model = config.ai_models.iter().find(|m| m.id == model_id)
+        let model = config
+            .ai_models
+            .iter()
+            .find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
-        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+        let channel = config
+            .ai_channels
+            .iter()
+            .find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
-        
+
         let proxy = if let Some(proxy_id) = &channel.proxy_id {
             if let Some(p) = config.proxies.iter().find(|p| p.id == *proxy_id) {
                 Some(p.clone())
             } else {
-                tracing::warn!("[AI] Configured proxy {} not found, falling back to direct connection", proxy_id);
+                tracing::warn!(
+                    "[AI] Configured proxy {} not found, falling back to direct connection",
+                    proxy_id
+                );
                 None
             }
         } else {
             None
         };
-        
+
         (
-            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel
+                .endpoint
+                .clone()
+                .unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
             channel.provider.clone(),
@@ -409,7 +482,7 @@ async fn run_ai_turn(
             Some(config.general.ai_timeout as u64),
         )
     };
-    
+
     if api_key.is_empty() {
         return Err("API key is not configured".to_string());
     }
@@ -417,9 +490,11 @@ async fn run_ai_turn(
     // 2. Load History with mode awareness
     let history = load_history(state, &session_id, is_agent_mode).await?;
     let history = validate_and_clean_history(history, &model_name);
-    tracing::debug!("[AI] Cleaned history for GLM, messages: {}, roles: {:?}", 
+    tracing::debug!(
+        "[AI] Cleaned history for GLM, messages: {}, roles: {:?}",
         history.len(),
-        history.iter().map(|m| m.role.clone()).collect::<Vec<_>>());
+        history.iter().map(|m| m.role.clone()).collect::<Vec<_>>()
+    );
 
     // 3. Prepare headers and token if Copilot
     let mut final_api_key = api_key;
@@ -433,19 +508,35 @@ async fn run_ai_turn(
         let token_resp = copilot::get_copilot_token(&final_api_key).await?;
         copilot_token_data = token_resp.token; // Copilot Session Token (tid_...)
         final_api_key = copilot_token_data.clone();
-        
-        final_endpoint = "https://api.githubcopilot.com".to_string(); 
+
+        final_endpoint = "https://api.githubcopilot.com".to_string();
 
         let mut headers = HashMap::new();
-        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert(
+            "Copilot-Integration-Id".to_string(),
+            "vscode-chat".to_string(),
+        );
         headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
-        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        headers.insert(
+            "User-Agent".to_string(),
+            "GithubCopilot/1.155.0".to_string(),
+        );
         extra_headers = Some(headers);
     }
 
     // 4. Stream
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, history, tools, extra_headers, proxy, timeout).await?;
-    
+    let mut stream = stream_openai_chat(
+        &final_endpoint,
+        &final_api_key,
+        &model_name,
+        history,
+        tools,
+        extra_headers,
+        proxy,
+        timeout,
+    )
+    .await?;
+
     let mut full_content = String::new();
     let mut full_reasoning = String::new();
     let mut tool_accumulator = ToolCallAccumulator::new();
@@ -461,23 +552,33 @@ async fn run_ai_turn(
             Ok(StreamEvent::Content(chunk)) => {
                 if !chunk.is_empty() {
                     full_content.push_str(&chunk);
-                    window.emit(&format!("ai-response-{}", session_id), chunk).map_err(|e| e.to_string())?;
+                    window
+                        .emit(&format!("ai-response-{}", session_id), chunk)
+                        .map_err(|e| e.to_string())?;
                 }
-            },
+            }
             Ok(StreamEvent::Reasoning(chunk)) => {
                 if !chunk.is_empty() {
                     full_reasoning.push_str(&chunk);
-                    window.emit(&format!("ai-reasoning-{}", session_id), chunk).map_err(|e| e.to_string())?;
+                    window
+                        .emit(&format!("ai-reasoning-{}", session_id), chunk)
+                        .map_err(|e| e.to_string())?;
                 }
-            },
+            }
             Ok(StreamEvent::ToolCall(json)) => {
                 has_tool_calls = true;
                 tool_accumulator.update(&json);
-            },
+            }
             Ok(StreamEvent::MessageBatch(messages)) => {
                 has_message_batch = true;
-                let message_batch_json = serde_json::to_value(&messages).map_err(|e| e.to_string())?;
-                window.emit(&format!("ai-message-batch-{}", session_id), message_batch_json).map_err(|e| e.to_string())?;
+                let message_batch_json =
+                    serde_json::to_value(&messages).map_err(|e| e.to_string())?;
+                window
+                    .emit(
+                        &format!("ai-message-batch-{}", session_id),
+                        message_batch_json,
+                    )
+                    .map_err(|e| e.to_string())?;
 
                 for msg in messages {
                     let msg_content = msg.content.clone().unwrap_or_default();
@@ -488,17 +589,24 @@ async fn run_ai_turn(
                     let reasoning_for_emit = msg_reasoning.clone();
 
                     if !content_for_emit.is_empty() {
-                        window.emit(&format!("ai-response-{}", session_id), content_for_emit).map_err(|e| e.to_string())?;
+                        window
+                            .emit(&format!("ai-response-{}", session_id), content_for_emit)
+                            .map_err(|e| e.to_string())?;
                     }
 
                     if !reasoning_for_emit.is_empty() {
-                        window.emit(&format!("ai-reasoning-{}", session_id), reasoning_for_emit).map_err(|e| e.to_string())?;
+                        window
+                            .emit(&format!("ai-reasoning-{}", session_id), reasoning_for_emit)
+                            .map_err(|e| e.to_string())?;
                     }
 
                     if let Some(tool_calls) = &msg_tool_calls {
                         has_tool_calls = true;
-                        let tool_calls_json = serde_json::to_value(tool_calls).map_err(|e| e.to_string())?;
-                        window.emit(&format!("ai-tool-call-{}", session_id), tool_calls_json).map_err(|e| e.to_string())?;
+                        let tool_calls_json =
+                            serde_json::to_value(tool_calls).map_err(|e| e.to_string())?;
+                        window
+                            .emit(&format!("ai-tool-call-{}", session_id), tool_calls_json)
+                            .map_err(|e| e.to_string())?;
                     }
 
                     full_content.push_str(&msg_content);
@@ -518,10 +626,12 @@ async fn run_ai_turn(
                         params![ai_msg_id, session_id, msg.role, msg_content, msg_reasoning, tool_calls_json],
                     ).map_err(|e| e.to_string())?;
                 }
-            },
-            Ok(StreamEvent::Done) => {},
+            }
+            Ok(StreamEvent::Done) => {}
             Err(e) => {
-                window.emit(&format!("ai-error-{}", session_id), e.clone()).map_err(|e| e.to_string())?;
+                window
+                    .emit(&format!("ai-error-{}", session_id), e.clone())
+                    .map_err(|e| e.to_string())?;
                 return Err(e);
             }
         }
@@ -551,7 +661,7 @@ async fn run_ai_turn(
 
         // Only insert if we have content or tool calls or reasoning
         if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty() {
-                conn.execute(
+            conn.execute(
                 "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json],
             ).map_err(|e| e.to_string())?;
@@ -582,9 +692,12 @@ pub async fn fetch_ai_models(
 ) -> Result<Vec<String>, String> {
     let (endpoint, api_key, provider, proxy, timeout) = {
         let config = state.config.lock().await;
-        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+        let channel = config
+            .ai_channels
+            .iter()
+            .find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
-        
+
         let proxy = if let Some(proxy_id) = &channel.proxy_id {
             if let Some(p) = config.proxies.iter().find(|p| p.id == *proxy_id) {
                 Some(p.clone())
@@ -594,9 +707,12 @@ pub async fn fetch_ai_models(
         } else {
             None
         };
-        
+
         (
-            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel
+                .endpoint
+                .clone()
+                .unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             channel.provider.clone(),
             proxy,
@@ -615,43 +731,64 @@ pub async fn fetch_ai_models(
     if provider == "copilot" {
         let token_resp = copilot::get_copilot_token(&final_api_key).await?;
         final_api_key = token_resp.token;
-        final_endpoint = "https://api.githubcopilot.com".to_string(); 
-        
+        final_endpoint = "https://api.githubcopilot.com".to_string();
+
         let mut headers = HashMap::new();
-        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert(
+            "Copilot-Integration-Id".to_string(),
+            "vscode-chat".to_string(),
+        );
         headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
-        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        headers.insert(
+            "User-Agent".to_string(),
+            "GithubCopilot/1.155.0".to_string(),
+        );
         extra_headers = Some(headers);
     }
 
-    let models = fetch_models(&final_endpoint, &final_api_key, extra_headers, proxy, timeout).await?;
+    let models = fetch_models(
+        &final_endpoint,
+        &final_api_key,
+        extra_headers,
+        proxy,
+        timeout,
+    )
+    .await?;
 
-    let mut model_ids: Vec<String> = models.into_iter().filter(|m| {
-        if provider == "copilot" {
-             // 1. Check capabilities.type == "chat"
-             let is_chat = if let Some(cap) = m.extra.get("capabilities") {
-                 cap.get("type").and_then(|v| v.as_str()) == Some("chat")
-             } else {
-                 // Fallback to top-level type if capabilities is missing
-                 m.extra.get("type").and_then(|v| v.as_str()) == Some("chat")
-             };
+    let mut model_ids: Vec<String> = models
+        .into_iter()
+        .filter(|m| {
+            if provider == "copilot" {
+                // 1. Check capabilities.type == "chat"
+                let is_chat = if let Some(cap) = m.extra.get("capabilities") {
+                    cap.get("type").and_then(|v| v.as_str()) == Some("chat")
+                } else {
+                    // Fallback to top-level type if capabilities is missing
+                    m.extra.get("type").and_then(|v| v.as_str()) == Some("chat")
+                };
 
-             if !is_chat {
-                 return false;
-             }
+                if !is_chat {
+                    return false;
+                }
 
-             // 2. Check model_picker_enabled == true
-             if let Some(enabled) = m.extra.get("model_picker_enabled").and_then(|v| v.as_bool()) {
-                 return enabled;
-             }
-             
-             // If field is missing, default to false (strict)
-             false 
-        } else {
-            true
-        }
-    }).map(|m| m.id).collect();
-    
+                // 2. Check model_picker_enabled == true
+                if let Some(enabled) = m
+                    .extra
+                    .get("model_picker_enabled")
+                    .and_then(|v| v.as_bool())
+                {
+                    return enabled;
+                }
+
+                // If field is missing, default to false (strict)
+                false
+            } else {
+                true
+            }
+        })
+        .map(|m| m.id)
+        .collect();
+
     model_ids.sort();
     Ok(model_ids)
 }
@@ -667,8 +804,8 @@ pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
         Ok(token) => {
             tracing::info!("[AI] GitHub Copilot authentication successful");
             Ok(token)
-        },
-        Err(e) => Err(e)
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -676,10 +813,10 @@ pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
 pub async fn open_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
         use std::os::windows::process::CommandExt;
+        use std::process::Command;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        
+
         Command::new("cmd")
             .args(["/C", "start", "", &url])
             .creation_flags(CREATE_NO_WINDOW)
@@ -714,11 +851,12 @@ pub async fn create_ai_session(
     let id = Uuid::new_v4().to_string();
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    
+
     conn.execute(
         "INSERT INTO ai_sessions (id, server_id, title, model_id) VALUES (?1, ?2, ?3, ?4)",
         params![id, server_id, "New Chat", model_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(id)
 }
@@ -730,28 +868,32 @@ pub async fn get_ai_sessions(
 ) -> Result<Vec<serde_json::Value>, String> {
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    
-    let mut stmt = conn.prepare(
-        "SELECT id, title, created_at, model_id FROM ai_sessions 
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, title, created_at, model_id FROM ai_sessions 
          WHERE server_id = ?1 
          AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)
-         ORDER BY created_at DESC"
-    ).map_err(|e| e.to_string())?;
-    
-    let rows = stmt.query_map(params![server_id], |row| {
-        Ok(serde_json::json!({
-            "id": row.get::<_, String>(0)?,
-            "title": row.get::<_, String>(1)?,
-            "createdAt": row.get::<_, String>(2)?,
-            "modelId": row.get::<_, Option<String>>(3)?,
-        }))
-    }).map_err(|e| e.to_string())?;
+         ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![server_id], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "title": row.get::<_, String>(1)?,
+                "createdAt": row.get::<_, String>(2)?,
+                "modelId": row.get::<_, Option<String>>(3)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
 
     let mut sessions = Vec::new();
     for row in rows {
         sessions.push(row.map_err(|e| e.to_string())?);
     }
-    
+
     Ok(sessions)
 }
 
@@ -762,7 +904,9 @@ pub async fn get_ai_messages(
 ) -> Result<Vec<ChatMessage>, String> {
     load_history(&state, &session_id, false).await.map(|msgs| {
         // Filter out system and tool messages for frontend to keep UI clean
-        msgs.into_iter().filter(|m| m.role != "system" && m.role != "tool").collect()
+        msgs.into_iter()
+            .filter(|m| m.role != "system" && m.role != "tool")
+            .collect()
     })
 }
 
@@ -777,11 +921,15 @@ pub async fn send_chat_message(
     mode: Option<String>, // "ask" or "agent"
     _ssh_session_id: Option<String>,
 ) -> Result<(), String> {
-    tracing::debug!("[AI] send_chat_message called: session_id={}, model_id={}, mode={:?}", 
-        session_id, model_id, mode);
-    
+    tracing::debug!(
+        "[AI] send_chat_message called: session_id={}, model_id={}, mode={:?}",
+        session_id,
+        model_id,
+        mode
+    );
+
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
-    
+
     // 1. Save User Message
     let user_msg_id = Uuid::new_v4().to_string();
     {
@@ -790,34 +938,53 @@ pub async fn send_chat_message(
         conn.execute(
             "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
             params![user_msg_id, session_id, "user", content],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
     let is_ask_mode = mode.as_deref() == Some("ask");
-    
+
     // Both agent and ask mode now support tools
-    let tools = if is_agent_mode || is_ask_mode { Some(create_tools(is_agent_mode)) } else { None };
+    let tools = if is_agent_mode || is_ask_mode {
+        Some(create_tools(is_agent_mode))
+    } else {
+        None
+    };
 
     let token = CancellationToken::new();
-    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
+    state
+        .ai_cancellation_tokens
+        .insert(session_id.clone(), token.clone());
 
-    let result = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools, token).await;
-    
+    let result = run_ai_turn(
+        &window,
+        &state,
+        session_id.clone(),
+        model_id,
+        channel_id,
+        is_agent_mode,
+        tools,
+        token,
+    )
+    .await;
+
     state.ai_cancellation_tokens.remove(&session_id);
-    
+
     let tool_calls = result?;
 
     if let Some(calls) = tool_calls {
         if !calls.is_empty() {
-             // Emit event for confirmation instead of auto-executing
-             let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
-             // We return Ok here, leaving the frontend to handle the confirmation loop
-             return Ok(());
+            // Emit event for confirmation instead of auto-executing
+            let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
+            // We return Ok here, leaving the frontend to handle the confirmation loop
+            return Ok(());
         }
     }
 
-    window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
+    window
+        .emit(&format!("ai-done-{}", session_id), "DONE")
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -832,7 +999,11 @@ pub async fn execute_agent_tools(
     ssh_session_id: Option<String>,
     tool_call_ids: Vec<String>, // List of tool call IDs to confirm execution for
 ) -> Result<(), String> {
-    tracing::debug!("[AI] execute_agent_tools called for session {} (mode: {:?})", session_id, mode);
+    tracing::debug!(
+        "[AI] execute_agent_tools called for session {} (mode: {:?})",
+        session_id,
+        mode
+    );
 
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
@@ -840,18 +1011,23 @@ pub async fn execute_agent_tools(
     let is_agent_mode = mode.as_deref() == Some("agent");
     let history = load_history(&state, &session_id, is_agent_mode).await?;
     let last_msg = history.last().ok_or("No history found")?;
-    
+
     if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
         tracing::error!("[AI] Last message was not a tool call: {:?}", last_msg);
         return Err("Last message was not an assistant tool call".to_string());
     }
 
     let tools_to_run = last_msg.tool_calls.as_ref().unwrap().clone();
-    let tools_filtered: Vec<ToolCall> = tools_to_run.into_iter().filter(|t| tool_call_ids.contains(&t.id)).collect();
+    let tools_filtered: Vec<ToolCall> = tools_to_run
+        .into_iter()
+        .filter(|t| tool_call_ids.contains(&t.id))
+        .collect();
 
     if tools_filtered.is_empty() {
         tracing::warn!("[AI] No matching tools found to execute.");
-        window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
+        window
+            .emit(&format!("ai-done-{}", session_id), "DONE")
+            .map_err(|e| e.to_string())?;
         return Ok(());
     }
 
@@ -860,7 +1036,9 @@ pub async fn execute_agent_tools(
         for call in &tools_filtered {
             if call.function.name == "run_in_terminal" {
                 tracing::error!("[AI] Attempted to run_in_terminal in non-agent mode!");
-                return Err("Execution denied: run_in_terminal is only allowed in Agent mode.".to_string());
+                return Err(
+                    "Execution denied: run_in_terminal is only allowed in Agent mode.".to_string(),
+                );
             }
         }
     }
@@ -868,38 +1046,57 @@ pub async fn execute_agent_tools(
     tracing::debug!("[AI] Executing {} tools...", tools_filtered.len());
 
     let token = CancellationToken::new();
-    state.ai_cancellation_tokens.insert(session_id.clone(), token.clone());
-    
-    execute_tools_and_save(&state, &session_id, ssh_session_id.as_deref(), tools_filtered, token.clone()).await?;
+    state
+        .ai_cancellation_tokens
+        .insert(session_id.clone(), token.clone());
+
+    execute_tools_and_save(
+        &state,
+        &session_id,
+        ssh_session_id.as_deref(),
+        tools_filtered,
+        token.clone(),
+    )
+    .await?;
     tracing::debug!("[AI] Tool execution complete. Running next AI turn...");
 
     // Continue the loop (1 turn)
     let tools = Some(create_tools(is_agent_mode));
-    
-    let result = run_ai_turn(&window, &state, session_id.clone(), model_id, channel_id, is_agent_mode, tools, token).await;
-    
+
+    let result = run_ai_turn(
+        &window,
+        &state,
+        session_id.clone(),
+        model_id,
+        channel_id,
+        is_agent_mode,
+        tools,
+        token,
+    )
+    .await;
+
     state.ai_cancellation_tokens.remove(&session_id);
-    
+
     let next_tool_calls = result?;
 
     if let Some(calls) = next_tool_calls {
         if !calls.is_empty() {
-             tracing::debug!("[AI] Next turn generated {} more tool calls", calls.len());
-             let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
-             return Ok(());
+            tracing::debug!("[AI] Next turn generated {} more tool calls", calls.len());
+            let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
+            return Ok(());
         }
     }
 
     tracing::debug!("[AI] Agent turn complete.");
-    window.emit(&format!("ai-done-{}", session_id), "DONE").map_err(|e| e.to_string())?;
+    window
+        .emit(&format!("ai-done-{}", session_id), "DONE")
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Get terminal text for AI to analyze
 #[tauri::command]
-pub async fn get_terminal_output(
-    session_id: String,
-) -> Result<String, String> {
+pub async fn get_terminal_output(session_id: String) -> Result<String, String> {
     let text = SSHClient::get_terminal_output(&session_id).await?;
     let clean_text = String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string();
     Ok(clean_text)
@@ -913,14 +1110,14 @@ pub async fn run_in_terminal(
     timeout_seconds: Option<u64>,
 ) -> Result<String, String> {
     let timeout = timeout_seconds.unwrap_or(30);
-    
+
     SSHClient::start_command_recording(&session_id).await?;
 
     // Send the actual command with newline
     let command_with_newline = format!("{}\n", command);
 
     match SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => tracing::error!("[run_in_terminal] send_command failed: {}", e),
     }
 
@@ -931,40 +1128,37 @@ pub async fn run_in_terminal(
     let marker = format!("echo DONE_MARKER\n");
 
     match SSHClient::send_input(&session_id, marker.as_bytes()).await {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => tracing::error!("[run_in_terminal] send_marker failed: {}", e),
     }
-    
+
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
     const CHECK_INTERVAL_MS: u64 = 100;
-    
+
     loop {
         interval.tick().await;
         elapsed += CHECK_INTERVAL_MS;
-        
 
-        
         if elapsed >= timeout * 1000 {
-
             break;
         }
 
         let is_completed = SSHClient::check_command_completed(&session_id).await?;
 
         if is_completed {
-
             break;
         }
     }
-    
+
     let output = SSHClient::stop_command_recording(&session_id).await?;
-    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
-    
+    let clean_output =
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
+
     if clean_output.is_empty() {
         return Err("Command timed out or produced no output".to_string());
     }
-    
+
     Ok(clean_output)
 }
 
@@ -973,7 +1167,7 @@ pub async fn run_in_terminal(
 pub async fn send_interrupt(session_id: String) -> Result<String, String> {
     match SSHClient::send_interrupt(&session_id).await {
         Ok(_) => Ok("Interrupt signal (Ctrl+C) sent successfully".to_string()),
-        Err(e) => Err(format!("Error sending interrupt: {}", e))
+        Err(e) => Err(format!("Error sending interrupt: {}", e)),
     }
 }
 
@@ -981,8 +1175,11 @@ pub async fn send_interrupt(session_id: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn send_terminal_input(session_id: String, input: String) -> Result<String, String> {
     match SSHClient::send_terminal_input(&session_id, &input).await {
-        Ok(_) => Ok(format!("Input '{}' sent successfully", input.escape_debug())),
-        Err(e) => Err(format!("Error sending input: {}", e))
+        Ok(_) => Ok(format!(
+            "Input '{}' sent successfully",
+            input.escape_debug()
+        )),
+        Err(e) => Err(format!("Error sending input: {}", e)),
     }
 }
 
@@ -994,13 +1191,17 @@ pub async fn generate_session_title(
     model_id: String,
     channel_id: String,
 ) -> Result<String, String> {
-    tracing::debug!("[AI] generate_session_title called for session {}", session_id);
+    tracing::debug!(
+        "[AI] generate_session_title called for session {}",
+        session_id
+    );
 
     // 1. Check if session needs title generation
     let current_title = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT title FROM ai_sessions WHERE id = ?1")
+        let mut stmt = conn
+            .prepare("SELECT title FROM ai_sessions WHERE id = ?1")
             .map_err(|e| e.to_string())?;
         stmt.query_row(params![session_id], |row| row.get::<_, String>(0))
             .map_err(|e| e.to_string())?
@@ -1016,17 +1217,21 @@ pub async fn generate_session_title(
     let messages = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT role, content FROM ai_messages 
+        let mut stmt = conn
+            .prepare(
+                "SELECT role, content FROM ai_messages 
              WHERE session_id = ?1 
              ORDER BY created_at ASC 
-             LIMIT 2"
-        ).map_err(|e| e.to_string())?;
-        
-        let rows = stmt.query_map(params![session_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
-        
+             LIMIT 2",
+            )
+            .map_err(|e| e.to_string())?;
+
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+
         let mut msgs = Vec::new();
         for row in rows {
             msgs.push(row.map_err(|e| e.to_string())?);
@@ -1041,9 +1246,15 @@ pub async fn generate_session_title(
     // 3. Get model and channel config
     let (endpoint, api_key, model_name, provider, proxy, timeout) = {
         let config = state.config.lock().await;
-        let model = config.ai_models.iter().find(|m| m.id == model_id)
+        let model = config
+            .ai_models
+            .iter()
+            .find(|m| m.id == model_id)
             .ok_or_else(|| "Model not found".to_string())?;
-        let channel = config.ai_channels.iter().find(|c| c.id == channel_id)
+        let channel = config
+            .ai_channels
+            .iter()
+            .find(|c| c.id == channel_id)
             .ok_or_else(|| "Channel not found".to_string())?;
 
         let proxy = if let Some(proxy_id) = &channel.proxy_id {
@@ -1056,9 +1267,12 @@ pub async fn generate_session_title(
         } else {
             None
         };
-        
+
         (
-            channel.endpoint.clone().unwrap_or("https://api.openai.com/v1".to_string()),
+            channel
+                .endpoint
+                .clone()
+                .unwrap_or("https://api.openai.com/v1".to_string()),
             channel.api_key.clone().unwrap_or_default(),
             model.name.clone(),
             channel.provider.clone(),
@@ -1066,7 +1280,7 @@ pub async fn generate_session_title(
             Some(config.general.ai_timeout as u64),
         )
     };
-    
+
     if api_key.is_empty() {
         return Err("API key is not configured".to_string());
     }
@@ -1075,7 +1289,7 @@ pub async fn generate_session_title(
     let system_prompt = "You are a helpful assistant that generates concise chat titles. \
                         Generate a short title (max 6 words) that summarizes the main topic of the conversation. \
                         Only output the title text, nothing else.";
-    
+
     let user_content = format!(
         "Based on this conversation, generate a concise title:\n\nUser: {}\n\nAssistant: {}",
         messages.get(0).map(|(_, c)| c.as_str()).unwrap_or(""),
@@ -1110,23 +1324,39 @@ pub async fn generate_session_title(
         let token_resp = copilot::get_copilot_token(&final_api_key).await?;
         copilot_token_data = token_resp.token;
         final_api_key = copilot_token_data.clone();
-        final_endpoint = "https://api.githubcopilot.com".to_string(); 
-        
+        final_endpoint = "https://api.githubcopilot.com".to_string();
+
         let mut headers = HashMap::new();
-        headers.insert("Copilot-Integration-Id".to_string(), "vscode-chat".to_string());
+        headers.insert(
+            "Copilot-Integration-Id".to_string(),
+            "vscode-chat".to_string(),
+        );
         headers.insert("Editor-Version".to_string(), "vscode/1.85.1".to_string());
-        headers.insert("User-Agent".to_string(), "GithubCopilot/1.155.0".to_string());
+        headers.insert(
+            "User-Agent".to_string(),
+            "GithubCopilot/1.155.0".to_string(),
+        );
         extra_headers = Some(headers);
     }
 
-    let mut stream = stream_openai_chat(&final_endpoint, &final_api_key, &model_name, title_messages, None, extra_headers, proxy, timeout).await?;
+    let mut stream = stream_openai_chat(
+        &final_endpoint,
+        &final_api_key,
+        &model_name,
+        title_messages,
+        None,
+        extra_headers,
+        proxy,
+        timeout,
+    )
+    .await?;
     let mut title = String::new();
-    
+
     while let Some(event_result) = stream.next().await {
         match event_result {
             Ok(StreamEvent::Content(chunk)) => {
                 title.push_str(&chunk);
-            },
+            }
             Ok(StreamEvent::Done) => break,
             Err(e) => return Err(e),
             _ => {}
@@ -1134,7 +1364,8 @@ pub async fn generate_session_title(
     }
 
     // Clean up title
-    let title = title.trim()
+    let title = title
+        .trim()
         .trim_matches('"')
         .trim_matches('\'')
         .to_string();
@@ -1156,7 +1387,8 @@ pub async fn generate_session_title(
         conn.execute(
             "UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
             params![title, session_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     tracing::debug!("[AI] Generated title for session {}: {}", session_id, title);
@@ -1171,16 +1403,15 @@ pub async fn delete_ai_session(
     tracing::debug!("[AI] delete_ai_session called for session {}", session_id);
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    
+
     conn.execute(
         "DELETE FROM ai_messages WHERE session_id = ?1",
         params![session_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
-    conn.execute(
-        "DELETE FROM ai_sessions WHERE id = ?1",
-        params![session_id],
-    ).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -1190,10 +1421,13 @@ pub async fn delete_all_ai_sessions(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
-    tracing::debug!("[AI] delete_all_ai_sessions called for server {}", server_id);
+    tracing::debug!(
+        "[AI] delete_all_ai_sessions called for server {}",
+        server_id
+    );
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    
+
     conn.execute(
         "DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)",
         params![server_id],
@@ -1202,7 +1436,8 @@ pub async fn delete_all_ai_sessions(
     conn.execute(
         "DELETE FROM ai_sessions WHERE server_id = ?1",
         params![server_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }

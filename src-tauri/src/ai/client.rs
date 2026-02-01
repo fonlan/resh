@@ -258,33 +258,104 @@ pub async fn stream_openai_chat(
                 }
                 match serde_json::from_str::<serde_json::Value>(&event.data) {
                     Ok(json) => {
-                        // Detect minimax format: choices contain message objects with role field
                         if let Some(choices) = json["choices"].as_array() {
-                            let is_minimax_format = choices.iter().any(|choice| {
-                                let message = &choice["message"];
-                                message.is_object() && message.get("role").is_some()
-                            });
+                            // Check for streaming format (delta) first
+                            let first_choice = choices.first();
+                            let has_delta = first_choice.and_then(|c| c.get("delta").map(|d| d.is_object())).unwrap_or(false);
 
-                            if is_minimax_format {
-                                let mut messages: Vec<ChatMessage> = Vec::new();
-                                for choice in choices {
-                                    if let Some(message_obj) = choice["message"].as_object() {
-                                        let role = message_obj.get("role").and_then(|r| r.as_str()).unwrap_or("assistant").to_string();
+                            if has_delta {
+                                // Streaming response - use OpenAI-style delta processing
+                                let delta = &json["choices"][0]["delta"];
+                                if let Some(content) = delta["content"].as_str() {
+                                    return Ok(StreamEvent::Content(content.to_string()));
+                                } else if let Some(reasoning) = delta["reasoning_content"].as_str() {
+                                    return Ok(StreamEvent::Reasoning(reasoning.to_string()));
+                                } else if let Some(tool_calls) = delta["tool_calls"].as_array() {
+                                    return Ok(StreamEvent::ToolCall(serde_json::Value::Array(tool_calls.clone())));
+                                } else {
+                                    return Ok(StreamEvent::Content("".to_string()));
+                                }
+                            } else {
+                                // Check for message objects
+                                let has_message_objects = choices.iter().any(|choice| {
+                                    let message = &choice["message"];
+                                    message.is_object()
+                                });
 
-                                        // Extract content and handle <thinking> tags
-                                        let raw_content = message_obj.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
-                                        let (thinking_content, cleaned_content) = extract_thinking_tags(&raw_content);
+                                if has_message_objects {
+                                    // Check if this is a batch format (multiple messages with different roles)
+                                    let roles: std::collections::HashSet<&str> = choices.iter()
+                                        .filter_map(|choice| choice["message"].get("role")?.as_str())
+                                        .collect();
+                                    
+                                    // If multiple unique roles or tool role present, treat as batch
+                                    let is_batch = roles.len() > 1 || roles.contains("tool");
 
-                                        let reasoning = message_obj.get("reasoning_content")
-                                            .and_then(|r| r.as_str())
-                                            .map(|s| s.to_string())
-                                            .or(Some(thinking_content))
-                                            .filter(|s| !s.is_empty());
+                                    if is_batch {
+                                        // Batch response - process all messages
+                                        let mut messages: Vec<ChatMessage> = Vec::new();
+                                        for choice in choices {
+                                            if let Some(message_obj) = choice["message"].as_object() {
+                                                let role = message_obj.get("role")
+                                                    .and_then(|r| r.as_str())
+                                                    .unwrap_or("assistant")
+                                                    .to_string();
 
-                                        let tool_calls = message_obj.get("tool_calls")
-                                            .and_then(|tc| tc.as_array())
-                                            .map(|arr| {
-                                                arr.iter().filter_map(|tc| {
+                                                let raw_content = message_obj.get("content")
+                                                    .and_then(|c| c.as_str())
+                                                    .unwrap_or("")
+                                                    .to_string();
+                                                let (thinking_content, cleaned_content) = extract_thinking_tags(&raw_content);
+
+                                                let reasoning = message_obj.get("reasoning_content")
+                                                    .and_then(|r| r.as_str())
+                                                    .map(|s| s.to_string())
+                                                    .or(Some(thinking_content))
+                                                    .filter(|s| !s.is_empty());
+
+                                                let tool_calls = message_obj.get("tool_calls")
+                                                    .and_then(|tc| tc.as_array())
+                                                    .map(|arr| {
+                                                        arr.iter().filter_map(|tc| {
+                                                            Some(ToolCall {
+                                                                id: tc.get("id")?.as_str()?.to_string(),
+                                                                tool_type: tc.get("type")?.as_str()?.to_string(),
+                                                                function: FunctionCall {
+                                                                    name: tc.get("function")?.get("name")?.as_str()?.to_string(),
+                                                                    arguments: tc.get("function")?.get("arguments")?.as_str()?.to_string(),
+                                                                }
+                                                            })
+                                                        }).collect()
+                                                    });
+
+                                                if reasoning.is_some() || !cleaned_content.is_empty() || tool_calls.is_some() {
+                                                    messages.push(ChatMessage {
+                                                        role,
+                                                        content: if cleaned_content.is_empty() { None } else { Some(cleaned_content) },
+                                                        reasoning_content: reasoning,
+                                                        tool_calls,
+                                                        tool_call_id: None,
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        if !messages.is_empty() {
+                                            return Ok(StreamEvent::MessageBatch(messages));
+                                        }
+                                    } else {
+                                        // Single message response - treat as standard OpenAI format
+                                        let message_obj = &choices[0]["message"];
+                                        if let Some(content) = message_obj.get("content").and_then(|c| c.as_str()) {
+                                            let (thinking_content, cleaned_content) = extract_thinking_tags(content);
+                                            let reasoning = message_obj.get("reasoning_content")
+                                                .and_then(|r| r.as_str())
+                                                .map(|s| s.to_string())
+                                                .or(Some(thinking_content))
+                                                .filter(|s| !s.is_empty());
+
+                                            if let Some(tc) = message_obj.get("tool_calls").and_then(|tc| tc.as_array()) {
+                                                let tool_calls: Vec<ToolCall> = tc.iter().filter_map(|tc| {
                                                     Some(ToolCall {
                                                         id: tc.get("id")?.as_str()?.to_string(),
                                                         tool_type: tc.get("type")?.as_str()?.to_string(),
@@ -293,23 +364,22 @@ pub async fn stream_openai_chat(
                                                             arguments: tc.get("function")?.get("arguments")?.as_str()?.to_string(),
                                                         }
                                                     })
-                                                }).collect()
-                                            });
+                                                }).collect();
 
-                                        if reasoning.is_some() || !cleaned_content.is_empty() || tool_calls.is_some() {
-                                            messages.push(ChatMessage {
-                                                role,
-                                                content: if cleaned_content.is_empty() { None } else { Some(cleaned_content) },
-                                                reasoning_content: reasoning,
-                                                tool_calls,
-                                                tool_call_id: None,
-                                            });
+                                                if !tool_calls.is_empty() {
+                                                    return Ok(StreamEvent::MessageBatch(vec![ChatMessage {
+                                                        role: "assistant".to_string(),
+                                                        content: if cleaned_content.is_empty() { None } else { Some(cleaned_content) },
+                                                        reasoning_content: reasoning,
+                                                        tool_calls: Some(tool_calls),
+                                                        tool_call_id: None,
+                                                    }]));
+                                                }
+                                            }
+
+                                            return Ok(StreamEvent::Content(cleaned_content));
                                         }
                                     }
-                                }
-
-                                if !messages.is_empty() {
-                                    return Ok(StreamEvent::MessageBatch(messages));
                                 }
                             }
                         }
