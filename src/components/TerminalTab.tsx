@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
 import { useConfig } from '../hooks/useConfig'; // Import useConfig
 import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types/config';
+import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../i18n';
 import { StatusBar } from './StatusBar';
 import { ManualAuthModal } from './ManualAuthModal';
@@ -38,7 +39,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   onSessionChange,
 }) => {
   const { t } = useTranslation();
-  const { config } = useConfig(); // Use config
+  const { config, saveConfig } = useConfig(); // Use config
   const containerId = `terminal-${tabId}`;
 
   // Memoize settings to prevent re-creating terminal on reference change
@@ -227,6 +228,34 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
         updateStatus(connectedMsg);
 
+        // Save credentials asynchronously if rememberMe is true
+        if (manualCreds?.rememberMe && config) {
+          const authId = uuidv4();
+          const newAuth: Authentication = {
+            id: authId,
+            name: `${server.name} Auth`,
+            type: manualCreds.privateKey ? 'key' : 'password',
+            keyContent: manualCreds.privateKey,
+            passphrase: manualCreds.passphrase,
+            password: manualCreds.password,
+            synced: false,
+            updatedAt: new Date().toISOString(),
+          };
+
+          const updatedConfig = {
+            ...config,
+            authentications: [...config.authentications, newAuth],
+            servers: config.servers.map((s) =>
+              s.id === server.id ? { ...s, authId, username: manualCreds.username } : s
+            ),
+          };
+
+          // Save credentials in background without blocking
+          saveConfig(updatedConfig).catch(() => {
+            // Silently fail - credential saving is non-critical
+          });
+        }
+
         outputUnlistener = await listen<string>(`terminal-output:${sid}`, (event) => {
           writeRef.current(event.payload);
         });
@@ -262,7 +291,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         onSessionChange?.(null);
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, t, showManualAuth, isCancelled, connectTrigger, manualCredentials, onSessionChange]);
+  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, server.id, t, showManualAuth, isCancelled, connectTrigger, manualCredentials, config, saveConfig, onSessionChange]);
 
   // Terminal focus effect
   useEffect(() => {

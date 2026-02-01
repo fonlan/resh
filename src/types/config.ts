@@ -136,4 +136,5 @@ export interface ManualAuthCredentials {
   password?: string;
   privateKey?: string;
   passphrase?: string;
+  rememberMe?: boolean;
 }

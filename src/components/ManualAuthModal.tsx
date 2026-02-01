@@ -3,6 +3,7 @@ import type { ManualAuthCredentials } from '../types/config';
 import { useTranslation } from '../i18n';
 import { Upload } from 'lucide-react';
 import './FormModal.css';
+import './settings/SettingsModal.css';
 
 interface ManualAuthModalProps {
   serverName: string;
@@ -116,6 +117,22 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               placeholder={t.manualAuth.privateKeyPlaceholder}
               style={{ minHeight: '100px', resize: 'vertical' }}
             />
+          </div>
+
+          <div className="form-group" style={{ marginTop: '16px' }}>
+            <label className="flex items-center gap-2 cursor-pointer" style={{ gap: '8px' }}>
+              <input
+                type="checkbox"
+                checked={credentials.rememberMe || false}
+                onChange={(e) =>
+                  onCredentialsChange({ ...credentials, rememberMe: e.target.checked })
+                }
+                className="form-checkbox"
+              />
+              <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                {t.manualAuth.rememberCredentials}
+              </span>
+            </label>
           </div>
         </div>
 

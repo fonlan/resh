@@ -178,6 +178,7 @@ export const locales = {
       orDivider: '— OR —',
       privateKeyLabel: 'Private Key (PEM)',
       privateKeyPlaceholder: 'Paste your private key here...',
+      rememberCredentials: 'Remember authentication information',
     },
     welcome: {
       title: 'Welcome to Resh',
@@ -448,6 +449,7 @@ export const locales = {
       orDivider: '— 或 —',
       privateKeyLabel: '私钥 (PEM)',
       privateKeyPlaceholder: '在此粘贴您的私钥...',
+      rememberCredentials: '记住认证信息',
     },
     welcome: {
       title: '欢迎使用 Resh',
