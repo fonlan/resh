@@ -1,5 +1,8 @@
-import React from 'react';
-import { ManualAuthCredentials } from '../types/config'; // I might need to define this or just inline it
+import React, { useRef } from 'react';
+import type { ManualAuthCredentials } from '../types/config';
+import { useTranslation } from '../i18n';
+import { Upload } from 'lucide-react';
+import './FormModal.css';
 
 interface ManualAuthModalProps {
   serverName: string;
@@ -16,18 +19,39 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
   onConnect,
   onCancel,
 }) => {
-  return (
-    <div className="absolute inset-0 bg-black/80 flex items-center justify-center z-10">
-      <div className="bg-gray-900 p-6 rounded-lg border border-gray-700 w-full max-w-md shadow-2xl">
-        <h3 className="text-lg font-semibold text-white mb-4">Manual Authentication</h3>
-        <p className="text-sm text-gray-400 mb-4">
-          Enter credentials for {serverName}:
-        </p>
+  const { t } = useTranslation();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="manual-username" className="block text-xs text-gray-500 mb-1">
-              Username
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        onCredentialsChange({ ...credentials, privateKey: content });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="form-modal-overlay">
+      <div className="form-modal-container" style={{ maxWidth: '480px' }}>
+        <div className="form-modal-header">
+          <h2>{t.manualAuth.title}</h2>
+        </div>
+
+        <div className="form-modal-content with-padding">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
+            {t.manualAuth.enterCredentials.replace('{server}', serverName)}
+          </p>
+
+          <div className="form-group">
+            <label htmlFor="manual-username" className="form-label">
+              {t.manualAuth.usernameLabel}
             </label>
             <input
               id="manual-username"
@@ -36,13 +60,13 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               onChange={(e) =>
                 onCredentialsChange({ ...credentials, username: e.target.value })
               }
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+              className="form-input"
             />
           </div>
 
-          <div>
-            <label htmlFor="manual-password" className="block text-xs text-gray-500 mb-1">
-              Password
+          <div className="form-group">
+            <label htmlFor="manual-password" className="form-label">
+              {t.manualAuth.passwordLabel}
             </label>
             <input
               id="manual-password"
@@ -51,42 +75,67 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               onChange={(e) =>
                 onCredentialsChange({ ...credentials, password: e.target.value })
               }
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
-              placeholder="Leave empty if using key"
+              className="form-input"
+              placeholder={t.manualAuth.passwordPlaceholder}
             />
           </div>
 
-          <div className="text-center text-xs text-gray-600 my-2">— OR —</div>
+          <div className="text-center text-xs" style={{ color: 'var(--text-muted)', margin: '16px 0' }}>
+            {t.manualAuth.orDivider}
+          </div>
 
-          <div>
-            <label htmlFor="manual-key" className="block text-xs text-gray-500 mb-1">
-              Private Key (PEM)
-            </label>
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+              <label htmlFor="manual-key" className="form-label" style={{ marginBottom: 0 }}>
+                {t.manualAuth.privateKeyLabel}
+              </label>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="btn btn-secondary py-1 px-2 text-xs flex items-center gap-1.5"
+                title={t.authForm.uploadKey}
+              >
+                <Upload size={14} />
+                <span>{t.authForm.uploadKey}</span>
+              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden"
+                accept=".pem,.key,.txt"
+              />
+            </div>
             <textarea
               id="manual-key"
               value={credentials.privateKey}
               onChange={(e) =>
                 onCredentialsChange({ ...credentials, privateKey: e.target.value })
               }
-              className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white font-mono text-[10px]"
-              rows={4}
+              className="form-input"
+              placeholder={t.manualAuth.privateKeyPlaceholder}
+              style={{ minHeight: '100px', resize: 'vertical' }}
             />
           </div>
+        </div>
 
-          <div className="flex gap-3 mt-6">
+        <div className="form-modal-footer">
+          <div style={{ display: 'flex', gap: '16px', width: '100%', justifyContent: 'center' }}>
             <button
               type="button"
               onClick={onCancel}
-              className="flex-1 bg-gray-800 hover:bg-gray-700 text-white py-2 rounded transition-colors"
+              className="form-modal-cancel-btn"
+              style={{ flex: 1, maxWidth: '140px', display: 'flex', justifyContent: 'center' }}
             >
-              Cancel
+              {t.common.cancel}
             </button>
             <button
               type="button"
               onClick={onConnect}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 rounded transition-colors"
+              className="form-modal-submit-btn"
+              style={{ flex: 1, maxWidth: '140px', display: 'flex', justifyContent: 'center' }}
             >
-              Connect
+              {t.common.connect}
             </button>
           </div>
         </div>

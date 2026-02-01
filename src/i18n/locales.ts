@@ -169,6 +169,16 @@ export const locales = {
       groupPlaceholder: 'Group Name',
       defaultGroup: 'Default',
     },
+    manualAuth: {
+      title: 'Manual Authentication',
+      enterCredentials: 'Enter credentials for {server}:',
+      usernameLabel: 'Username',
+      passwordLabel: 'Password',
+      passwordPlaceholder: 'Leave empty if using key',
+      orDivider: '— OR —',
+      privateKeyLabel: 'Private Key (PEM)',
+      privateKeyPlaceholder: 'Paste your private key here...',
+    },
     welcome: {
       title: 'Welcome to Resh',
       subtitle: 'A professional, high-performance SSH client.',
@@ -428,6 +438,16 @@ export const locales = {
       groupLabel: '分组',
       groupPlaceholder: '分组名称',
       defaultGroup: '默认',
+    },
+    manualAuth: {
+      title: '手动身份验证',
+      enterCredentials: '请输入 {server} 的凭据：',
+      usernameLabel: '用户名',
+      passwordLabel: '密码',
+      passwordPlaceholder: '如使用密钥则留空',
+      orDivider: '— 或 —',
+      privateKeyLabel: '私钥 (PEM)',
+      privateKeyPlaceholder: '在此粘贴您的私钥...',
     },
     welcome: {
       title: '欢迎使用 Resh',
