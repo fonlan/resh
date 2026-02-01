@@ -103,8 +103,45 @@ export const useAIStore = create<AIState>((set, get) => ({
         }
       }
 
+      // Check if there's a pending user message in frontend that hasn't been saved to backend yet
+      // This happens when user sends a message but backend hasn't persisted it yet
+      const currentState = get();
+      const isCurrentSession = currentState.activeSessionId === sessionId;
+      const isGenerating = currentState.isGenerating[sessionId] ?? false;
+      const pendingTools = currentState.pendingToolCalls[sessionId];
+      const frontendMessages = currentState.messages[sessionId];
+      
+      let finalMessages = msgs;
+      if (isCurrentSession && isGenerating && !pendingTools && frontendMessages && frontendMessages.length > 0) {
+        const lastFrontendMsg = frontendMessages[frontendMessages.length - 1];
+        
+        // If frontend has more messages than backend, and the last frontend message is a user message,
+        // preserve all frontend messages (user message not persisted to backend yet)
+        // This handles both new sessions (empty backend) and ongoing conversations
+        if (frontendMessages.length > msgs.length && lastFrontendMsg.role === 'user') {
+          // Find the last backend assistant message and append frontend user messages after it
+          let lastBackendAssistantIdx = -1;
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i].role === 'assistant') {
+              lastBackendAssistantIdx = i;
+              break;
+            }
+          }
+          
+          if (lastBackendAssistantIdx >= 0) {
+            // Append all frontend messages after the last assistant message
+            const backendMsgsUpToAssistant = msgs.slice(0, lastBackendAssistantIdx + 1);
+            const frontendUserMsgs = frontendMessages.filter((m: ChatMessage) => m.role === 'user');
+            finalMessages = [...backendMsgsUpToAssistant, ...frontendUserMsgs];
+          } else {
+            // No assistant message in backend yet (new session), use all frontend messages
+            finalMessages = frontendMessages;
+          }
+        }
+      }
+
       set(state => ({
-        messages: { ...state.messages, [sessionId]: msgs },
+        messages: { ...state.messages, [sessionId]: finalMessages },
         pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: pending }
       }));
     }
