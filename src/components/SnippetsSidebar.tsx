@@ -28,7 +28,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   
   // Grouping logic
   const groupedSnippets = useMemo(() => {
-    return snippets.reduce((acc, snippet) => {
+    const groups = snippets.reduce((acc, snippet) => {
       const groupName = snippet.group || t.snippetForm.defaultGroup;
       if (!acc[groupName]) {
         acc[groupName] = [];
@@ -36,9 +36,22 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
       acc[groupName].push(snippet);
       return acc;
     }, {} as Record<string, Snippet[]>);
+
+    Object.keys(groups).forEach(key => {
+      groups[key].sort((a, b) => a.name.localeCompare(b.name));
+    });
+
+    return groups;
   }, [snippets, t.snippetForm.defaultGroup]);
 
-  const groupNames = useMemo(() => Object.keys(groupedSnippets).sort(), [groupedSnippets]);
+  const groupNames = useMemo(() => {
+    const defaultGroup = t.snippetForm.defaultGroup;
+    return Object.keys(groupedSnippets).sort((a, b) => {
+      if (a === defaultGroup) return -1;
+      if (b === defaultGroup) return 1;
+      return a.localeCompare(b);
+    });
+  }, [groupedSnippets, t.snippetForm.defaultGroup]);
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
