@@ -4,7 +4,7 @@ use crate::config::{Config, ConfigManager, SyncManager};
 use crate::master_password::MasterPasswordManager;
 use crate::db::DatabaseManager;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State, Window};
 use tokio::sync::Mutex;
 
 use dashmap::DashMap;
@@ -28,6 +28,7 @@ pub async fn get_config(state: State<'_, Arc<AppState>>) -> Result<Config, Strin
 pub async fn save_config(
     config: Config,
     state: State<'_, Arc<AppState>>,
+    window: Window,
 ) -> Result<(), String> {
     let mut current_config = state.config.lock().await;
     
@@ -43,8 +44,8 @@ pub async fn save_config(
     // Update log level
     crate::logger::set_log_level(config.general.debug_enabled);
 
-    // If sync is enabled, we could trigger sync here or wait for user to click sync
-    // Given the "automatic trigger" recommendation accepted by user:
+    // If sync is enabled, trigger async sync in background without blocking
+    // Local save is already complete, sync failures should not block the operation
     if config.general.webdav.enabled && !config.general.webdav.url.is_empty() {
         let proxy = config.general.webdav.proxy_id.as_ref()
             .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
@@ -55,21 +56,28 @@ pub async fn save_config(
             config.general.webdav.password.clone(),
             proxy,
         );
-        // Run sync in background or await? 
-        // Better to await to ensure sync completes before returning success if it's "save and sync"
-        let mut local_copy = config.clone();
-        if let Err(e) = sync_manager.sync(&mut local_copy, removed_ids).await {
-            tracing::warn!("Automatic sync failed: {}", e);
-            // We don't necessarily want to fail the save if sync fails, 
-            // but maybe return a specific error or warning?
-            // For now, let's just log and continue.
-        } else {
-            *current_config = local_copy;
-            state.config_manager.save_config(&current_config, &local_path)?;
-            tracing::info!("Config saved and synced successfully");
-        }
-    } else {
-        tracing::info!("Config saved locally");
+
+        // Clone config for background sync (we need to work on a copy)
+        let sync_config = config.clone();
+        let sync_removed_ids = removed_ids;
+        let config_manager = state.config_manager.clone();
+        let sync_path = local_path.clone();
+
+        // Spawn sync task in background - does not block local save
+        let window = window.clone();
+        tokio::spawn(async move {
+            let mut local_copy = sync_config;
+            if let Err(e) = sync_manager.sync(&mut local_copy, sync_removed_ids).await {
+                tracing::warn!("Background sync failed: {}", e);
+                // Emit event for frontend to show toast
+                let _ = window.emit("sync-failed", e);
+            } else {
+                // Save merged config locally
+                if let Err(e) = config_manager.save_config(&local_copy, &sync_path) {
+                    tracing::error!("Failed to save merged config after sync: {}", e);
+                }
+            }
+        });
     }
 
     Ok(())

@@ -1,6 +1,7 @@
-import React, { useState, useCallback, Suspense } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { Settings, X, Code, Circle, MessageSquare } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Config } from '../types/config';
 // SettingsModal is now lazy loaded
 const SettingsModal = React.lazy(() => 
@@ -13,6 +14,7 @@ import { NewTabButton } from './NewTabButton';
 import { SnippetsSidebar } from './SnippetsSidebar';
 import { AISidebar } from './AISidebar';
 import { TabContextMenu } from './TabContextMenu';
+import { ToastContainer, ToastItem } from './Toast';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
@@ -34,6 +36,28 @@ export const MainWindow: React.FC = () => {
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  // Listen for sync failed events
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncFailedListener = listen<string>('sync-failed', (event) => {
+      if (isMounted) {
+        const id = generateId();
+        setToasts(prev => [...prev, { id, type: 'error', message: `同步失败: ${event.payload}` }]);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      syncFailedListener.then(unlisten => unlisten());
+    };
+  }, []);
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   // Sync locked sidebar state from config on initial load
   React.useEffect(() => {
@@ -432,6 +456,9 @@ export const MainWindow: React.FC = () => {
           onCloseOthers={handleCloseOthers}
         />
       )}
+
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
     </div>
   );
 };
