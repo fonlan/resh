@@ -133,7 +133,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   {(auth || proxy || jumphost) && (
                     <div className="item-tags">
                       {auth && <span className="tag">{t.auth}: {auth.name}</span>}
-                      {proxy && <span className="tag">{t.proxyTab.editTooltip.split(' ')[1]}: {proxy.name}</span>}
+                      {proxy && <span className="tag">{t.common.proxy}: {proxy.name}</span>}
                       {jumphost && <span className="tag">{t.serverTab.jumphost}: {jumphost.name}</span>}
                     </div>
                   )}
