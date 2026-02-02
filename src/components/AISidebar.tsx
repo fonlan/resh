@@ -441,7 +441,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   const lastMessageContentLength = useMemo(() => {
     const lastMsg = currentMessages[currentMessages.length - 1];
-    return lastMsg?.role === 'assistant' ? (lastMsg.content?.length || 0) + (lastMsg.reasoning_content?.length || 0) : 0;
+    if (lastMsg?.role === 'assistant') {
+      const contentLength = (lastMsg.content?.length || 0) + (lastMsg.reasoning_content?.length || 0);
+      const toolCallsCount = lastMsg.tool_calls?.length || 0;
+      // Include tool calls count to trigger scroll when tool call cards appear
+      return contentLength + toolCallsCount;
+    }
+    return 0;
   }, [currentMessages]);
 
   useEffect(() => {

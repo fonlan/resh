@@ -4,7 +4,7 @@ use genai::adapter::AdapterKind;
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ServiceTarget, ModelIden};
 use crate::config::types::{AiChannel, AiModel, Proxy};
-use reqwest::header::{HeaderValue, AUTHORIZATION, USER_AGENT, ACCEPT};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT, ACCEPT};
 use reqwest::Client as HttpClient;
 use std::time::Duration;
 
@@ -24,11 +24,19 @@ impl AiManager {
         }
     }
 
-    pub fn build_http_client(&self, proxy: Option<Proxy>) -> Result<HttpClient, String> {
+    pub fn build_http_client(&self, proxy: Option<Proxy>, provider: Option<&str>) -> Result<HttpClient, String> {
         let mut builder = HttpClient::builder()
             .user_agent("Resh/0.1.0")
             .timeout(Duration::from_secs(120))
             .connect_timeout(Duration::from_secs(10));
+
+        // Add default headers for Copilot provider
+        if provider == Some("copilot") {
+            let mut headers = HeaderMap::new();
+            headers.insert("Editor-Version", HeaderValue::from_static("vscode/1.85.1"));
+            headers.insert("Copilot-Integration-Id", HeaderValue::from_static("vscode-chat"));
+            builder = builder.default_headers(headers);
+        }
 
         if let Some(p) = proxy {
             let scheme = if p.proxy_type == "socks5" { "socks5h" } else { "http" };
@@ -38,7 +46,7 @@ impl AiManager {
                 "".to_string()
             };
             let proxy_url = format!("{}://{}{}:{}", scheme, auth_part, p.host, p.port);
-            
+
             match reqwest::Proxy::all(&proxy_url) {
                 Ok(proxy_obj) => {
                     builder = builder.proxy(proxy_obj);
@@ -74,7 +82,6 @@ impl AiManager {
         let res = http_client.get("https://api.github.com/copilot_internal/v2/token")
             .header(AUTHORIZATION, auth_val)
             .header(USER_AGENT, "GithubCopilot/1.155.0")
-            .header("Editor-Version", "vscode/1.85.1")
             .header(ACCEPT, "application/json")
             .send()
             .await
@@ -107,7 +114,7 @@ impl AiManager {
         tools: Option<Vec<Tool>>,
         proxy: Option<Proxy>,
     ) -> Result<ChatStream, String> {
-        let http_client = self.build_http_client(proxy)?;
+        let http_client = self.build_http_client(proxy, Some(&channel.provider))?;
         let mut chat_req = ChatRequest::new(messages);
         if let Some(t) = tools {
             chat_req = chat_req.with_tools(t);
@@ -167,7 +174,7 @@ impl AiManager {
         channel: &AiChannel,
         proxy: Option<Proxy>,
     ) -> Result<Vec<String>, String> {
-        let http_client = self.build_http_client(proxy)?;
+        let http_client = self.build_http_client(proxy, Some(&channel.provider))?;
         
         if channel.provider == "copilot" {
             let oauth_token = channel.api_key.as_deref().unwrap_or_default();
@@ -176,7 +183,6 @@ impl AiManager {
             let res = http_client.get("https://api.githubcopilot.com/models")
                 .header(AUTHORIZATION, format!("Bearer {}", session_token))
                 .header("Copilot-Integration-Id", "vscode-chat")
-                .header("Editor-Version", "vscode/1.85.1")
                 .header(USER_AGENT, "GithubCopilot/1.155.0")
                 .send()
                 .await
