@@ -68,7 +68,7 @@ impl AiManager {
         if let Some(token) = self.copilot_tokens.get(oauth_token) {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .map_err(|e| format!("系统时间错误: {}", e))?
                 .as_secs();
             if token.expires_at > now + 60 {
                 return Ok(token.token.clone());

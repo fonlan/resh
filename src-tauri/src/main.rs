@@ -12,9 +12,65 @@ use std::sync::Arc;
 use tauri::Manager;
 use tauri::image::Image;
 use tokio::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static APP_DATA_DIR_SET: AtomicBool = AtomicBool::new(false);
+static mut APP_DATA_DIR: Option<std::path::PathBuf> = None;
+
+fn get_panic_log_path() -> std::path::PathBuf {
+    // 优先使用已设置的 app_data_dir
+    unsafe {
+        if let Some(ref dir) = APP_DATA_DIR {
+            return dir.join("logs").join("panic.log");
+        }
+    }
+    // 回退到临时目录
+    std::env::temp_dir().join("resh_panic.log")
+}
 
 #[tokio::main]
 async fn main() {
+    // 设置 panic hook 捕获所有 panic 并记录
+    std::panic::set_hook(Box::new(|info| {
+        let message = if let Some(s) = info.payload().downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = info.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic".to_string()
+        };
+        
+        let location = if let Some(loc) = info.location() {
+            format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
+        } else {
+            "unknown location".to_string()
+        };
+        
+        let error_msg = format!(
+            "[PANIC] {} at {}\n",
+            message, location
+        );
+        
+        // 打印到 stderr
+        eprintln!("{}", error_msg);
+        
+        // 尝试写入 panic 日志文件
+        let log_path = get_panic_log_path();
+        // 确保日志目录存在
+        if let Some(parent) = log_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            use std::io::Write;
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+            let _ = writeln!(file, "[{}] {}", timestamp, error_msg);
+        }
+    }));
+    
     tauri::Builder::default()
         .setup(|app| {
             // Set window icon
@@ -31,17 +87,23 @@ async fn main() {
             // Get the default app data dir (e.g., %AppData%/com.resh.ssh)
             let default_app_data_dir = app.path()
                 .app_data_dir()
-                .expect("failed to resolve app data dir");
+                .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
 
-            // We want %AppData%/Resh directly, so we go up one level and join "Resh"
             let app_data_dir = default_app_data_dir
                 .parent()
                 .map(|p| p.join("Resh"))
                 .unwrap_or_else(|| default_app_data_dir.join("Resh"));
 
+            // 设置全局 app_data_dir 供 panic hook 使用
+            unsafe {
+                APP_DATA_DIR = Some(app_data_dir.clone());
+                APP_DATA_DIR_SET.store(true, Ordering::SeqCst);
+            }
+
             let config_manager = ConfigManager::new(app_data_dir.clone());
             let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
-            let db_manager = DatabaseManager::new(app_data_dir.clone()).expect("Failed to initialize database");
+            let db_manager = DatabaseManager::new(app_data_dir.clone())
+                .map_err(|e| format!("数据库初始化失败: {}", e))?;
 
             // Load initial config
             let local_config = config_manager.load_local_config().unwrap_or_else(|_| resh::config::Config::empty());

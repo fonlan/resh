@@ -178,7 +178,20 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           return;
         }
 
-        const proxy = proxiesRef.current.find(p => p.id === server.proxyId);
+        // Get proxy from jumphost if configured, otherwise from target server
+        // When using jumphost, the proxy should follow the jumphost's configuration
+        let proxy = null;
+        if (server.jumphostId) {
+          const jhServer = serversRef.current.find(s => s.id === server.jumphostId);
+          if (jhServer) {
+            proxy = proxiesRef.current.find(p => p.id === jhServer.proxyId);
+          }
+        }
+        // Fallback to target server's proxy if no jumphost or jumphost has no proxy
+        if (!proxy) {
+          proxy = proxiesRef.current.find(p => p.id === server.proxyId);
+        }
+
         let jumphost = null;
         if (server.jumphostId) {
           const jhServer = serversRef.current.find(s => s.id === server.jumphostId);

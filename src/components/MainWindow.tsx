@@ -335,8 +335,8 @@ export const MainWindow: React.FC = () => {
             type="button"
             className={`settings-btn ${isAIOpen ? 'bg-gray-700 text-white' : ''}`}
             onClick={() => setIsAIOpen(!isAIOpen)}
-            aria-label="Toggle AI Chat"
-            title="AI Chat"
+            aria-label={t.mainWindow.aiAssistant}
+            title={t.mainWindow.aiAssistant}
           >
             <MessageSquare size={18} />
           </button>
@@ -344,8 +344,8 @@ export const MainWindow: React.FC = () => {
             type="button"
             className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
             onClick={() => setIsSnippetsOpen(!isSnippetsOpen)}
-            aria-label="Toggle Snippets"
-            title="Snippets"
+            aria-label={t.mainWindow.snippetsTooltip}
+            title={t.mainWindow.snippetsTooltip}
           >
             <Code size={18} />
           </button>

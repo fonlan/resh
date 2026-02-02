@@ -115,6 +115,20 @@ impl SSHClient {
 
         info!("[SSH] Connecting to {}:{} as {}", params.host, params.port, params.username);
 
+        // Debug: Log proxy configuration
+        if let Some(ref p) = params.proxy {
+            info!("[SSH] Proxy configured: type={}, host={}, port={}", p.proxy_type, p.host, p.port);
+        } else {
+            info!("[SSH] No proxy configured (proxy=None)");
+        }
+
+        // Debug: Log jumphost configuration
+        if let Some(ref j) = params.jumphost {
+            info!("[SSH] Jumphost configured: {}:{} as {}", j.host, j.port, j.username);
+        } else {
+            info!("[SSH] No jumphost configured (jumphost=None)");
+        }
+
         let mut jh_handle_to_store = None;
 
         let mut session = if let Some(p) = &params.proxy {
@@ -167,23 +181,129 @@ impl SSHClient {
         } else if let Some(j) = &params.jumphost {
             info!("[SSH] Using jumphost: {}:{} as {}", j.host, j.port, j.username);
             let _ = tx.send((session_id.clone(), "Connecting to jump host...\r\n".as_bytes().to_vec())).await;
-            
+
             let jh_handler = ClientHandler::new();
-            let mut jh_session = client::connect(config.clone(), (j.host.as_str(), j.port), jh_handler).await
-                .map_err(|e| format!("Failed to connect to jumphost: {}", e))?;
+
+            // Connect to jumphost - use proxy if configured, otherwise direct
+            let mut jh_session = if let Some(p) = &params.proxy {
+                info!("[SSH] Connecting to jumphost via {} proxy: {}:{} -> {}:{}", p.proxy_type, p.host, p.port, j.host, j.port);
+                info!("[SSH] Target server: {}:{}", params.host, params.port);
+                let _ = tx.send((session_id.clone(), format!("Connecting via {} proxy {}:{} to jumphost {}:{}...\r\n", p.proxy_type, p.host, p.port, j.host, j.port).as_bytes().to_vec())).await;
+
+                if p.proxy_type == "socks5" {
+                    info!("[SSH] Attempting SOCKS5 connection to jumphost via proxy...");
+                    use tokio_socks::tcp::Socks5Stream;
+                    let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
+                    info!("[SSH] SOCKS5 proxy auth: {}", if has_auth { "yes" } else { "no" });
+
+                    let stream = if has_auth {
+                        let u = p.username.as_ref().unwrap();
+                        let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                        info!("[SSH] SOCKS5: Connecting to proxy {}:{} with username {}", p.host, p.port, u);
+                        Socks5Stream::connect_with_password((p.host.as_str(), p.port), (&j.host[..], j.port), u, p_auth).await
+                            .map_err(|e| {
+                                error!("[SSH] SOCKS5 connect_with_password failed: {}", e);
+                                format!("SOCKS5 proxy error when connecting to jumphost: {}", e)
+                            })?
+                    } else {
+                        info!("[SSH] SOCKS5: Connecting to proxy {}:{} (no auth)", p.host, p.port);
+                        Socks5Stream::connect((p.host.as_str(), p.port), (&j.host[..], j.port)).await
+                            .map_err(|e| {
+                                error!("[SSH] SOCKS5 connect failed: {}", e);
+                                format!("SOCKS5 proxy error when connecting to jumphost: {}", e)
+                            })?
+                    };
+                    info!("[SSH] SOCKS5 stream established, now connecting SSH...");
+                    client::connect_stream(config.clone(), stream, jh_handler).await
+                        .map_err(|e| {
+                            error!("[SSH] SSH connection via SOCKS5 failed: {}", e);
+                            format!("Failed to connect to jumphost via SOCKS5: {}", e)
+                        })?
+                } else if p.proxy_type == "http" {
+                    info!("[SSH] Attempting HTTP proxy connection to jumphost...");
+                    use tokio::io::{AsyncWriteExt, AsyncReadExt};
+                    info!("[SSH] HTTP: Connecting to proxy {}:{}", p.host, p.port);
+                    let mut stream = tokio::net::TcpStream::connect((p.host.as_str(), p.port)).await
+                        .map_err(|e| {
+                            error!("[SSH] HTTP proxy TCP connect failed: {}", e);
+                            format!("Failed to connect to HTTP proxy: {}", e)
+                        })?;
+
+                    let mut auth_header = String::new();
+                    if let Some(u) = &p.username {
+                        if !u.is_empty() {
+                            let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                            let auth_str = format!("{}:{}", u, p_auth);
+                            let encoded = BASE64_STANDARD.encode(auth_str);
+                            auth_header = format!("\r\nProxy-Authorization: Basic {}", encoded);
+                            info!("[SSH] HTTP: Using proxy auth for user {}", u);
+                        }
+                    }
+
+                    let connect_req = format!(
+                        "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{} {}\r\n\r\n",
+                        j.host, j.port, j.host, j.port, auth_header
+                    );
+                    info!("[SSH] HTTP: Sending CONNECT request for {}:{}", j.host, j.port);
+                    stream.write_all(connect_req.as_bytes()).await.map_err(|e| {
+                        error!("[SSH] HTTP CONNECT write failed: {}", e);
+                        e.to_string()
+                    })?;
+
+                    let mut response = [0u8; 4096];
+                    let n = stream.read(&mut response).await.map_err(|e| {
+                        error!("[SSH] HTTP CONNECT response read failed: {}", e);
+                        e.to_string()
+                    })?;
+                    let response_text = String::from_utf8_lossy(&response[..n]);
+                    info!("[SSH] HTTP proxy response: {}", response_text);
+
+                    if !response_text.contains("200 Connection established") && !response_text.contains("200 OK") {
+                        error!("[SSH] HTTP proxy rejected connection: {}", response_text);
+                        return Err(format!("HTTP proxy returned error when connecting to jumphost: {}", response_text));
+                    }
+                    info!("[SSH] HTTP tunnel established, now connecting SSH...");
+                    client::connect_stream(config.clone(), stream, jh_handler).await
+                        .map_err(|e| {
+                            error!("[SSH] SSH connection via HTTP proxy failed: {}", e);
+                            format!("Failed to connect to jumphost via HTTP proxy: {}", e)
+                        })?
+                } else {
+                    return Err(format!("Unsupported proxy type for jumphost connection: {}", p.proxy_type));
+                }
+            } else {
+                // Direct connection to jumphost
+                info!("[SSH] Direct connection to jumphost {}:{} (no proxy)", j.host, j.port);
+                client::connect(config.clone(), (j.host.as_str(), j.port), jh_handler).await
+                    .map_err(|e| {
+                        error!("[SSH] Direct jumphost connection failed: {}", e);
+                        format!("Failed to connect to jumphost: {}", e)
+                    })?
+            };
             
+            info!("[SSH] Connected to jumphost successfully, now authenticating...");
             let _ = tx.send((session_id.clone(), "Authenticating jump host...\r\n".as_bytes().to_vec())).await;
+            info!("[SSH] Jumphost auth: username={}, password={}, private_key={}", j.username, if j.password.is_some() { "yes" } else { "no" }, if j.private_key.is_some() { "yes" } else { "no" });
             Self::authenticate_session(
                 &mut jh_session,
                 &j.username,
                 j.password.clone(),
                 j.private_key.clone(),
                 j.passphrase.clone(),
-            ).await.map_err(|e| format!("Jumphost authentication failed: {}", e))?;
-            
+            ).await.map_err(|e| {
+                error!("[SSH] Jumphost authentication failed: {}", e);
+                format!("Jumphost authentication failed: {}", e)
+            })?;
+            info!("[SSH] Jumphost authentication successful");
+
+            info!("[SSH] Opening tunnel to target {}:{}", params.host, params.port);
             let _ = tx.send((session_id.clone(), format!("Tunneling to {}:{}...\r\n", params.host, params.port).as_bytes().to_vec())).await;
             let channel = jh_session.channel_open_direct_tcpip(&params.host, params.port as u32, "127.0.0.1", 22222).await
-                .map_err(|e| format!("Failed to open direct-tcpip through jumphost: {}", e))?;
+                .map_err(|e| {
+                    error!("[SSH] Failed to open direct-tcpip tunnel: {}", e);
+                    format!("Failed to open direct-tcpip through jumphost: {}", e)
+                })?;
+            info!("[SSH] Tunnel opened successfully, connecting to target via tunnel...");
             
             jh_handle_to_store = Some(jh_session);
 
@@ -225,10 +345,13 @@ impl SSHClient {
         let mut authenticated = false;
 
         if let Some(key_content) = private_key {
-            info!("[SSH] Attempting publickey auth for user: '{}'", username);
+            info!("[SSH] Attempting publickey auth for user: '{}' (has passphrase: {})", username, passphrase.is_some());
             let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())
-                .map_err(|e| format!("Failed to decode private key: {}", e))?;
-            
+                .map_err(|e| {
+                    error!("[SSH] Failed to decode private key: {}", e);
+                    format!("Failed to decode private key: {}", e)
+                })?;
+
             let key_pair = Arc::new(key);
             match session.authenticate_publickey(username, key_pair).await {
                 Ok(true) => {
@@ -242,20 +365,24 @@ impl SSHClient {
 
         if !authenticated {
             if let Some(pwd) = password {
-                info!("[SSH] Attempting password auth...");
-                if session.authenticate_password(username, &pwd).await.map_err(|e| e.to_string())? {
-                    authenticated = true;
-                    info!("[SSH] Password authentication successful.");
-                } else {
-                    warn!("[SSH] Password authentication failed.");
+                info!("[SSH] Attempting password auth for user: '{}'...", username);
+                match session.authenticate_password(username, &pwd).await {
+                    Ok(true) => {
+                        authenticated = true;
+                        info!("[SSH] Password authentication successful.");
+                    },
+                    Ok(false) => warn!("[SSH] Password authentication failed."),
+                    Err(e) => error!("[SSH] Password authentication error: {}", e),
                 }
             }
         }
 
         if !authenticated {
+            error!("[SSH] All authentication methods failed for user: {}", username);
             return Err("Authentication failed".to_string());
         }
 
+        info!("[SSH] Authentication complete for user: {}", username);
         Ok(())
     }
 

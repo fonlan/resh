@@ -684,7 +684,7 @@ pub fn run_ai_turn(
             let conn = state.db_manager.get_connection();
             let conn = conn.lock().unwrap();
             let tool_calls_json = if let Some(calls) = &final_tool_calls {
-                Some(serde_json::to_string(calls).unwrap())
+                Some(serde_json::to_string(calls).map_err(|e| format!("序列化失败: {}", e))?)
             } else {
                 None
             };
