@@ -411,7 +411,7 @@ impl SSHClient {
         let sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get(session_id) {
             if session_data.command_recorder.is_none() {
-
+                tracing::debug!("[check_command_completed] {} - no recorder, returning true", session_id);
                 return Ok(true);
             }
 
@@ -423,11 +423,12 @@ impl SSHClient {
                 ""
             };
 
-
+            tracing::debug!("[check_command_completed] {} - buffer_len={}, start={}, content_len={}, content={:?}",
+                session_id, current_buffer.len(), recording_start, new_content.len(), new_content.chars().take(50).collect::<String>());
 
             // Priority 1: Completion marker detection
             if new_content.contains("DONE_MARKER") {
-
+                tracing::debug!("[check_command_completed] {} - DONE_MARKER detected, returning true", session_id);
                 return Ok(true);
             }
 
@@ -438,18 +439,15 @@ impl SSHClient {
                 let trimmed = cleaned.trim_end();
 
                 if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('>')
-                   || trimmed.ends_with('%') || trimmed.is_empty() {
-
-                    return Ok(true);
+                   || trimmed.ends_with('%') {
+                    if !trimmed.is_empty() {
+                        tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true", session_id, trimmed);
+                        return Ok(true);
+                    }
                 }
             }
 
-            // Check if buffer grew (command produced output)
-            if new_content.contains("inet ") || new_content.contains("link/ether") {
-
-                return Ok(true);
-            }
-
+            tracing::debug!("[check_command_completed] {} - returning false", session_id);
             Ok(false)
         } else {
             Err("Session not found".to_string())

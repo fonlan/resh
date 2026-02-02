@@ -8,7 +8,7 @@ use tauri::{Emitter, State, Window};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
-use genai::chat::{ChatMessage as GenaiMessage, Tool, ToolResponse, ChatStreamEvent};
+use genai::chat::{ChatMessage as GenaiMessage, Tool, ChatStreamEvent};
 use reqwest::Client;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -306,6 +306,7 @@ async fn execute_tools_and_save(
                                 .unwrap_or(30);
 
                             SSHClient::start_command_recording(ssh_id).await?;
+                            tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
 
                             let cmd_nl = format!("{}\n", cmd);
                             if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await
@@ -317,6 +318,7 @@ async fn execute_tools_and_save(
                             let mut interval =
                                 tokio::time::interval(tokio::time::Duration::from_millis(100));
                             let mut elapsed = 0u64;
+                            let timeout_ms = timeout * 1000;
 
                             loop {
                                 if cancellation_token.is_cancelled() {
@@ -326,13 +328,15 @@ async fn execute_tools_and_save(
                                 interval.tick().await;
                                 elapsed += 100;
 
-                                if elapsed >= timeout * 1000 {
+                                if elapsed >= timeout_ms {
+                                    tracing::warn!("[execute_tools] Timeout reached at {}ms for command '{}'", elapsed, cmd);
                                     break;
                                 }
 
                                 let is_completed =
                                     SSHClient::check_command_completed(ssh_id).await?;
                                 if is_completed {
+                                    tracing::debug!("[execute_tools] Command '{}' completed at {}ms", cmd, elapsed);
                                     break;
                                 }
                             }
@@ -451,6 +455,7 @@ pub fn run_ai_turn(
         let mut full_content = String::new();
         let mut full_reasoning = String::new();
         let mut final_tool_calls: Option<Vec<ToolCall>> = None;
+        let mut has_pending_reasoning = false;
 
         while let Some(event_result) = stream.next().await {
             if cancellation_token.is_cancelled() {
@@ -460,61 +465,89 @@ pub fn run_ai_turn(
                 Ok(event) => {
                     match event {
                         ChatStreamEvent::Chunk(chunk) => {
+                            // 如果之前有思考内容，先发送结束标记
+                            if has_pending_reasoning {
+                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
+                                has_pending_reasoning = false;
+                            }
                             full_content.push_str(&chunk.content);
                             window.emit(&format!("ai-response-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
                         }
                         ChatStreamEvent::ReasoningChunk(chunk) => {
+                            has_pending_reasoning = true;
                             full_reasoning.push_str(&chunk.content);
                             window.emit(&format!("ai-reasoning-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
-                        let tc = chunk.tool_call;
-                        let calls = final_tool_calls.get_or_insert_with(Vec::new);
-                        if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
-                            let part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                            existing.function.arguments.push_str(&part);
-                        } else {
-                            let args_part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                            calls.push(ToolCall {
-                                id: tc.call_id.clone(),
-                                tool_type: "function".to_string(),
-                                function: FunctionCall {
-                                    name: tc.fn_name.clone(),
-                                    arguments: args_part,
-                                }
-                            });
-                        }
-
-                        }
-                        ChatStreamEvent::End(end) => {
-                        if let Some(content) = end.captured_content {
-                            for tc in content.tool_calls() {
-                                let calls = final_tool_calls.get_or_insert_with(Vec::new);
-                                if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
-                                    existing.function.arguments = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                                } else {
-                                    calls.push(ToolCall {
-                                        id: tc.call_id.clone(),
-                                        tool_type: "function".to_string(),
-                                        function: FunctionCall {
-                                            name: tc.fn_name.clone(),
-                                            arguments: tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string()),
-                                        }
-                                    });
-                                }
+                            // 如果之前有思考内容，先发送结束标记
+                            if has_pending_reasoning {
+                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
+                                has_pending_reasoning = false;
+                            }
+                            let tc = chunk.tool_call;
+                            let calls = final_tool_calls.get_or_insert_with(Vec::new);
+                            if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
+                                let part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
+                                existing.function.arguments.push_str(&part);
+                            } else {
+                                let args_part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
+                                calls.push(ToolCall {
+                                    id: tc.call_id.clone(),
+                                    tool_type: "function".to_string(),
+                                    function: FunctionCall {
+                                        name: tc.fn_name.clone(),
+                                        arguments: args_part,
+                                    }
+                                });
+                            }
+                            // 立即发送工具调用事件到前端
+                            if let Some(ref calls) = final_tool_calls {
+                                window.emit(&format!("ai-tool-call-{}", session_id), calls.clone()).map_err(|e| e.to_string())?;
                             }
                         }
-
+                        ChatStreamEvent::End(end) => {
+                            // 发送思考结束标记
+                            if has_pending_reasoning {
+                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
+                                has_pending_reasoning = false;
+                            }
+                            if let Some(content) = end.captured_content {
+                                for tc in content.tool_calls() {
+                                    let calls = final_tool_calls.get_or_insert_with(Vec::new);
+                                    if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
+                                        existing.function.arguments = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
+                                    } else {
+                                        calls.push(ToolCall {
+                                            id: tc.call_id.clone(),
+                                            tool_type: "function".to_string(),
+                                            function: FunctionCall {
+                                                name: tc.fn_name.clone(),
+                                                arguments: tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string()),
+                                            }
+                                        });
+                                    }
+                                }
+                            }
                         }
                         _ => {}
                     }
                 }
                 Err(e) => {
+                    // 发送思考结束标记（如果有的话）
+                    if has_pending_reasoning {
+                        window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
+                        let _ = has_pending_reasoning;
+                    }
                     let err_msg = e.to_string();
                     window.emit(&format!("ai-error-{}", session_id), err_msg.clone()).map_err(|e| e.to_string())?;
                     return Err(err_msg);
                 }
             }
+        }
+
+        // 流结束后也发送思考结束标记（以防万一）
+        if has_pending_reasoning {
+            window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
         }
 
         let ai_msg_id = Uuid::new_v4().to_string();
@@ -537,15 +570,32 @@ pub fn run_ai_turn(
 
         if let Some(calls) = &final_tool_calls {
             if is_agent_mode && !calls.is_empty() {
-                tracing::info!("[AI] Auto-executing {} tools in Agent mode", calls.len());
-                execute_tools_and_save(
-                    &state,
-                    &session_id,
-                    ssh_session_id.as_deref(),
-                    calls.clone(),
-                    cancellation_token.clone(),
-                ).await?;
-                
+                let auto_exec_calls: Vec<ToolCall> = calls.iter()
+                    .filter(|c| c.function.name == "get_terminal_output")
+                    .cloned()
+                    .collect();
+
+                let confirm_calls: Vec<ToolCall> = calls.iter()
+                    .filter(|c| c.function.name != "get_terminal_output")
+                    .cloned()
+                    .collect();
+
+                if !auto_exec_calls.is_empty() {
+                    tracing::info!("[AI] Auto-executing {} get_terminal_output tools", auto_exec_calls.len());
+                    execute_tools_and_save(
+                        &state,
+                        &session_id,
+                        ssh_session_id.as_deref(),
+                        auto_exec_calls,
+                        cancellation_token.clone(),
+                    ).await?;
+                }
+
+                if !confirm_calls.is_empty() {
+                    tracing::info!("[AI] {} tools need confirmation, emitting for frontend countdown", confirm_calls.len());
+                    return Ok(Some(confirm_calls));
+                }
+
                 return run_ai_turn(
                     window,
                     state,
@@ -979,26 +1029,57 @@ pub async fn run_in_terminal(
     timeout_seconds: Option<u64>,
 ) -> Result<String, String> {
     let timeout = timeout_seconds.unwrap_or(30);
+    let timeout_ms = timeout * 1000;
+
     SSHClient::start_command_recording(&session_id).await?;
+
     let command_with_newline = format!("{}\n", command);
-    let _ = SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await;
-    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-    let marker = format!("echo DONE_MARKER\n");
-    let _ = SSHClient::send_input(&session_id, marker.as_bytes()).await;
+    if let Err(e) = SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await {
+        let _ = SSHClient::stop_command_recording(&session_id).await;
+        return Err(format!("Failed to send command: {}", e));
+    }
+
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
+
+    tracing::debug!("[run_in_terminal] Starting countdown, timeout={}ms", timeout_ms);
+
     loop {
         interval.tick().await;
         elapsed += 100;
-        if elapsed >= timeout * 1000 { break; }
-        let is_completed = SSHClient::check_command_completed(&session_id).await?;
-        if is_completed { break; }
+
+        tracing::debug!("[run_in_terminal] Elapsed={}ms, checking...", elapsed);
+
+        if elapsed >= timeout_ms {
+            tracing::warn!("[run_in_terminal] Timeout reached ({}ms), sending interrupt", elapsed);
+            let _ = SSHClient::send_interrupt(&session_id).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            break;
+        }
+
+        match SSHClient::check_command_completed(&session_id).await {
+            Ok(true) => {
+                tracing::debug!("[run_in_terminal] Command completed at {}ms", elapsed);
+                break;
+            }
+            Ok(false) => {
+                tracing::debug!("[run_in_terminal] Command not completed yet, continuing...");
+                continue;
+            }
+            Err(e) => {
+                tracing::warn!("[run_in_terminal] check_command_completed error: {}, continuing...", e);
+                continue;
+            }
+        }
     }
+
     let output = SSHClient::stop_command_recording(&session_id).await?;
     let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
-    if clean_output.is_empty() {
+
+    if clean_output.trim().is_empty() || clean_output.contains("Command timed out") {
         return Err("Command timed out or produced no output".to_string());
     }
+
     Ok(clean_output)
 }
 
