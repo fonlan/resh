@@ -24,7 +24,7 @@ pbkdf2 = "0.12"
 rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
-reqwest = { version = "0.13.1", features = ["json", "socks", "stream", "rustls"] }
+reqwest = { version = "0.13", features = ["json", "socks", "stream", "rustls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
@@ -45,6 +45,8 @@ futures = "0.3.31"
 tokio-util = "0.7.10"
 dashmap = "5.4.0"
 regex = "1.9.6"
+genai = "0.5.3"
+copilot-client = "0.1"
 
 [features]
 default = ["custom-protocol"]

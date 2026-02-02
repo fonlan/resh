@@ -57,6 +57,7 @@ async fn main() {
                 db_manager,
                 config: Mutex::new(local_config.clone()),
                 ai_cancellation_tokens: dashmap::DashMap::new(),
+                ai_manager: resh::ai::manager::AiManager::new(),
             });
 
             // Apply window state
