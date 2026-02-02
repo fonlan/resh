@@ -1,4 +1,5 @@
 use crate::ai::prompts::SYSTEM_PROMPT;
+use crate::ai::validator::{validate_and_fix_messages, MessagePayload, ToolCallPayload, ToolCallFunction};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
@@ -50,6 +51,21 @@ pub struct FunctionDefinition {
     pub name: String,
     pub description: String,
     pub parameters: serde_json::Value,
+}
+
+fn extract_timeout(arguments: &str) -> Option<u64> {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()?
+        .get("timeoutSeconds")
+        .and_then(|v| v.as_u64())
+}
+
+fn extract_command(arguments: &str) -> Option<String> {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()?
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
@@ -171,26 +187,24 @@ async fn load_history(
 ) -> Result<Vec<ChatMessage>, String> {
     let max_history = {
         let config = state.config.lock().await;
-        config.general.ai_max_history
+        config.general.ai_max_history as usize
     };
 
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
 
+    // 加载所有非system消息，按时间排序
     let mut stmt = conn
         .prepare(
-            "SELECT role, content, reasoning_content, tool_calls, tool_call_id FROM (
-            SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
+            "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
             FROM ai_messages 
             WHERE session_id = ?1 
-            ORDER BY created_at DESC 
-            LIMIT ?2
-        ) ORDER BY created_at ASC",
+            ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
 
     let rows = stmt
-        .query_map(params![session_id, max_history], |row| {
+        .query_map(params![session_id], |row| {
             let role: String = row.get(0)?;
             let content_raw: String = row.get(1)?;
             let reasoning_raw: Option<String> = row.get(2)?;
@@ -219,17 +233,39 @@ async fn load_history(
         })
         .map_err(|e| e.to_string())?;
 
-    let mut msgs = Vec::new();
+    // 收集所有消息
+    let mut all_messages: Vec<ChatMessage> = Vec::new();
+    for row in rows {
+        let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+        all_messages.push(msg);
+    }
 
+    // 分离system消息和对话消息
+    let _system_msg = all_messages.first().filter(|m| m.role == "system");
+    let dialog_messages: Vec<ChatMessage> = all_messages
+        .into_iter()
+        .filter(|m| m.role != "system")
+        .collect();
+
+    // 从最早的消息开始删除超出max_history的部分
+    let dialog_messages = if dialog_messages.len() > max_history {
+        dialog_messages[dialog_messages.len() - max_history..].to_vec()
+    } else {
+        dialog_messages
+    };
+
+    // 构建最终消息列表
+    let mut messages: Vec<ChatMessage> = Vec::new();
+
+    // 添加system消息（固定第一条）
     let mode_desc = if is_agent_mode {
         "You are currently in AGENT mode. You can read terminal output AND execute commands to solve problems."
     } else {
         "You are currently in ASK mode. You can read terminal output to analyze issues, but you CANNOT execute commands directly. Suggest commands to the user instead."
     };
-
     let full_system_prompt = format!("{}\n\n{}", SYSTEM_PROMPT, mode_desc);
 
-    msgs.push(ChatMessage {
+    messages.push(ChatMessage {
         role: "system".to_string(),
         content: Some(full_system_prompt),
         reasoning_content: None,
@@ -237,36 +273,60 @@ async fn load_history(
         tool_call_id: None,
     });
 
-    let mut db_msgs: Vec<ChatMessage> = Vec::new();
-    for row in rows {
-        let msg: ChatMessage = row.map_err(|e| e.to_string())?;
-        db_msgs.push(msg);
+    // 添加所有对话消息（已经在数据库中按正确顺序存储）
+    messages.extend(dialog_messages);
+
+    // 验证并修复消息序列
+    let mut payload_messages: Vec<MessagePayload> = messages
+        .iter()
+        .map(|m| MessagePayload {
+            role: m.role.clone(),
+            content: m.content.clone(),
+            reasoning_content: m.reasoning_content.clone(),
+            tool_calls: m.tool_calls.as_ref().map(|calls| {
+                calls.iter()
+                    .map(|c| ToolCallPayload {
+                        id: c.id.clone(),
+                        function: ToolCallFunction {
+                            name: c.function.name.clone(),
+                            arguments: c.function.arguments.clone(),
+                        },
+                    })
+                    .collect()
+            }),
+            tool_call_id: m.tool_call_id.clone(),
+        })
+        .collect();
+
+    let result = validate_and_fix_messages(&mut payload_messages);
+    if result.was_fixed {
+        tracing::warn!("[AI] Message sequence fixed: {:?}", result.fixes);
     }
 
-    if !db_msgs.is_empty() && db_msgs[0].role != "user" {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        let first_user_msg: Option<ChatMessage> = conn.query_row(
-            "SELECT role, content FROM ai_messages WHERE session_id = ?1 AND role = 'user' ORDER BY created_at ASC LIMIT 1",
-            params![session_id],
-            |row| {
-                Ok(ChatMessage {
-                    role: row.get(0)?,
-                    content: Some(row.get(1)?),
-                    reasoning_content: None,
-                    tool_calls: None,
-                    tool_call_id: None,
-                })
-            }
-        ).ok();
+    // 转换回ChatMessage格式
+    let validated_messages: Vec<ChatMessage> = payload_messages
+        .into_iter()
+        .map(|m| ChatMessage {
+            role: m.role,
+            content: m.content,
+            reasoning_content: m.reasoning_content,
+            tool_calls: m.tool_calls.map(|calls| {
+                calls.iter()
+                    .map(|c| ToolCall {
+                        id: c.id.clone(),
+                        tool_type: "function".to_string(),
+                        function: FunctionCall {
+                            name: c.function.name.clone(),
+                            arguments: c.function.arguments.clone(),
+                        },
+                    })
+                    .collect()
+            }),
+            tool_call_id: m.tool_call_id,
+        })
+        .collect();
 
-        if let Some(msg) = first_user_msg {
-            msgs.push(msg);
-        }
-    }
-
-    msgs.extend(db_msgs);
-    Ok(msgs)
+    Ok(validated_messages)
 }
 
 async fn execute_tools_and_save(
@@ -455,6 +515,7 @@ pub fn run_ai_turn(
         let mut full_content = String::new();
         let mut full_reasoning = String::new();
         let mut final_tool_calls: Option<Vec<ToolCall>> = None;
+        let mut accumulated_tool_calls: Vec<ToolCall> = Vec::new();
         let mut has_pending_reasoning = false;
 
         while let Some(event_result) = stream.next().await {
@@ -479,30 +540,28 @@ pub fn run_ai_turn(
                             window.emit(&format!("ai-reasoning-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
-                            // 如果之前有思考内容，先发送结束标记
-                            if has_pending_reasoning {
-                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
-                                has_pending_reasoning = false;
-                            }
-                            let tc = chunk.tool_call;
-                            let calls = final_tool_calls.get_or_insert_with(Vec::new);
-                            if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
-                                let part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                                existing.function.arguments.push_str(&part);
-                            } else {
-                                let args_part = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                                calls.push(ToolCall {
-                                    id: tc.call_id.clone(),
-                                    tool_type: "function".to_string(),
-                                    function: FunctionCall {
-                                        name: tc.fn_name.clone(),
-                                        arguments: args_part,
-                                    }
-                                });
-                            }
-                            // 立即发送工具调用事件到前端
-                            if let Some(ref calls) = final_tool_calls {
-                                window.emit(&format!("ai-tool-call-{}", session_id), calls.clone()).map_err(|e| e.to_string())?;
+                            // 累积工具调用 chunk（用于某些提供商，End 事件可能没有 captured_content）
+                            if !chunk.tool_call.fn_name.is_empty() {
+                                let args = chunk.tool_call.fn_arguments.as_str()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
+
+                                // 查找是否已有相同 call_id 的工具调用
+                                if let Some(existing) = accumulated_tool_calls.iter_mut().find(|tc| tc.id == chunk.tool_call.call_id) {
+                                    // 累积 arguments（某些流式响应会分块发送参数）
+                                    existing.function.arguments.push_str(&args);
+                                } else {
+                                    // 新工具调用
+                                    accumulated_tool_calls.push(ToolCall {
+                                        id: chunk.tool_call.call_id.clone(),
+                                        tool_type: "function".to_string(),
+                                        function: FunctionCall {
+                                            name: chunk.tool_call.fn_name.clone(),
+                                            arguments: args,
+                                        }
+                                    });
+                                }
+                                tracing::debug!("[AI] ToolCallChunk: id={}, name={}", chunk.tool_call.call_id, chunk.tool_call.fn_name);
                             }
                         }
                         ChatStreamEvent::End(end) => {
@@ -511,22 +570,50 @@ pub fn run_ai_turn(
                                 window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
                                 has_pending_reasoning = false;
                             }
-                            if let Some(content) = end.captured_content {
-                                for tc in content.tool_calls() {
-                                    let calls = final_tool_calls.get_or_insert_with(Vec::new);
-                                    if let Some(existing) = calls.iter_mut().find(|c| c.id == tc.call_id) {
-                                        existing.function.arguments = tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string());
-                                    } else {
-                                        calls.push(ToolCall {
+
+                            // 优先使用 End 事件中的完整 tool_calls
+                            let tool_calls = if let Some(content) = end.captured_content {
+                                let raw_tool_calls = content.tool_calls();
+                                tracing::debug!("[AI] End event captured_content tool_calls count: {}", raw_tool_calls.len());
+
+                                raw_tool_calls
+                                    .into_iter()
+                                    .filter(|tc| !tc.fn_name.is_empty())
+                                    .map(|tc| {
+                                        let args = tc.fn_arguments.as_str()
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| tc.fn_arguments.to_string());
+                                        ToolCall {
                                             id: tc.call_id.clone(),
                                             tool_type: "function".to_string(),
                                             function: FunctionCall {
                                                 name: tc.fn_name.clone(),
-                                                arguments: tc.fn_arguments.as_str().map(|s| s.to_string()).unwrap_or_else(|| tc.fn_arguments.to_string()),
+                                                arguments: args,
                                             }
-                                        });
-                                    }
-                                }
+                                        }
+                                    })
+                                    .collect()
+                            } else {
+                                // 如果 End 事件没有 captured_content，则使用累积的 tool_calls
+                                tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
+                                accumulated_tool_calls.clone()
+                            };
+
+                            // 记录所有工具调用的详细信息
+                            for call in &tool_calls {
+                                let timeout = extract_timeout(&call.function.arguments);
+                                let command = extract_command(&call.function.arguments);
+                                tracing::info!(
+                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s",
+                                    call.id,
+                                    call.function.name,
+                                    command.as_deref().unwrap_or("N/A"),
+                                    timeout.unwrap_or(30)
+                                );
+                            }
+
+                            if !tool_calls.is_empty() {
+                                *final_tool_calls.get_or_insert_with(Vec::new) = tool_calls;
                             }
                         }
                         _ => {}
@@ -536,7 +623,6 @@ pub fn run_ai_turn(
                     // 发送思考结束标记（如果有的话）
                     if has_pending_reasoning {
                         window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
-                        let _ = has_pending_reasoning;
                     }
                     let err_msg = e.to_string();
                     window.emit(&format!("ai-error-{}", session_id), err_msg.clone()).map_err(|e| e.to_string())?;
@@ -569,7 +655,8 @@ pub fn run_ai_turn(
         }
 
         if let Some(calls) = &final_tool_calls {
-            if is_agent_mode && !calls.is_empty() {
+            if !calls.is_empty() {
+                // 分类工具：get_terminal_output 自动执行，其他工具需要确认
                 let auto_exec_calls: Vec<ToolCall> = calls.iter()
                     .filter(|c| c.function.name == "get_terminal_output")
                     .cloned()
@@ -580,6 +667,7 @@ pub fn run_ai_turn(
                     .cloned()
                     .collect();
 
+                // 自动执行 get_terminal_output 工具（Ask 和 Agent 模式都支持）
                 if !auto_exec_calls.is_empty() {
                     tracing::info!("[AI] Auto-executing {} get_terminal_output tools", auto_exec_calls.len());
                     execute_tools_and_save(
@@ -591,11 +679,21 @@ pub fn run_ai_turn(
                     ).await?;
                 }
 
+                // 需要确认的工具（仅在 Agent 模式下允许）
                 if !confirm_calls.is_empty() {
-                    tracing::info!("[AI] {} tools need confirmation, emitting for frontend countdown", confirm_calls.len());
-                    return Ok(Some(confirm_calls));
+                    if is_agent_mode {
+                        tracing::info!("[AI] {} tools need confirmation, emitting for frontend countdown", confirm_calls.len());
+                        // 发送完整的tool_calls到前端（完整接收后才发送）
+                        window.emit(&format!("ai-tool-call-{}", session_id), confirm_calls.clone())
+                            .map_err(|e| e.to_string())?;
+                        return Ok(Some(confirm_calls));
+                    } else {
+                        // Ask 模式下不允许执行除 get_terminal_output 以外的工具
+                        tracing::warn!("[AI] Ask mode cannot execute tools other than get_terminal_output, ignoring {} tool calls", confirm_calls.len());
+                    }
                 }
 
+                // 继续 AI 轮次
                 return run_ai_turn(
                     window,
                     state,
