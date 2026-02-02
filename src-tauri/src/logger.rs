@@ -40,13 +40,19 @@ pub fn init_logging(app_data_dir: PathBuf, debug_enabled: bool) {
                 Level::INFO
             };
             // Suppress verbose debug logs from third-party libraries
+            // h2 and hyper_util expose local file paths in debug logs (sensitive info)
             if metadata.level() <= &max_level {
                 let target = metadata.target();
                 if target.starts_with("russh::cipher")
                     || target.starts_with("hyper::proto::h1::decode")
+                    || target.starts_with("h2")
+                    || target.starts_with("hyper_util")
+                    || target.starts_with("reqwest::connect")
+                    || target.starts_with("hyper_util")
+                    || target.starts_with("russh::")
                 {
-                    // Only allow WARN and above for these verbose modules
-                    metadata.level() <= &Level::WARN
+                    // Completely disable these modules (they leak sensitive paths)
+                    false
                 } else {
                     true
                 }
