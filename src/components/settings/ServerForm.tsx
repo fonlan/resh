@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Settings, Network, Terminal, Code } from 'lucide-react';
+import { Settings, Network, Terminal, Code, Trash2, Edit2, Check, X } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
@@ -77,6 +77,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Env var editing state
+  const [editingEnvVar, setEditingEnvVar] = useState<{ key: string; newKey: string; newValue: string } | null>(null);
 
   // Port forward input state
   const [newPortForward, setNewPortForward] = useState({ local: '', remote: '' });
@@ -550,30 +553,84 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 {/* Existing Env Vars */}
                 {Object.entries(formData.envVars).length > 0 && (
                   <div className="space-y-2 mb-3">
-                    {Object.entries(formData.envVars).map(([key, value]) => (
-                      <div key={key} className="flex gap-2">
-                        <input
-                          type="text"
-                          value={key}
-                          disabled
-                          className="w-24 px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400 cursor-not-allowed"
-                        />
-                        <span className="text-gray-500 self-center">=</span>
-                        <input
-                          type="text"
-                          value={value}
-                          onChange={(e) => handleEnvVarChange(key, e.target.value)}
-                          className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeEnvVar(key)}
-                          className="text-red-400 hover:text-red-300 px-3 py-2"
-                        >
-                          {t.common.remove}
-                        </button>
-                      </div>
-                    ))}
+                    {Object.entries(formData.envVars).map(([key, value]) => {
+                      const isEditing = editingEnvVar?.key === key;
+
+                      if (isEditing) {
+                        return (
+                          <div key={key} className="flex gap-2">
+                            <input
+                              type="text"
+                              value={editingEnvVar.newKey}
+                              onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newKey: e.target.value })}
+                              className="w-24 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <span className="text-gray-500 self-center">=</span>
+                            <input
+                              type="text"
+                              value={editingEnvVar.newValue}
+                              onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newValue: e.target.value })}
+                              className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const { key: oldKey, newKey, newValue } = editingEnvVar;
+                                const newEnvVars = { ...formData.envVars };
+                                delete newEnvVars[oldKey];
+                                newEnvVars[newKey] = newValue;
+                                setFormData((prev) => ({ ...prev, envVars: newEnvVars }));
+                                setEditingEnvVar(null);
+                              }}
+                              className="icon-btn icon-btn-connect"
+                            >
+                              <Check size={16} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingEnvVar(null)}
+                              className="icon-btn icon-btn-delete"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={key} className="flex gap-2">
+                          <input
+                            type="text"
+                            value={key}
+                            disabled
+                            className="w-24 px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400 cursor-not-allowed"
+                          />
+                          <span className="text-gray-500 self-center">=</span>
+                          <input
+                            type="text"
+                            value={value}
+                            disabled
+                            className="flex-1 px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400 cursor-not-allowed"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setEditingEnvVar({ key, newKey: key, newValue: value })}
+                            className="icon-btn icon-btn-edit"
+                            title={t.common.edit}
+                          >
+                            <Edit2 size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeEnvVar(key)}
+                            className="icon-btn icon-btn-delete"
+                            title={t.common.remove}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
