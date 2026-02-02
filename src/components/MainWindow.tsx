@@ -343,7 +343,13 @@ export const MainWindow: React.FC = () => {
           <button
             type="button"
             className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
-            onClick={() => setIsSnippetsOpen(!isSnippetsOpen)}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (e.button === 0) {
+                setIsSnippetsOpen(prev => !prev);
+              }
+            }}
             aria-label={t.mainWindow.snippetsTooltip}
             title={t.mainWindow.snippetsTooltip}
           >
