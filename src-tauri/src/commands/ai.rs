@@ -541,27 +541,53 @@ pub fn run_ai_turn(
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
                             // 累积工具调用 chunk（用于某些提供商，End 事件可能没有 captured_content）
-                            if !chunk.tool_call.fn_name.is_empty() {
-                                let args = chunk.tool_call.fn_arguments.as_str()
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
+                            tracing::debug!("[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
+                                chunk.tool_call.call_id, chunk.tool_call.fn_name, chunk.tool_call.fn_arguments);
 
-                                // 查找是否已有相同 call_id 的工具调用
-                                if let Some(existing) = accumulated_tool_calls.iter_mut().find(|tc| tc.id == chunk.tool_call.call_id) {
-                                    // 累积 arguments（某些流式响应会分块发送参数）
-                                    existing.function.arguments.push_str(&args);
-                                } else {
-                                    // 新工具调用
-                                    accumulated_tool_calls.push(ToolCall {
-                                        id: chunk.tool_call.call_id.clone(),
-                                        tool_type: "function".to_string(),
-                                        function: FunctionCall {
-                                            name: chunk.tool_call.fn_name.clone(),
-                                            arguments: args,
-                                        }
-                                    });
+                            let args = chunk.tool_call.fn_arguments.as_str()
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
+
+                            tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
+
+                            // 查找是否已有相同 call_id 的工具调用
+                            if let Some(existing) = accumulated_tool_calls.iter_mut().find(|tc| tc.id == chunk.tool_call.call_id) {
+                                // 累积 arguments（某些流式响应会分块发送参数）
+                                existing.function.arguments.push_str(&args);
+
+                                // 如果之前没有 fn_name，现在有了，就更新
+                                if existing.function.name.is_empty() && !chunk.tool_call.fn_name.is_empty() {
+                                    existing.function.name = chunk.tool_call.fn_name.clone();
                                 }
-                                tracing::debug!("[AI] ToolCallChunk: id={}, name={}", chunk.tool_call.call_id, chunk.tool_call.fn_name);
+
+                                tracing::debug!("[AI] ToolCallChunk (append by id): id={}, name={}, args_len={}, total_len={}",
+                                    chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
+                            } else if chunk.tool_call.call_id == "call_0" && accumulated_tool_calls.len() == 1 {
+                                // 处理 call_id 变化的情况（如 DeepSeek）：
+                                // 如果 call_id 是 "call_0" 且只有一个工具调用在进行中，则累积到那个工具调用
+                                let existing = &mut accumulated_tool_calls[0];
+                                existing.function.arguments.push_str(&args);
+
+                                if existing.function.name.is_empty() && !chunk.tool_call.fn_name.is_empty() {
+                                    existing.function.name = chunk.tool_call.fn_name.clone();
+                                }
+
+                                tracing::debug!("[AI] ToolCallChunk (append by fallback): original_id={}, fallback_id={}, name={}, args_len={}, total_len={}",
+                                    existing.id, chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
+                            } else if !chunk.tool_call.fn_name.is_empty() || !args.is_empty() {
+                                // 新工具调用（只要有 fn_name 或 arguments 就创建）
+                                accumulated_tool_calls.push(ToolCall {
+                                    id: chunk.tool_call.call_id.clone(),
+                                    tool_type: "function".to_string(),
+                                    function: FunctionCall {
+                                        name: chunk.tool_call.fn_name.clone(),
+                                        arguments: args.clone(),
+                                    }
+                                });
+                                tracing::debug!("[AI] ToolCallChunk (new): id={}, name={}, args=\"{}\"",
+                                    chunk.tool_call.call_id, chunk.tool_call.fn_name, args);
+                            } else {
+                                tracing::debug!("[AI] ToolCallChunk (skipped): empty fn_name and args");
                             }
                         }
                         ChatStreamEvent::End(end) => {
@@ -571,12 +597,12 @@ pub fn run_ai_turn(
                                 has_pending_reasoning = false;
                             }
 
-                            // 优先使用 End 事件中的完整 tool_calls
+                            // 优先使用 End 事件中的完整 tool_calls，但如果为空则回退到累积的 tool_calls
                             let tool_calls = if let Some(content) = end.captured_content {
                                 let raw_tool_calls = content.tool_calls();
                                 tracing::debug!("[AI] End event captured_content tool_calls count: {}", raw_tool_calls.len());
 
-                                raw_tool_calls
+                                let calls_from_captured: Vec<ToolCall> = raw_tool_calls
                                     .into_iter()
                                     .filter(|tc| !tc.fn_name.is_empty())
                                     .map(|tc| {
@@ -592,10 +618,26 @@ pub fn run_ai_turn(
                                             }
                                         }
                                     })
-                                    .collect()
+                                    .collect();
+
+                                // 如果 captured_content 的 tool_calls 为空，回退到累积的 tool_calls
+                                if calls_from_captured.is_empty() && !accumulated_tool_calls.is_empty() {
+                                    tracing::debug!("[AI] captured_content tool_calls is empty, fallback to accumulated tool_calls: {}", accumulated_tool_calls.len());
+                                    for acc_call in &accumulated_tool_calls {
+                                        tracing::debug!("[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
+                                            acc_call.id, acc_call.function.name, acc_call.function.arguments);
+                                    }
+                                    accumulated_tool_calls.clone()
+                                } else {
+                                    calls_from_captured
+                                }
                             } else {
                                 // 如果 End 事件没有 captured_content，则使用累积的 tool_calls
                                 tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
+                                for acc_call in &accumulated_tool_calls {
+                                    tracing::debug!("[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
+                                        acc_call.id, acc_call.function.name, acc_call.function.arguments);
+                                }
                                 accumulated_tool_calls.clone()
                             };
 
@@ -604,11 +646,12 @@ pub fn run_ai_turn(
                                 let timeout = extract_timeout(&call.function.arguments);
                                 let command = extract_command(&call.function.arguments);
                                 tracing::info!(
-                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s",
+                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s, raw_args=\"{}\"",
                                     call.id,
                                     call.function.name,
                                     command.as_deref().unwrap_or("N/A"),
-                                    timeout.unwrap_or(30)
+                                    timeout.unwrap_or(30),
+                                    call.function.arguments
                                 );
                             }
 
