@@ -76,6 +76,8 @@ pub struct Proxy {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
+    #[serde(default)]
+    pub ignore_ssl_errors: bool, // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
     #[serde(default = "default_true")]
     pub synced: bool,
     #[serde(default = "default_updated_at")]

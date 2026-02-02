@@ -11,11 +11,12 @@ pub struct WebDAVClient {
 
 impl WebDAVClient {
     pub fn new(base_url: String, username: String, password: String, proxy: Option<Proxy>) -> Self {
-        let mut client_builder = Client::builder();
+        let mut client_builder = Client::builder()
+            .user_agent("Resh/0.1.0");
 
         if let Some(proxy_config) = proxy {
             let scheme = match proxy_config.proxy_type.as_str() {
-                "socks5" => "socks5",
+                "socks5" => "socks5h",
                 _ => "http",
             };
             let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
@@ -29,6 +30,12 @@ impl WebDAVClient {
                 client_builder = client_builder.proxy(p);
             } else {
                 tracing::warn!("Invalid WebDAV proxy configuration: {}", proxy_url);
+            }
+
+            // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
+            if proxy_config.ignore_ssl_errors {
+                tracing::warn!("WebDAV: Ignoring SSL certificates for proxy {}", proxy_config.name);
+                client_builder = client_builder.danger_accept_invalid_certs(true);
             }
         }
 
@@ -51,7 +58,10 @@ impl WebDAVClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(format!("Upload failed: HTTP {}", response.status()).into());
+            let status = response.status();
+            let text = response.text().await.unwrap_or_else(|_| "Could not read response body".to_string());
+            tracing::error!("Upload failed: HTTP {} - {}", status, text);
+            return Err(format!("Upload failed: HTTP {} - {}", status, text).into());
         }
 
         Ok(())
@@ -73,7 +83,10 @@ impl WebDAVClient {
         }
 
         if !response.status().is_success() {
-            return Err(format!("Download failed: HTTP {}", response.status()).into());
+            let status = response.status();
+            let text = response.text().await.unwrap_or_else(|_| "Could not read response body".to_string());
+            tracing::error!("Download failed: HTTP {} - {}", status, text);
+            return Err(format!("Download failed: HTTP {} - {}", status, text).into());
         }
 
         let content = response.bytes().await?;

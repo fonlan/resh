@@ -111,11 +111,12 @@ pub async fn fetch_models(
     let timeout_duration = Duration::from_secs(timeout.unwrap_or(30));
 
     let mut client_builder = Client::builder()
+        .user_agent("Resh/0.1.0")
         .timeout(timeout_duration)
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(p) = proxy {
-        let scheme = if p.proxy_type == "socks5" { "socks5" } else { "http" };
+        let scheme = if p.proxy_type == "socks5" { "socks5h" } else { "http" };
         let auth_part = if let (Some(u), Some(pass)) = (p.username, p.password) {
             format!("{}:{}@", u, pass)
         } else {
@@ -130,6 +131,12 @@ pub async fn fetch_models(
             Err(e) => {
                 tracing::warn!("[AI Client] Failed to create proxy: {}", e);
             }
+        }
+
+        // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
+        if p.ignore_ssl_errors {
+            tracing::warn!("[AI Client] Ignoring SSL certificates for proxy {}", p.name);
+            client_builder = client_builder.danger_accept_invalid_certs(true);
         }
     }
 
@@ -179,11 +186,12 @@ pub async fn stream_openai_chat(
 
     // Explicitly configure client for robustness
     let mut client_builder = Client::builder()
+        .user_agent("Resh/0.1.0")
         .timeout(timeout_duration)
         .connect_timeout(Duration::from_secs(10));
 
     if let Some(p) = proxy {
-        let scheme = if p.proxy_type == "socks5" { "socks5" } else { "http" };
+        let scheme = if p.proxy_type == "socks5" { "socks5h" } else { "http" };
         let auth_part = if let (Some(u), Some(pass)) = (p.username, p.password) {
             format!("{}:{}@", u, pass)
         } else {

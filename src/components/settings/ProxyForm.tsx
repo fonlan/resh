@@ -34,6 +34,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
       port: 8080,
       username: '',
       password: '',
+      ignoreSslErrors: false,
       synced: true,
       updatedAt: new Date().toISOString(),
     };
@@ -171,6 +172,24 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
         <h3 className="text-sm font-medium text-gray-300 mb-3">
           {t.proxyForm.authTitle}
         </h3>
+
+        {/* Ignore SSL checkbox - only show for HTTP proxy */}
+        {formData.type === 'http' && (
+          <div className="mb-4 p-3 bg-gray-800/50 rounded-md">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.ignoreSslErrors}
+                onChange={(e) => handleChange('ignoreSslErrors', e.target.checked)}
+                className="w-4 h-4 rounded border-gray-600 bg-gray-700 text-blue-500 focus:ring-blue-500"
+              />
+              <div>
+                <span className="text-gray-300 font-medium block">{t.proxyForm.ignoreSslLabel}</span>
+                <span className="text-gray-500 text-xs">{t.proxyForm.ignoreSslDesc}</span>
+              </div>
+            </label>
+          </div>
+        )}
 
         <div className="space-y-3">
           {/* Username */}

@@ -54,6 +54,7 @@ export interface ProxyConfig {
   port: number;
   username?: string;
   password?: string;
+  ignoreSslErrors: boolean; // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
   synced: boolean;
   updatedAt: string;
 }

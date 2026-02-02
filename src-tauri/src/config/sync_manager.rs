@@ -37,8 +37,8 @@ impl SyncManager {
                 }
             }
             Err(e) => {
-                tracing::error!("Failed to download sync.json: {}", e);
-                return Err(format!("Sync failed: {}", e));
+                tracing::error!("Failed to download sync.json: {:?}", e);
+                return Err(format!("Sync failed: {:?}", e));
             }
         };
 

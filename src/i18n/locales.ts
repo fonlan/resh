@@ -157,6 +157,8 @@ export const locales = {
       authTitle: 'Authentication (Optional)',
       usernamePlaceholder: 'Leave empty if no auth required',
       passwordPlaceholder: 'Leave empty if no auth required',
+      ignoreSslLabel: 'Ignore SSL Certificate Errors',
+      ignoreSslDesc: 'Enable for corporate proxies with MITM inspection',
     },
     snippetForm: {
       nameLabel: 'Name',
@@ -428,6 +430,8 @@ export const locales = {
       authTitle: '身份验证 (可选)',
       usernamePlaceholder: '无需验证请留空',
       passwordPlaceholder: '无需验证请留空',
+      ignoreSslLabel: '忽略 SSL 证书错误',
+      ignoreSslDesc: '用于公司代理 MITM 拦截场景',
     },
     snippetForm: {
       nameLabel: '名称',
