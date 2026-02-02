@@ -379,7 +379,7 @@ impl SSHClient {
 
         if !authenticated {
             error!("[SSH] All authentication methods failed for user: {}", username);
-            return Err("Authentication failed".to_string());
+            return Err("AUTH_PASSWORD_REQUIRED: Authentication failed. Please enter your password.".to_string());
         }
 
         info!("[SSH] Authentication complete for user: {}", username);

@@ -96,6 +96,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   const [showManualAuth, setShowManualAuth] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
+  const [isAuthRetry, setIsAuthRetry] = useState(false);
   const [manualCredentials, setManualCredentials] = useState<ManualAuthCredentials>({ 
     username: server.username, 
     password: '', 
@@ -279,11 +280,23 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         });
 
       } catch (err) {
-        const errorMsg = t.terminalTab.error.replace('{error}', String(err));
+        const errorStr = String(err);
+        const errorMsg = t.terminalTab.error.replace('{error}', errorStr);
         writeRef.current('\r\n' + errorMsg + '\r\n');
-        updateStatus(`Error: ${String(err)}`);
-        connectedRef.current = false;
-        setIsConnected(false);
+
+        // Check if authentication failed and password is required
+        if (errorStr.includes('AUTH_PASSWORD_REQUIRED')) {
+          setManualCredentials(prev => ({ ...prev, password: '', privateKey: '', passphrase: '' }));
+          setIsAuthRetry(true);
+          setShowManualAuth(true);
+          updateStatus(t.manualAuth.title);
+          connectedRef.current = false;
+          setIsConnected(false);
+        } else {
+          updateStatus(`Error: ${errorStr}`);
+          connectedRef.current = false;
+          setIsConnected(false);
+        }
       }
     };
 
@@ -429,14 +442,17 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
             serverName={server.host}
             credentials={manualCredentials}
             onCredentialsChange={setManualCredentials}
+            isRetry={isAuthRetry}
             onConnect={() => {
               setIsCancelled(false);
+              setIsAuthRetry(false);
               connectedRef.current = false;
               setConnectTrigger(prev => prev + 1);
             }}
             onCancel={() => {
               setIsCancelled(true);
               setShowManualAuth(false);
+              setIsAuthRetry(false);
               setStatusText(t.terminalTab.connectionClosed);
             }}
           />

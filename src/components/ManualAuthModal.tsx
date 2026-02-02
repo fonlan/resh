@@ -11,6 +11,7 @@ interface ManualAuthModalProps {
   onCredentialsChange: (creds: ManualAuthCredentials) => void;
   onConnect: () => void;
   onCancel: () => void;
+  isRetry?: boolean;
 }
 
 export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
@@ -19,6 +20,7 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
   onCredentialsChange,
   onConnect,
   onCancel,
+  isRetry = false,
 }) => {
   const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -42,12 +44,12 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
     <div className="form-modal-overlay">
       <div className="form-modal-container" style={{ maxWidth: '480px' }}>
         <div className="form-modal-header">
-          <h2>{t.manualAuth.title}</h2>
+          <h2>{isRetry ? t.manualAuth.retryTitle : t.manualAuth.title}</h2>
         </div>
 
         <div className="form-modal-content with-padding">
           <p className="text-sm" style={{ color: 'var(--text-secondary)', marginBottom: '20px' }}>
-            {t.manualAuth.enterCredentials.replace('{server}', serverName)}
+            {isRetry ? t.manualAuth.retryDescription.replace('{server}', serverName) : t.manualAuth.enterCredentials.replace('{server}', serverName)}
           </p>
 
           <div className="form-group">

@@ -173,6 +173,8 @@ export const locales = {
     },
     manualAuth: {
       title: 'Manual Authentication',
+      retryTitle: 'Authentication Failed',
+      retryDescription: 'Authentication failed for {server}. Please try again:',
       enterCredentials: 'Enter credentials for {server}:',
       usernameLabel: 'Username',
       passwordLabel: 'Password',
@@ -448,6 +450,8 @@ export const locales = {
     },
     manualAuth: {
       title: '手动身份验证',
+      retryTitle: '认证失败',
+      retryDescription: '{server} 认证失败，请重试：',
       enterCredentials: '请输入 {server} 的凭据：',
       usernameLabel: '用户名',
       passwordLabel: '密码',
