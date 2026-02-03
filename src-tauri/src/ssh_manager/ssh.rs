@@ -55,6 +55,7 @@ struct SessionData {
     command_recorder: Option<String>,
     last_output_len: usize,
     recording_prompt: Option<String>,
+    recording_line_count: usize,
     command_finished: bool,
     last_exit_code: Option<i32>,
     pub system_info: Option<SystemInfo>,
@@ -100,6 +101,7 @@ impl SSHClient {
                     command_recorder: None,
                     last_output_len: 0,
                     recording_prompt: None,
+                    recording_line_count: 0,
                     command_finished: false,
                     last_exit_code: None,
                     system_info: None,
@@ -692,6 +694,7 @@ impl SSHClient {
             session_data.last_output_len = session_data.terminal_buffer.len();
             session_data.recording_prompt =
                 Self::extract_last_line_cleaned(&session_data.terminal_buffer);
+            session_data.recording_line_count = Self::count_non_empty_lines(&session_data.terminal_buffer);
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
@@ -727,6 +730,19 @@ impl SSHClient {
             }
         }
         None
+    }
+
+    /// Count non-empty lines in buffer (lines that contain visible characters)
+    fn count_non_empty_lines(buffer: &str) -> usize {
+        let trimmed = buffer.trim_end();
+        if trimmed.is_empty() {
+            return 0;
+        }
+        trimmed.lines().filter(|line| {
+            let stripped = strip_ansi_escapes::strip(line.as_bytes());
+            let cleaned: String = stripped.into_iter().map(|c| c as char).collect();
+            !cleaned.trim().is_empty()
+        }).count()
     }
 
     /// Check if a line looks like a shell prompt
@@ -838,6 +854,19 @@ impl SSHClient {
                 );
 
                 if !cleaned.is_empty() {
+                    // Check if line count increased (indicates new prompt appeared)
+                    let new_line_count = Self::count_non_empty_lines(new_content);
+                    tracing::info!("[check_command_completed] {} - new_line_count={}, recorded_line_count={}",
+                        session_id, new_line_count, session_data.recording_line_count);
+
+                    // Also check if the content changed significantly
+                    if new_line_count > session_data.recording_line_count {
+                        // More non-empty lines appeared, likely command finished
+                        tracing::debug!("[check_command_completed] {} - line count increased ({} -> {}), command completed",
+                            session_id, session_data.recording_line_count, new_line_count);
+                        return Ok(true);
+                    }
+
                     // Check if this is a new prompt line (different from the one we recorded)
                     if let Some(ref recorded_prompt) = session_data.recording_prompt {
                         if cleaned != recorded_prompt {
