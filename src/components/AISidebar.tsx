@@ -451,7 +451,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [currentMessages]);
 
   useEffect(() => {
-    if (lastMessageContentLength > 0 && (isAtBottomRef.current || isLoading)) {
+    const shouldScroll = isAtBottomRef.current || isLoading;
+    if (shouldScroll && lastMessageContentLength >= 0) {
       const rafId = requestAnimationFrame(() => {
         scrollToBottom(isLoading ? 'auto' : 'smooth');
       });
