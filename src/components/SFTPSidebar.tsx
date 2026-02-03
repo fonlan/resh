@@ -3,6 +3,8 @@ import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, U
 import { invoke } from '@tauri-apps/api/core';
 import './SFTPSidebar.css';
 
+import { TransferStatusPanel } from './TransferStatusPanel';
+
 interface SFTPSidebarProps {
   isOpen: boolean;
   onClose: () => void;
@@ -346,9 +348,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                   const filename = file.split(/[\\/]/).pop();
                   await invoke('sftp_upload', { sessionId, localPath: file, remotePath: `${targetPath}/${filename}` });
               }
-              if (targetPath === currentPath) {
-                  loadDirectory(currentPath);
-              }
+              // Upload is async now, tracked in TransferStatusPanel
           }
       } catch (e) {
           console.error('Upload failed', e);
@@ -449,6 +449,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               </div>
           )}
       </div>
+      
+      <TransferStatusPanel />
     </div>
 
     {contextMenu && (

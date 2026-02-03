@@ -218,6 +218,7 @@ async fn main() {
             commands::sftp::sftp_list_dir,
             commands::sftp::sftp_download,
             commands::sftp::sftp_upload,
+            commands::sftp::sftp_cancel_transfer,
             commands::sftp::pick_files,
         ])
         .run(tauri::generate_context!())

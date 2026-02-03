@@ -1,0 +1,94 @@
+.transfer-panel {
+    background-color: var(--sidebar-bg, #1e1e1e);
+    border-top: 1px solid var(--border-color, #333);
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+
+.transfer-header {
+    padding: 8px 12px;
+    font-weight: bold;
+    background-color: rgba(0,0,0,0.1);
+    color: var(--text-color, #ccc);
+}
+
+.transfer-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.transfer-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color, #333);
+    gap: 8px;
+}
+
+.transfer-icon {
+    color: var(--accent-color, #3c8ce7);
+    display: flex;
+    align-items: center;
+}
+
+.transfer-info {
+    flex: 1;
+    overflow: hidden;
+    min-width: 0; /* Enable truncation in flex item */
+}
+
+.transfer-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+    color: var(--text-color, #fff);
+}
+
+.transfer-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-muted, #888);
+    margin-bottom: 4px;
+}
+
+.progress-bar-container {
+    height: 4px;
+    background-color: var(--bg-color-dim, #333);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background-color: var(--accent-color, #3c8ce7);
+    transition: width 0.3s ease;
+}
+
+.progress-bar.failed {
+    background-color: #ff4d4f;
+}
+
+.progress-bar.completed {
+    background-color: #52c41a;
+}
+
+.cancel-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted, #888);
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.2s;
+}
+
+.cancel-btn:hover {
+    color: var(--text-color, #fff);
+    background-color: rgba(255,255,255,0.1);
+    border-radius: 4px;
+}
