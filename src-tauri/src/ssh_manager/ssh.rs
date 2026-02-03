@@ -695,6 +695,14 @@ impl SSHClient {
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
+            tracing::info!(
+                "[start_command_recording] {} - buffer_len={}, last_output_len={}, recorded_prompt={:?}",
+                session_id,
+                session_data.terminal_buffer.len(),
+                session_data.last_output_len,
+                session_data.recording_prompt
+            );
+
             Ok(())
         } else {
             Err("Session not found".to_string())
@@ -815,12 +823,19 @@ impl SSHClient {
 
             // Priority 2: New prompt detection - check if a new prompt line appeared
             let lines: Vec<&str> = new_content.lines().collect();
+            tracing::info!("[check_command_completed] {} - new_content has {} lines", session_id, lines.len());
+            
             if let Some(last_line) = lines.last() {
                 let cleaned: String = strip_ansi_escapes::strip(last_line)
                     .into_iter()
                     .map(|c| c as char)
                     .collect();
                 let cleaned = cleaned.trim();
+                
+                tracing::info!(
+                    "[check_command_completed] {} - last_line={:?}, cleaned={:?}, recorded={:?}",
+                    session_id, last_line, cleaned, session_data.recording_prompt
+                );
 
                 if !cleaned.is_empty() {
                     // Check if this is a new prompt line (different from the one we recorded)
@@ -831,7 +846,13 @@ impl SSHClient {
                                 tracing::debug!("[check_command_completed] {} - new prompt detected: {:?} (was: {:?}), returning true",
                                     session_id, cleaned, recorded_prompt);
                                 return Ok(true);
+                            } else {
+                                tracing::info!("[check_command_completed] {} - line differs but not prompt-like: {:?}",
+                                    session_id, cleaned);
                             }
+                        } else {
+                            tracing::info!("[check_command_completed] {} - line same as recorded: {:?}",
+                                session_id, cleaned);
                         }
                     } else {
                         // No previous prompt recorded, just check if it looks like a prompt
@@ -839,8 +860,13 @@ impl SSHClient {
                             tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
                                 session_id, cleaned);
                             return Ok(true);
+                        } else {
+                            tracing::info!("[check_command_completed] {} - no recorded prompt and line not prompt-like: {:?}",
+                                session_id, cleaned);
                         }
                     }
+                } else {
+                    tracing::info!("[check_command_completed] {} - cleaned line is empty", session_id);
                 }
             }
 
