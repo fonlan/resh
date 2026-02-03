@@ -730,7 +730,8 @@ impl SSHClient {
 
         // Also check if the line is very short (like just a prompt symbol)
         // This handles cases where the prompt is just an icon like ""
-        if trimmed.len() <= 3 {
+        // Note: use chars().count() for Unicode character count, not .len() which returns bytes
+        if trimmed.chars().count() <= 3 {
             // Single character line is likely a prompt
             return true;
         }
