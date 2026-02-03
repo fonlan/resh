@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw, Bot } from 'lucide-react';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw, Bot, Info } from 'lucide-react';
 import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet, AIChannel, AIModel } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
@@ -9,6 +9,7 @@ import { GeneralTab } from './GeneralTab';
 import { SyncTab } from './SyncTab';
 import { SnippetsTab } from './SnippetsTab';
 import { AITab } from './AITab';
+import { AboutTab } from './AboutTab';
 import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
 
@@ -20,7 +21,7 @@ export interface SettingsModalProps {
   editServerId?: string | null;
 }
 
-type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai';
+type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai' | 'about';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers', editServerId }) => {
@@ -237,6 +238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     { id: 'ai', label: t.ai.tabTitle, icon: <Bot size={18} /> },
     { id: 'sync', label: t.sync, icon: <RefreshCw size={18} /> },
     { id: 'general', label: t.general, icon: <Settings size={18} /> },
+    { id: 'about', label: t.about.tabTitle, icon: <Info size={18} /> },
   ];
 
   return (
@@ -356,6 +358,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 general={localConfig.general}
                 onGeneralUpdate={handleGeneralUpdate}
               />
+            )}
+            {activeTab === 'about' && (
+              <AboutTab />
             )}
           </div>
         </div>

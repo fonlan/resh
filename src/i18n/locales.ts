@@ -277,6 +277,16 @@ export const locales = {
         insertToTerminal: 'Insert to terminal',
         executeCommand: 'Execute Command'
       }
+    },
+    about: {
+      tabTitle: 'About',
+      description: 'A modern, secure multi-tab SSH client built with Tauri 2 + React.',
+      version: 'Version',
+      author: 'Author',
+      github: 'GitHub Repository',
+      license: 'License',
+      techStack: 'Tech Stack',
+      thanks: 'Special thanks to all contributors and the open source community.',
     }
   },
   'zh-CN': {
@@ -545,21 +555,32 @@ export const locales = {
         channel: '所属渠道',
         active: '启用此模型'
       },
-      tool: {
-        confirmExecution: '确认执行',
-        autoExecute: '{seconds}秒后自动执行',
-        cancel: '取消',
-        runNow: '立即运行 ({seconds}s)',
-        confirmRun: '确认运行',
-        usingTools: '使用工具: {tools}',
-        codeCopied: '代码已复制',
-        copyCode: '复制代码',
-        insertToTerminal: '插入终端',
-        executeCommand: '执行命令'
+        tool: {
+          confirmExecution: '确认执行',
+          autoExecute: '{seconds}秒后自动执行',
+          cancel: '取消',
+          runNow: '立即运行 ({seconds}s)',
+          confirmRun: '确认运行',
+          usingTools: '使用工具: {tools}',
+          codeCopied: '代码已复制',
+          copyCode: '复制代码',
+          insertToTerminal: '插入终端',
+          executeCommand: '执行命令'
+        }
+      },
+      about: {
+        tabTitle: '关于',
+        description: '一款基于 Tauri 2 + React 构建的现代、安全的多标签 SSH 客户端。',
+        version: '版本',
+        author: '作者',
+        github: 'GitHub 仓库',
+        license: '许可证',
+        techStack: '技术栈',
+        thanks: '特别感谢所有贡献者和开源社区。',
       }
     }
-  }
-};
+  };
+
 
 export type LocaleType = keyof typeof locales;
 export type TranslationKeys = typeof locales.en;
