@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
+use tokio::net::lookup_host;
 use lazy_static::lazy_static;
 use tracing::{info, error, warn};
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ pub struct SystemInfo {
     pub distro: String,
     pub username: String,
     pub ip: String,
+    pub shell: String,
 }
 
 struct SessionData {
@@ -831,7 +833,13 @@ impl SSHClient {
 
         let mut channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
         
-        let cmd = "uname -s; (grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"') || uname -v; whoami; (hostname -I | awk '{print $1}') || hostname";
+        let cmd = "sh -c '\
+            OS=$(uname -s 2>/dev/null || echo Unknown); \
+            UNAME_V=$(uname -v 2>/dev/null || echo Unknown); \
+            echo \"OS:$OS\"; \
+            echo \"UNAME_V:$UNAME_V\"; \
+            [ -f /etc/os-release ] && cat /etc/os-release; \
+            echo \"SHELL:${1:-$2}\"' -- \"$SHELL\" \"$0\"";
         channel.exec(true, cmd).await.map_err(|e| e.to_string())?;
 
         let mut output = String::new();
@@ -857,13 +865,42 @@ impl SSHClient {
             }
         }
 
-        let lines: Vec<&str> = output.lines().collect();
-        let info = SystemInfo {
-            os: lines.get(0).unwrap_or(&"Unknown").trim().to_string(),
-            distro: lines.get(1).unwrap_or(&"Unknown").trim().to_string(),
-            username: lines.get(2).unwrap_or(&"Unknown").trim().to_string(),
-            ip: lines.get(3).unwrap_or(&"Unknown").trim().to_string(),
+        let mut info = SystemInfo {
+            os: "Unknown".to_string(),
+            distro: "Unknown".to_string(),
+            username: params.username.clone(),
+            ip: params.host.clone(),
+            shell: "Unknown".to_string(),
         };
+
+        if let Ok(mut addrs) = lookup_host(format!("{}:{}", params.host, params.port)).await {
+            if let Some(addr) = addrs.next() {
+                info.ip = addr.ip().to_string();
+            }
+        }
+
+        let mut uname_v = String::new();
+
+        for line in output.lines() {
+            let line = line.trim();
+            if let Some(val) = line.strip_prefix("OS:") {
+                info.os = val.trim().to_string();
+            } else if let Some(val) = line.strip_prefix("UNAME_V:") {
+                uname_v = val.trim().to_string();
+            } else if line.starts_with("PRETTY_NAME=") {
+                info.distro = line.split('=')
+                    .nth(1)
+                    .unwrap_or("")
+                    .trim_matches(|c| c == '"' || c == '\'')
+                    .to_string();
+            } else if let Some(val) = line.strip_prefix("SHELL:") {
+                info.shell = val.trim().to_string();
+            }
+        }
+
+        if info.distro == "Unknown" && !uname_v.is_empty() {
+            info.distro = uname_v;
+        }
 
         Ok(info)
     }

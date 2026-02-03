@@ -267,8 +267,8 @@ async fn load_history(
     if let Some(ssh_id) = ssh_session_id {
         if let Some(info) = SSHClient::get_system_info(ssh_id).await {
             system_context = format!(
-                "\n\nCurrent System Context:\n- OS: {}\n- Distro: {}\n- User: {}\n- IP: {}",
-                info.os, info.distro, info.username, info.ip
+                "\n\nCurrent System Context:\n- OS: {}\n- Distro: {}\n- User: {}\n- Shell: {}\n- IP: {}",
+                info.os, info.distro, info.username, info.shell, info.ip
             );
         }
     }

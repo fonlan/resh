@@ -77,17 +77,25 @@ export const ServerTab: React.FC<ServerTabProps> = ({
     }
   };
 
+  const lastProcessedEditServerId = useRef<string | null>(null);
+
   useEffect(() => {
-    if (editServerId) {
+    if (!editServerId) {
+      lastProcessedEditServerId.current = null;
+      return;
+    }
+
+    if (editServerId !== lastProcessedEditServerId.current) {
       const server = servers.find((s) => s.id === editServerId);
       if (server) {
         handleEditServer(server);
+        lastProcessedEditServerId.current = editServerId;
       }
     }
   }, [editServerId, servers, handleEditServer]);
 
   useEffect(() => {
-    if (formRef.current) {
+    if (isFormOpen && formRef.current) {
       setIsSynced(formRef.current.synced);
     }
   }, [isFormOpen]);
