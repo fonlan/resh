@@ -50,7 +50,7 @@ export const useTerminal = (
       fontSize: settings?.fontSize || 14,
       fontFamily: settings?.fontFamily || 'Consolas, monospace',
       cursorStyle: (settings?.cursorStyle as 'block' | 'underline' | 'bar') || 'block',
-      scrollback: settings?.scrollback || 5000,
+      scrollback: settings?.scrollback || 25000,
       theme: actualTheme === 'light' ? {
         background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
       } : actualTheme === 'orange' ? {
@@ -169,7 +169,7 @@ export const useTerminal = (
       term.options.fontSize = settings.fontSize || 14;
       term.options.fontFamily = settings.fontFamily || 'Consolas, monospace';
       term.options.cursorStyle = (settings.cursorStyle as 'block' | 'underline' | 'bar') || 'block';
-      term.options.scrollback = settings.scrollback || 5000;
+      term.options.scrollback = settings.scrollback || 25000;
     }
 
     // Determine actual theme

@@ -214,7 +214,7 @@ fn default_ai_mode() -> String {
 }
 
 fn default_ai_max_history() -> u32 {
-    10
+    20
 }
 
 fn default_ai_timeout() -> u32 {
@@ -294,7 +294,7 @@ impl Config {
                     font_family: "Consolas".to_string(),
                     font_size: 14,
                     cursor_style: "block".to_string(),
-                    scrollback: 5000,
+                    scrollback: 25000,
                 },
                 webdav: WebDAVSettings {
                     url: String::new(),
@@ -309,7 +309,7 @@ impl Config {
                 snippets_sidebar_locked: false,
                 ai_sidebar_locked: false,
                 ai_mode: default_ai_mode(),
-                ai_max_history: 10,
+                ai_max_history: 20,
                 ai_timeout: 120,
                 max_recent_servers: 3,
                 recent_server_ids: vec![],
