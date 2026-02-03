@@ -809,11 +809,17 @@ impl SSHClient {
             // Priority 2: New prompt detection - check if a new prompt line appeared
             let lines: Vec<&str> = new_content.lines().collect();
             if let Some(last_line) = lines.last() {
+                // Log raw last line for debugging
+                tracing::info!("[check_command_completed] {} - Raw last line: {:?}", session_id, last_line);
+                
                 let cleaned: String = strip_ansi_escapes::strip(last_line)
                     .into_iter()
                     .map(|c| c as char)
                     .collect();
-                let cleaned = cleaned.trim_end();
+                let cleaned = cleaned.trim();
+                
+                tracing::info!("[check_command_completed] {} - Cleaned last line: {:?}, recorded: {:?}", 
+                    session_id, cleaned, session_data.recording_prompt);
 
                 if !cleaned.is_empty() {
                     // Check if this is a new prompt line (different from the one we recorded)
