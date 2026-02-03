@@ -488,7 +488,7 @@ export const locales = {
       closeTab: '关闭标签页',
       cloneTab: '克隆标签页',
       closeOthers: '关闭其他标签页',
-      reconnect: '重连',
+      reconnect: '重新连接',
       settings: '设置',
       snippets: '代码段',
       aiAssistant: 'AI 助手',
