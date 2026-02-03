@@ -565,9 +565,10 @@ impl SSHClient {
             tracing::debug!("[check_command_completed] {} - buffer_len={}, start={}, content_len={}, content={:?}",
                 session_id, current_buffer.len(), recording_start, new_content.len(), new_content.chars().take(50).collect::<String>());
 
-            // Priority 1: Completion marker detection
-            if new_content.contains("DONE_MARKER") {
-                tracing::debug!("[check_command_completed] {} - DONE_MARKER detected, returning true", session_id);
+            // Priority 1: Completion marker detection (pure control chars)
+            // The marker is: \x1b\x1b (double ESC, completely invisible)
+            if new_content.contains("\x1b\x1b") {
+                tracing::debug!("[check_command_completed] {} - Completion marker detected, returning true", session_id);
                 return Ok(true);
             }
 

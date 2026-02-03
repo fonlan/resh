@@ -379,11 +379,14 @@ async fn execute_tools_and_save(
                             tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
 
                             let cmd_nl = format!("{}\n", cmd);
-                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await
-                            {
+                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
                                 let _ = SSHClient::stop_command_recording(ssh_id).await;
                                 break;
                             }
+
+                            // Send pure control chars as marker (completely invisible)
+                            let marker = "\x1b\x1b\n";
+                            let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
 
                             let mut interval =
                                 tokio::time::interval(tokio::time::Duration::from_millis(100));
@@ -1234,11 +1237,15 @@ pub async fn run_in_terminal(
 
     SSHClient::start_command_recording(&session_id).await?;
 
-    let command_with_newline = format!("{}\n", command);
-    if let Err(e) = SSHClient::send_input(&session_id, command_with_newline.as_bytes()).await {
+    let cmd_nl = format!("{}\n", command);
+    if let Err(e) = SSHClient::send_input(&session_id, cmd_nl.as_bytes()).await {
         let _ = SSHClient::stop_command_recording(&session_id).await;
         return Err(format!("Failed to send command: {}", e));
     }
+
+    // Send pure control chars as marker (completely invisible)
+    let marker = "\x1b\x1b\n";
+    let _ = SSHClient::send_input(&session_id, marker.as_bytes()).await;
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
