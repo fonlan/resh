@@ -33,6 +33,14 @@ pub struct JumphostConfig {
     pub passphrase: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemInfo {
+    pub os: String,
+    pub distro: String,
+    pub username: String,
+    pub ip: String,
+}
+
 struct SessionData {
     channel: russh::Channel<russh::client::Msg>,
     session: russh::client::Handle<ClientHandler>,
@@ -47,6 +55,7 @@ struct SessionData {
     recording_prompt: Option<String>,
     command_finished: bool,
     last_exit_code: Option<i32>,
+    pub system_info: Option<SystemInfo>,
 }
 
 lazy_static! {
@@ -88,6 +97,7 @@ impl SSHClient {
                 recording_prompt: None,
                 command_finished: false,
                 last_exit_code: None,
+                system_info: None,
             });
         }
         
@@ -664,5 +674,194 @@ impl SSHClient {
         } else {
             Err("Session not found".to_string())
         }
+    }
+
+    pub async fn update_system_info(session_id: &str, info: SystemInfo) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.system_info = Some(info);
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    pub async fn get_system_info(session_id: &str) -> Option<SystemInfo> {
+        let sessions = SESSIONS.lock().await;
+        sessions.get(session_id).and_then(|s| s.system_info.clone())
+    }
+
+    pub async fn gather_system_info(params: ConnectParams) -> Result<SystemInfo, String> {
+        let mut config = client::Config::default();
+        config.preferred.key = std::borrow::Cow::Owned(vec![
+            russh::keys::key::Name("ssh-ed25519"),
+            russh::keys::key::Name("rsa-sha2-256"),
+            russh::keys::key::Name("rsa-sha2-512"),
+            russh::keys::key::Name("ssh-rsa"),
+        ]);
+        let config = Arc::new(config);
+        let handler = ClientHandler::new();
+
+        let mut session = if let Some(p) = &params.proxy {
+            if p.proxy_type == "socks5" {
+                use tokio_socks::tcp::Socks5Stream;
+                let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
+                let stream = if has_auth {
+                    let u = p.username.as_ref().unwrap();
+                    let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                    Socks5Stream::connect_with_password((p.host.as_str(), p.port), (&params.host[..], params.port), u, p_auth).await
+                        .map_err(|e| format!("SOCKS5 proxy error: {}", e))?
+                } else {
+                    Socks5Stream::connect((p.host.as_str(), p.port), (&params.host[..], params.port)).await
+                        .map_err(|e| format!("SOCKS5 proxy error: {}", e))?
+                };
+                client::connect_stream(config, stream, handler).await
+            } else if p.proxy_type == "http" {
+                use tokio::io::{AsyncWriteExt, AsyncReadExt};
+                let mut stream = tokio::net::TcpStream::connect((p.host.as_str(), p.port)).await
+                    .map_err(|e| format!("Failed to connect to HTTP proxy: {}", e))?;
+                
+                let mut auth_header = String::new();
+                if let Some(u) = &p.username {
+                    if !u.is_empty() {
+                        let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                        let auth_str = format!("{}:{}", u, p_auth);
+                        let encoded = BASE64_STANDARD.encode(auth_str);
+                        auth_header = format!("\r\nProxy-Authorization: Basic {}", encoded);
+                    }
+                }
+
+                let connect_req = format!(
+                    "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{} {}\r\n\r\n",
+                    params.host, params.port, params.host, params.port, auth_header
+                );
+                stream.write_all(connect_req.as_bytes()).await.map_err(|e| e.to_string())?;
+                
+                let mut response = [0u8; 4096];
+                let n = stream.read(&mut response).await.map_err(|e| e.to_string())?;
+                let response_text = String::from_utf8_lossy(&response[..n]);
+                if !response_text.contains("200 Connection established") && !response_text.contains("200 OK") {
+                    return Err(format!("HTTP proxy returned error: {}", response_text));
+                }
+                client::connect_stream(config, stream, handler).await
+            } else {
+                return Err(format!("Unsupported proxy type: {}", p.proxy_type));
+            }
+        } else if let Some(j) = &params.jumphost {
+            let jh_handler = ClientHandler::new();
+            let mut jh_session = if let Some(p) = &params.proxy {
+                if p.proxy_type == "socks5" {
+                    use tokio_socks::tcp::Socks5Stream;
+                    let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
+                    let stream = if has_auth {
+                        let u = p.username.as_ref().unwrap();
+                        let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                        Socks5Stream::connect_with_password((p.host.as_str(), p.port), (&j.host[..], j.port), u, p_auth).await
+                            .map_err(|e| format!("SOCKS5 proxy error when connecting to jumphost: {}", e))?
+                    } else {
+                        Socks5Stream::connect((p.host.as_str(), p.port), (&j.host[..], j.port)).await
+                            .map_err(|e| format!("SOCKS5 proxy error when connecting to jumphost: {}", e))?
+                    };
+                    client::connect_stream(config.clone(), stream, jh_handler).await
+                        .map_err(|e| format!("Failed to connect to jumphost via SOCKS5: {}", e))?
+                } else if p.proxy_type == "http" {
+                    use tokio::io::{AsyncWriteExt, AsyncReadExt};
+                    let mut stream = tokio::net::TcpStream::connect((p.host.as_str(), p.port)).await
+                        .map_err(|e| format!("Failed to connect to HTTP proxy: {}", e))?;
+
+                    let mut auth_header = String::new();
+                    if let Some(u) = &p.username {
+                        if !u.is_empty() {
+                            let p_auth = p.password.as_ref().map(|s| s.as_str()).unwrap_or("");
+                            let auth_str = format!("{}:{}", u, p_auth);
+                            let encoded = BASE64_STANDARD.encode(auth_str);
+                            auth_header = format!("\r\nProxy-Authorization: Basic {}", encoded);
+                        }
+                    }
+
+                    let connect_req = format!(
+                        "CONNECT {}:{} HTTP/1.1\r\nHost: {}:{} {}\r\n\r\n",
+                        j.host, j.port, j.host, j.port, auth_header
+                    );
+                    stream.write_all(connect_req.as_bytes()).await.map_err(|e| e.to_string())?;
+
+                    let mut response = [0u8; 4096];
+                    let n = stream.read(&mut response).await.map_err(|e| e.to_string())?;
+                    let response_text = String::from_utf8_lossy(&response[..n]);
+                    if !response_text.contains("200 Connection established") && !response_text.contains("200 OK") {
+                        return Err(format!("HTTP proxy returned error when connecting to jumphost: {}", response_text));
+                    }
+                    client::connect_stream(config.clone(), stream, jh_handler).await
+                        .map_err(|e| format!("Failed to connect to jumphost via HTTP proxy: {}", e))?
+                } else {
+                    return Err(format!("Unsupported proxy type: {}", p.proxy_type));
+                }
+            } else {
+                client::connect(config.clone(), (j.host.as_str(), j.port), jh_handler).await
+                    .map_err(|e| format!("Failed to connect to jumphost: {}", e))?
+            };
+            
+            Self::authenticate_session(
+                &mut jh_session,
+                &j.username,
+                j.password.clone(),
+                j.private_key.clone(),
+                j.passphrase.clone(),
+            ).await.map_err(|e| format!("Jumphost authentication failed: {}", e))?;
+
+            let channel = jh_session.channel_open_direct_tcpip(&params.host, params.port as u32, "127.0.0.1", 22222).await
+                .map_err(|e| format!("Failed to open direct-tcpip through jumphost: {}", e))?;
+            
+            client::connect_stream(config, channel.into_stream(), handler).await
+        } else {
+            client::connect(config, (&params.host[..], params.port), handler).await
+        }
+        .map_err(|e| e.to_string())?;
+
+        Self::authenticate_session(
+            &mut session,
+            &params.username,
+            params.password.clone(),
+            params.private_key.clone(),
+            params.passphrase.clone(),
+        ).await?;
+
+        let mut channel = session.channel_open_session().await.map_err(|e| e.to_string())?;
+        
+        let cmd = "uname -s; (grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '\"') || uname -v; whoami; (hostname -I | awk '{print $1}') || hostname";
+        channel.exec(true, cmd).await.map_err(|e| e.to_string())?;
+
+        let mut output = String::new();
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+        let mut elapsed = 0;
+
+        loop {
+            tokio::select! {
+                Some(msg) = channel.wait() => {
+                    match msg {
+                        russh::ChannelMsg::Data { ref data } => {
+                            output.push_str(&String::from_utf8_lossy(data));
+                        }
+                        russh::ChannelMsg::Eof => break,
+                        russh::ChannelMsg::Close => break,
+                        _ => {}
+                    }
+                }
+                _ = interval.tick() => {
+                    elapsed += 100;
+                    if elapsed > 5000 { break; }
+                }
+            }
+        }
+
+        let lines: Vec<&str> = output.lines().collect();
+        let info = SystemInfo {
+            os: lines.get(0).unwrap_or(&"Unknown").trim().to_string(),
+            distro: lines.get(1).unwrap_or(&"Unknown").trim().to_string(),
+            username: lines.get(2).unwrap_or(&"Unknown").trim().to_string(),
+            ip: lines.get(3).unwrap_or(&"Unknown").trim().to_string(),
+        };
+
+        Ok(info)
     }
 }

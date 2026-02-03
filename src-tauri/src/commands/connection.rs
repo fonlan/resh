@@ -109,8 +109,22 @@ pub async fn connect_to_server(
         }
     });
 
-    let session_id = SSHClient::connect(params, tx).await?;
+    let session_id = SSHClient::connect(params.clone(), tx).await?;
     tracing::info!("SSH Session {} established", session_id);
+
+    let session_id_clone = session_id.clone();
+    tokio::spawn(async move {
+        match SSHClient::gather_system_info(params).await {
+            Ok(info) => {
+                if let Err(e) = SSHClient::update_system_info(&session_id_clone, info).await {
+                    tracing::error!("Failed to update system info for {}: {}", session_id_clone, e);
+                }
+            }
+            Err(e) => {
+                tracing::debug!("Failed to gather system info for {} (this is expected for some systems): {}", session_id_clone, e);
+            }
+        }
+    });
 
     Ok(ConnectResponse { session_id })
 }

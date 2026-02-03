@@ -183,87 +183,97 @@ async fn load_history(
     state: &Arc<AppState>,
     session_id: &str,
     is_agent_mode: bool,
-    _provider: &str,
+    ssh_session_id: Option<&str>,
 ) -> Result<Vec<ChatMessage>, String> {
     let max_history = {
         let config = state.config.lock().await;
         config.general.ai_max_history as usize
     };
 
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
+    let dialog_messages: Vec<ChatMessage> = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
 
-    // 加载所有非system消息，按时间排序
-    let mut stmt = conn
-        .prepare(
-            "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
-            FROM ai_messages 
-            WHERE session_id = ?1 
-            ORDER BY created_at ASC",
-        )
-        .map_err(|e| e.to_string())?;
+        // 加载所有非system消息，按时间排序
+        let mut stmt = conn
+            .prepare(
+                "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
+                FROM ai_messages 
+                WHERE session_id = ?1 
+                ORDER BY created_at ASC",
+            )
+            .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map(params![session_id], |row| {
-            let role: String = row.get(0)?;
-            let content_raw: String = row.get(1)?;
-            let reasoning_raw: Option<String> = row.get(2)?;
-            let tool_calls_json: Option<String> = row.get(3).ok();
-            let tool_call_id: Option<String> = row.get(4).ok();
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                let role: String = row.get(0)?;
+                let content_raw: String = row.get(1)?;
+                let reasoning_raw: Option<String> = row.get(2)?;
+                let tool_calls_json: Option<String> = row.get(3).ok();
+                let tool_call_id: Option<String> = row.get(4).ok();
 
-            let content = if content_raw.is_empty() {
-                None
-            } else {
-                Some(content_raw)
-            };
+                let content = if content_raw.is_empty() {
+                    None
+                } else {
+                    Some(content_raw)
+                };
 
-            let tool_calls = if let Some(json) = tool_calls_json {
-                serde_json::from_str(&json).unwrap_or(None)
-            } else {
-                None
-            };
+                let tool_calls = if let Some(json) = tool_calls_json {
+                    serde_json::from_str(&json).unwrap_or(None)
+                } else {
+                    None
+                };
 
-            Ok(ChatMessage {
-                role,
-                content,
-                reasoning_content: reasoning_raw,
-                tool_calls,
-                tool_call_id,
+                Ok(ChatMessage {
+                    role,
+                    content,
+                    reasoning_content: reasoning_raw,
+                    tool_calls,
+                    tool_call_id,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
-    // 收集所有消息
-    let mut all_messages: Vec<ChatMessage> = Vec::new();
-    for row in rows {
-        let msg: ChatMessage = row.map_err(|e| e.to_string())?;
-        all_messages.push(msg);
-    }
+        // 收集所有消息
+        let mut all_messages: Vec<ChatMessage> = Vec::new();
+        for row in rows {
+            let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+            all_messages.push(msg);
+        }
 
-    // 分离system消息和对话消息
-    let _system_msg = all_messages.first().filter(|m| m.role == "system");
-    let dialog_messages: Vec<ChatMessage> = all_messages
-        .into_iter()
-        .filter(|m| m.role != "system")
-        .collect();
+        // 分离system消息和对话消息
+        let dialog_messages: Vec<ChatMessage> = all_messages
+            .into_iter()
+            .filter(|m| m.role != "system")
+            .collect();
 
-    // 从最早的消息开始删除超出max_history的部分
-    let dialog_messages = if dialog_messages.len() > max_history {
-        dialog_messages[dialog_messages.len() - max_history..].to_vec()
-    } else {
-        dialog_messages
+        // 从最早的消息开始删除超出max_history的部分
+        if dialog_messages.len() > max_history {
+            dialog_messages[dialog_messages.len() - max_history..].to_vec()
+        } else {
+            dialog_messages
+        }
     };
 
-    // 构建最终消息列表
     let mut messages: Vec<ChatMessage> = Vec::new();
 
-    // 添加system消息（固定第一条）
     let mode_desc = if is_agent_mode {
         "You are currently in AGENT mode. You can read terminal output AND execute commands to solve problems."
     } else {
         "You are currently in ASK mode. You can read terminal output to analyze issues, but you CANNOT execute commands directly. Suggest commands to the user instead."
     };
-    let full_system_prompt = format!("{}\n\n{}", SYSTEM_PROMPT, mode_desc);
+
+    let mut system_context = String::new();
+    if let Some(ssh_id) = ssh_session_id {
+        if let Some(info) = SSHClient::get_system_info(ssh_id).await {
+            system_context = format!(
+                "\n\nCurrent System Context:\n- OS: {}\n- Distro: {}\n- User: {}\n- IP: {}",
+                info.os, info.distro, info.username, info.ip
+            );
+        }
+    }
+
+    let full_system_prompt = format!("{}\n\n{}{}", SYSTEM_PROMPT, mode_desc, system_context);
 
     messages.push(ChatMessage {
         role: "system".to_string(),
@@ -493,7 +503,7 @@ pub fn run_ai_turn(
             (channel, model, proxy)
         };
 
-        let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, &channel.provider).await?;
+        let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, ssh_session_id.as_deref()).await?;
         let genai_history = to_genai_messages(history);
 
         let genai_tools: Option<Vec<Tool>> = tools.as_ref().map(|ts| {
@@ -963,7 +973,7 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    load_history(&state, &session_id, false, "openai").await.map(|msgs: Vec<ChatMessage>| {
+    load_history(&state, &session_id, false, None).await.map(|msgs: Vec<ChatMessage>| {
         msgs.into_iter()
             .filter(|m| m.role != "system" && m.role != "tool")
             .collect()
@@ -1059,7 +1069,7 @@ pub async fn execute_agent_tools(
 
     let is_agent_mode = mode.as_deref() == Some("agent");
 
-    let provider = {
+    let _provider = {
         let config = state.config.lock().await;
         config
             .ai_channels
@@ -1069,7 +1079,7 @@ pub async fn execute_agent_tools(
             .unwrap_or_else(|| "openai".to_string())
     };
 
-    let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, &provider).await?;
+    let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, ssh_session_id.as_deref()).await?;
     let last_msg = history.last().ok_or("No history found")?;
 
     if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
