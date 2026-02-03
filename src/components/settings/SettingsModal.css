@@ -406,6 +406,21 @@
   opacity: 0.5;
 }
 
+.item-card.inactive {
+  background: transparent;
+}
+
+.item-card.inactive:hover {
+  background: transparent;
+  transform: none;
+  box-shadow: none;
+  border-color: var(--glass-border);
+}
+
+.item-card.inactive:hover::before {
+  opacity: 0;
+}
+
 .item-info {
   flex: 1;
   min-width: 0;

@@ -250,6 +250,8 @@ export const locales = {
       editModel: 'Edit AI Model',
       deleteChannelConfirm: 'Are you sure you want to delete this AI Channel? Associated models will be affected.',
       deleteModelConfirm: 'Are you sure you want to delete this AI Model?',
+      disabled: 'Disabled',
+      channelDisabled: 'Channel Disabled',
       channelForm: {
         name: 'Name',
         type: 'Type',
@@ -527,6 +529,8 @@ export const locales = {
       editModel: '编辑 AI 模型',
       deleteChannelConfirm: '确定要删除此 AI 渠道吗？关联的模型也会受到影响。',
       deleteModelConfirm: '确定要删除此 AI 模型吗？',
+      disabled: '已禁用',
+      channelDisabled: '渠道已禁用',
       channelForm: {
         name: '名称',
         type: '类型',

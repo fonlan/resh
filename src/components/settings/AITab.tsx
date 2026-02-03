@@ -384,11 +384,11 @@ export const AITab: React.FC<AITabProps> = ({
           </div>
         ) : (
           sortedChannels.map((channel) => (
-            <div key={channel.id} className="item-card">
+            <div key={channel.id} className={`item-card ${!channel.isActive ? 'inactive opacity-60' : ''}`}>
               <div className="item-info">
                 <div className="flex items-center gap-2">
                   <span className="item-name">{channel.name}</span>
-                  {channel.isActive && <span className="tag text-xs bg-green-900 text-green-200">Active</span>}
+                  {!channel.isActive && <span className="tag text-xs bg-gray-700 text-gray-300">{t.ai.disabled}</span>}
                 </div>
                 <p className="item-detail">Type: {channel.type}</p>
               </div>
@@ -436,14 +436,14 @@ export const AITab: React.FC<AITabProps> = ({
             const effectivelyEnabled = model.enabled && isChannelActive;
 
             return (
-              <div key={model.id} className={`item-card ${!effectivelyEnabled ? 'opacity-60' : ''}`}>
+              <div key={model.id} className={`item-card ${!effectivelyEnabled ? 'inactive opacity-60' : ''}`}>
                 <div className="item-info">
                   <div className="flex items-center gap-2">
                     <span className="item-name">{model.name}</span>
-                    {!model.enabled && <span className="tag text-xs bg-gray-700 text-gray-300">Disabled</span>}
+                    {!model.enabled && <span className="tag text-xs bg-gray-700 text-gray-300">{t.ai.disabled}</span>}
                     {model.enabled && !isChannelActive && (
                       <span className="tag text-xs bg-yellow-900 text-yellow-200" title="Parent channel is disabled">
-                        Channel Disabled
+                        {t.ai.channelDisabled}
                       </span>
                     )}
                   </div>
