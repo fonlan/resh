@@ -192,6 +192,7 @@ async fn main() {
             commands::connection::send_command,
             commands::connection::resize_terminal,
             commands::connection::close_session,
+            commands::connection::reconnect_session,
             commands::connection::export_terminal_log,
             commands::connection::select_save_path,
             commands::master_password::get_master_password_status,

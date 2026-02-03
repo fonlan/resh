@@ -410,11 +410,20 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   // Listen for reconnect event
   useEffect(() => {
-    const handleReconnect = () => {
-      connectedRef.current = false;
-      setIsConnected(false);
-      setSessionId(null);
-      setConnectTrigger(prev => prev + 1);
+    const handleReconnect = async () => {
+      if (!sessionIdRef.current) return;
+      
+      try {
+        await invoke('reconnect_session', { sessionId: sessionIdRef.current });
+        setIsConnected(true);
+        const reconnectedMsg = t.terminalTab.connected.replace('{id}', sessionIdRef.current);
+        setStatusText(reconnectedMsg);
+      } catch (err) {
+        const errorStr = String(err);
+        const errorMsg = t.terminalTab.error.replace('{error}', errorStr);
+        writeRef.current('\r\n' + errorMsg + '\r\n');
+        setIsConnected(false);
+      }
     };
 
     window.addEventListener(`reconnect:${tabId}`, handleReconnect as unknown as EventListener);
@@ -422,7 +431,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     return () => {
       window.removeEventListener(`reconnect:${tabId}`, handleReconnect as unknown as EventListener);
     };
-  }, [tabId]);
+  }, [tabId, t]);
 
   // Sync terminal size with backend upon connection
   useEffect(() => {

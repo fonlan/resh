@@ -190,6 +190,15 @@ pub async fn close_session(
 }
 
 #[tauri::command]
+pub async fn reconnect_session(
+    session_id: String,
+    _state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    SSHClient::reconnect(&session_id).await?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn export_terminal_log(
     content: String,
     default_path: String,
