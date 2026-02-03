@@ -215,6 +215,10 @@ async fn main() {
             commands::ai::poll_copilot_auth,
             commands::ai::open_url,
             commands::ai::fetch_ai_models,
+            commands::sftp::sftp_list_dir,
+            commands::sftp::sftp_download,
+            commands::sftp::sftp_upload,
+            commands::sftp::pick_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

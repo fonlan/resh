@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, Suspense } from 'react';
-import { Settings, X, Code, Circle, MessageSquare } from 'lucide-react';
+import { Settings, X, Code, Circle, MessageSquare, Folder } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Config } from '../types/config';
@@ -13,6 +13,7 @@ import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
 import { SnippetsSidebar } from './SnippetsSidebar';
 import { AISidebar } from './AISidebar';
+import { SFTPSidebar } from './SFTPSidebar';
 import { TabContextMenu } from './TabContextMenu';
 import { ServerContextMenu } from './ServerContextMenu';
 import { ToastContainer, ToastItem } from './Toast';
@@ -36,6 +37,7 @@ export const MainWindow: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<'servers' | 'auth' | 'proxies' | 'snippets' | 'general'>('servers');
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
+  const [isSFTPOpen, setIsSFTPOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -68,6 +70,9 @@ export const MainWindow: React.FC = () => {
       }
       if (config.general.snippetsSidebarLocked) {
         setIsSnippetsOpen(true);
+      }
+      if (config.general.sftpSidebarLocked) {
+        setIsSFTPOpen(true);
       }
     }
   }, [config?.general]);
@@ -289,6 +294,19 @@ export const MainWindow: React.FC = () => {
     await saveConfig(newConfig);
   }, [config, saveConfig]);
 
+  const handleToggleSFTPLock = useCallback(async () => {
+    if (!config) return;
+    const currentLocked = config.general.sftpSidebarLocked;
+    const newConfig = {
+      ...config,
+      general: {
+        ...config.general,
+        sftpSidebarLocked: !currentLocked
+      }
+    };
+    await saveConfig(newConfig);
+  }, [config, saveConfig]);
+
   const prefetchSettings = useCallback(() => {
     import('./settings/SettingsModal');
   }, []);
@@ -368,6 +386,15 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
+            className={`settings-btn ${isSFTPOpen ? 'bg-gray-700 text-white' : ''}`}
+            onClick={() => setIsSFTPOpen(!isSFTPOpen)}
+            aria-label="SFTP"
+            title="SFTP"
+          >
+            <Folder size={18} />
+          </button>
+          <button
+            type="button"
             className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
             onMouseDown={(e) => {
               e.preventDefault();
@@ -398,6 +425,13 @@ export const MainWindow: React.FC = () => {
 
       {/* Content Area */}
       <div className="content-area" style={{ position: 'relative', display: 'flex', flexDirection: 'row' }}>
+        <SFTPSidebar
+          isOpen={isSFTPOpen}
+          onClose={() => setIsSFTPOpen(false)}
+          isLocked={config?.general.sftpSidebarLocked || false}
+          onToggleLock={handleToggleSFTPLock}
+          sessionId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
+        />
         <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {tabs.length === 0 ? (
           <WelcomeScreen

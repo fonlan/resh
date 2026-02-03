@@ -84,6 +84,7 @@ export interface GeneralSettings {
   debugEnabled: boolean;
   snippetsSidebarLocked: boolean;
   aiSidebarLocked: boolean;
+  sftpSidebarLocked: boolean;
   aiMode: 'ask' | 'agent';
   aiMaxHistory: number;
   aiTimeout: number;

@@ -45,7 +45,7 @@ pub struct SystemInfo {
 
 struct SessionData {
     channel: russh::Channel<russh::client::Msg>,
-    session: russh::client::Handle<ClientHandler>,
+    session: Arc<russh::client::Handle<ClientHandler>>,
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
     config: ConnectParams,
     tx: mpsc::Sender<(String, Vec<u8>)>,
@@ -59,6 +59,10 @@ struct SessionData {
     last_exit_code: Option<i32>,
     pub system_info: Option<SystemInfo>,
 }
+
+// Public wrapper for SessionData to allow external access if needed (safe subset)
+// Not strictly needed if we just expose get_session_handle on SSHClient
+// but SessionData itself is private.
 
 lazy_static! {
     static ref SESSIONS: Mutex<HashMap<String, SessionData>> = Mutex::new(HashMap::new());
@@ -90,7 +94,7 @@ impl SSHClient {
                 session_id.clone(),
                 SessionData {
                     channel,
-                    session,
+                    session: Arc::new(session),
                     jumphost_session: jh_session,
                     config: params,
                     tx,
@@ -134,7 +138,8 @@ impl SSHClient {
         ]);
 
         let config = Arc::new(config);
-        let handler = ClientHandler::with_channel(session_id.clone(), tx.clone());
+        let shell_channel_id = Arc::new(Mutex::new(None));
+        let handler = ClientHandler::with_channel(session_id.clone(), tx.clone(), shell_channel_id.clone());
 
         info!(
             "[SSH] Connecting to {}:{} as {}",
@@ -483,6 +488,12 @@ impl SSHClient {
             .await
             .map_err(|e| e.to_string())?;
 
+        // Set the shell channel ID so the handler knows to only forward data from this channel
+        {
+            let mut id_guard = shell_channel_id.lock().await;
+            *id_guard = Some(channel.id());
+        }
+
         channel
             .request_pty(true, "xterm-256color", cols, rows, 0, 0, &[])
             .await
@@ -620,7 +631,7 @@ impl SSHClient {
                 let mut sessions = SESSIONS.lock().await;
                 if let Some(data) = sessions.get_mut(session_id) {
                     data.channel = channel;
-                    data.session = session;
+                    data.session = Arc::new(session);
                     data.jumphost_session = jh_session;
                     // Reset terminal state for new connection
                     data.terminal_buffer.clear();
@@ -672,6 +683,11 @@ impl SSHClient {
         } else {
             Err("Session not found".to_string())
         }
+    }
+
+    pub async fn get_session_handle(session_id: &str) -> Option<Arc<russh::client::Handle<ClientHandler>>> {
+        let sessions = SESSIONS.lock().await;
+        sessions.get(session_id).map(|s| s.session.clone())
     }
 
     /// Get the current terminal buffer content (last 100KB)

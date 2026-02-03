@@ -182,6 +182,9 @@ pub struct GeneralSettings {
     #[serde(default)]
     #[serde(alias = "aiSidebarLocked", alias = "ai_sidebar_locked")]
     pub ai_sidebar_locked: bool,
+    #[serde(default)]
+    #[serde(alias = "sftpSidebarLocked", alias = "sftp_sidebar_locked")]
+    pub sftp_sidebar_locked: bool,
     #[serde(default = "default_ai_mode")]
     #[serde(alias = "aiMode", alias = "ai_mode")]
     pub ai_mode: String,
@@ -308,6 +311,7 @@ impl Config {
                 debug_enabled: false,
                 snippets_sidebar_locked: false,
                 ai_sidebar_locked: false,
+                sftp_sidebar_locked: false,
                 ai_mode: default_ai_mode(),
                 ai_max_history: 20,
                 ai_timeout: 120,
