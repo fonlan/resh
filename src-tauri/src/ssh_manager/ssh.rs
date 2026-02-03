@@ -498,7 +498,7 @@ impl SSHClient {
         if let Some(session_data) = sessions.get_mut(session_id) {
             session_data.command_recorder = Some(String::new());
             session_data.last_output_len = session_data.terminal_buffer.len();
-            session_data.recording_prompt = Self::extract_prompt(&session_data.terminal_buffer);
+            session_data.recording_prompt = Self::extract_last_line_cleaned(&session_data.terminal_buffer);
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
@@ -508,20 +508,54 @@ impl SSHClient {
         }
     }
 
-    /// Extract potential prompt from terminal buffer end
-    fn extract_prompt(buffer: &str) -> Option<String> {
+    /// Extract the last line from buffer, cleaned of ANSI escapes
+    fn extract_last_line_cleaned(buffer: &str) -> Option<String> {
         let trimmed = buffer.trim_end();
         if trimmed.is_empty() {
             return None;
         }
         let lines: Vec<&str> = trimmed.lines().collect();
         if let Some(last_line) = lines.last() {
-            let last_line = last_line.trim_end();
-            if last_line.ends_with('$') || last_line.ends_with('#') || last_line.ends_with('>') {
-                return Some(last_line.to_string());
+            let cleaned: String = strip_ansi_escapes::strip(last_line)
+                .into_iter()
+                .map(|c| c as char)
+                .collect();
+            let cleaned = cleaned.trim_end().to_string();
+            if !cleaned.is_empty() {
+                return Some(cleaned);
             }
         }
         None
+    }
+
+    /// Check if a line looks like a shell prompt
+    fn is_prompt_like(line: &str) -> bool {
+        // Common prompt endings
+        let prompt_chars = ['$', '#', '>', '%', '❯', '➜', '→', '»', 'λ', '♦', '»'];
+        let trimmed = line.trim_end();
+
+        // Check if line ends with common prompt characters
+        for ch in &prompt_chars {
+            if trimmed.ends_with(*ch) {
+                return true;
+            }
+        }
+
+        // Check for patterns that look like paths (e.g., "/home/user" or "~/project")
+        // followed by a space or special character
+        if trimmed.contains('/') || trimmed.contains('~') || trimmed.contains('\\') {
+            // If line contains path-like patterns and is relatively short, likely a prompt
+            if trimmed.len() < 200 {
+                return true;
+            }
+        }
+
+        // Check for common prompt patterns (e.g., "user@host:path$" format)
+        if trimmed.contains('@') && (trimmed.contains(':') || trimmed.contains(' ')) {
+            return true;
+        }
+
+        false
     }
 
     /// Stop recording and get the recorded output since start_command_recording was called
@@ -572,17 +606,33 @@ impl SSHClient {
                 return Ok(true);
             }
 
-            // Priority 2: Shell prompt detection
+            // Priority 2: New prompt detection - check if a new prompt line appeared
             let lines: Vec<&str> = new_content.lines().collect();
             if let Some(last_line) = lines.last() {
-                let cleaned: String = strip_ansi_escapes::strip(last_line).into_iter().map(|c| c as char).collect();
-                let trimmed = cleaned.trim_end();
+                let cleaned: String = strip_ansi_escapes::strip(last_line)
+                    .into_iter()
+                    .map(|c| c as char)
+                    .collect();
+                let cleaned = cleaned.trim_end();
 
-                if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('>')
-                   || trimmed.ends_with('%') {
-                    if !trimmed.is_empty() {
-                        tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true", session_id, trimmed);
-                        return Ok(true);
+                if !cleaned.is_empty() {
+                    // Check if this is a new prompt line (different from the one we recorded)
+                    if let Some(ref recorded_prompt) = session_data.recording_prompt {
+                        if cleaned != recorded_prompt {
+                            // New line appeared, check if it looks like a prompt
+                            if Self::is_prompt_like(cleaned) {
+                                tracing::debug!("[check_command_completed] {} - new prompt detected: {:?} (was: {:?}), returning true",
+                                    session_id, cleaned, recorded_prompt);
+                                return Ok(true);
+                            }
+                        }
+                    } else {
+                        // No previous prompt recorded, just check if it looks like a prompt
+                        if Self::is_prompt_like(cleaned) {
+                            tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
+                                session_id, cleaned);
+                            return Ok(true);
+                        }
                     }
                 }
             }
