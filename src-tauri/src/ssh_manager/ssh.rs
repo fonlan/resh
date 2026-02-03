@@ -622,6 +622,12 @@ impl SSHClient {
                     data.channel = channel;
                     data.session = session;
                     data.jumphost_session = jh_session;
+                    // Reset terminal state for new connection
+                    data.terminal_buffer.clear();
+                    data.command_recorder = None;
+                    data.last_output_len = 0;
+                    data.recording_prompt = None;
+                    data.command_finished = false;
                     info!("[SSH] Reconnection successful for {}", session_id);
                     Ok(())
                 } else {
