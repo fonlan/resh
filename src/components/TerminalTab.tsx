@@ -403,6 +403,22 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
   }, [tabId, config?.general.recordingMode]);
 
+  // Listen for reconnect event
+  useEffect(() => {
+    const handleReconnect = () => {
+      connectedRef.current = false;
+      setIsConnected(false);
+      setSessionId(null);
+      setConnectTrigger(prev => prev + 1);
+    };
+
+    window.addEventListener(`reconnect:${tabId}`, handleReconnect as unknown as EventListener);
+
+    return () => {
+      window.removeEventListener(`reconnect:${tabId}`, handleReconnect as unknown as EventListener);
+    };
+  }, [tabId]);
+
   // Sync terminal size with backend upon connection
   useEffect(() => {
     if (isConnected && terminal && sessionId) {

@@ -218,6 +218,10 @@ export const MainWindow: React.FC = () => {
     });
   }, []);
 
+  const handleReconnect = useCallback((tabId: string) => {
+    window.dispatchEvent(new CustomEvent(`reconnect:${tabId}`));
+  }, []);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
     e.preventDefault();
     setContextMenu({
@@ -455,6 +459,7 @@ export const MainWindow: React.FC = () => {
           isRecording={recordingTabs.has(contextMenu.tabId)}
           onClose={() => setContextMenu(null)}
           onClone={handleCloneTab}
+          onReconnect={handleReconnect}
           onExport={handleExportLogs}
           onStartRecording={handleStartRecording}
           onStopRecording={handleStopRecording}

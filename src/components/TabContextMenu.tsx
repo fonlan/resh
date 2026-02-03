@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Copy, X, XCircle, FileDown, Circle, Square } from 'lucide-react';
+import { Copy, X, XCircle, FileDown, Circle, Square, RefreshCw } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
 interface TabContextMenuProps {
@@ -9,6 +9,7 @@ interface TabContextMenuProps {
   isRecording: boolean;
   onClose: () => void;
   onClone: (tabId: string) => void;
+  onReconnect: (tabId: string) => void;
   onExport: (tabId: string) => void;
   onStartRecording: (tabId: string) => void;
   onStopRecording: (tabId: string) => void;
@@ -23,6 +24,7 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
   isRecording,
   onClose,
   onClone,
+  onReconnect,
   onExport,
   onStartRecording,
   onStopRecording,
@@ -94,6 +96,18 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
       >
         <Copy size={14} />
         <span>{t.mainWindow.cloneTab}</span>
+      </button>
+
+      <button
+        type="button"
+        className="tab-context-menu-item"
+        onClick={() => {
+          onReconnect(tabId);
+          onClose();
+        }}
+      >
+        <RefreshCw size={14} />
+        <span>{t.mainWindow.reconnect}</span>
       </button>
 
       <button
