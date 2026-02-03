@@ -918,14 +918,15 @@ pub async fn create_ai_session(
     state: State<'_, Arc<AppState>>,
     server_id: String,
     model_id: Option<String>,
+    ssh_session_id: Option<String>,
 ) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
 
     conn.execute(
-        "INSERT INTO ai_sessions (id, server_id, title, model_id) VALUES (?1, ?2, ?3, ?4)",
-        params![id, server_id, "New Chat", model_id],
+        "INSERT INTO ai_sessions (id, server_id, title, model_id, ssh_session_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![id, server_id, "New Chat", model_id, ssh_session_id],
     )
     .map_err(|e| e.to_string())?;
 
@@ -942,7 +943,7 @@ pub async fn get_ai_sessions(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, title, created_at, model_id FROM ai_sessions 
+            "SELECT id, title, created_at, model_id, ssh_session_id FROM ai_sessions 
          WHERE server_id = ?1 
          AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)
          ORDER BY created_at DESC",
@@ -956,6 +957,7 @@ pub async fn get_ai_sessions(
                 "title": row.get::<_, String>(1)?,
                 "createdAt": row.get::<_, String>(2)?,
                 "modelId": row.get::<_, Option<String>>(3)?,
+                "sshSessionId": row.get::<_, Option<String>>(4)?,
             }))
         })
         .map_err(|e| e.to_string())?;
@@ -993,6 +995,36 @@ pub async fn send_chat_message(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
+    // 绑定 SSH 会话 ID 到 AI 会话（如果尚未绑定）
+    let bound_ssh_session_id = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        
+        let existing_ssh_id: Option<String> = conn.query_row(
+            "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        ).ok();
+
+        if existing_ssh_id.is_none() || existing_ssh_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+            if let Some(ref new_id) = ssh_session_id {
+                if !new_id.is_empty() {
+                    conn.execute(
+                        "UPDATE ai_sessions SET ssh_session_id = ?1 WHERE id = ?2",
+                        params![new_id, session_id],
+                    ).ok();
+                    ssh_session_id.clone()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            existing_ssh_id
+        }
+    };
+
     let user_msg_id = Uuid::new_v4().to_string();
     {
         let conn = state.db_manager.get_connection();
@@ -1027,7 +1059,7 @@ pub async fn send_chat_message(
         is_agent_mode,
         tools,
         token,
-        ssh_session_id,
+        bound_ssh_session_id,
     )
     .await;
 
@@ -1067,6 +1099,24 @@ pub async fn execute_agent_tools(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
+    // 获取绑定的 SSH 会话 ID
+    let bound_ssh_session_id = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        
+        let existing_ssh_id: Option<String> = conn.query_row(
+            "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        ).ok();
+
+        if existing_ssh_id.is_none() || existing_ssh_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+            ssh_session_id.clone()
+        } else {
+            existing_ssh_id
+        }
+    };
+
     let is_agent_mode = mode.as_deref() == Some("agent");
 
     let _provider = {
@@ -1079,7 +1129,7 @@ pub async fn execute_agent_tools(
             .unwrap_or_else(|| "openai".to_string())
     };
 
-    let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, ssh_session_id.as_deref()).await?;
+    let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, bound_ssh_session_id.as_deref()).await?;
     let last_msg = history.last().ok_or("No history found")?;
 
     if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
@@ -1117,7 +1167,7 @@ pub async fn execute_agent_tools(
     let exec_res = execute_tools_and_save(
         &state,
         &session_id,
-        ssh_session_id.as_deref(),
+        bound_ssh_session_id.as_deref(),
         tools_filtered,
         token.clone(),
     )
@@ -1139,7 +1189,7 @@ pub async fn execute_agent_tools(
         is_agent_mode,
         tools,
         token,
-        ssh_session_id,
+        bound_ssh_session_id,
     )
     .await;
 

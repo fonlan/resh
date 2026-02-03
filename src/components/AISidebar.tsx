@@ -376,6 +376,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   const isLoading = activeSessionId ? isGenerating[activeSessionId] || false : false;
   const pendingToolCalls = activeSessionId ? pendingToolCallsMap[activeSessionId] || null : null;
+  const currentSession = useMemo(() => 
+    sessions.find(s => s.id === activeSessionId),
+    [sessions, activeSessionId]
+  );
+  const boundSshSessionId = currentSession?.sshSessionId || currentTabId;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
@@ -550,7 +555,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           selectedModelId,
           channelId,
           mode,
-          currentTabId,
+          boundSshSessionId,
           calls.map(c => c.id)
         ).catch(() => {
           // Failed to auto-execute safe tools
@@ -604,7 +609,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, addCompleteMessage, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, currentTabId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, addCompleteMessage, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, boundSshSessionId, sessions, currentServerId, loadSessions]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -653,7 +658,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (!sessionId) {
       if (!currentServerId) return;
       try {
-        sessionId = await createSession(currentServerId, selectedModelId);
+        sessionId = await createSession(currentServerId, selectedModelId, currentTabId);
       } catch (err) {
         return;
       }
@@ -685,16 +690,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         selectedModelId, 
         channelId,
         mode,
-        currentTabId
+        boundSshSessionId
       );
       
       if (currentServerId) {
-        loadSessions(currentServerId);
+        await loadSessions(currentServerId);
       }
     } catch (err) {
       setGenerating(sessionId, false);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, isLoading, pendingToolCalls, clearSessionStopped, loadSessions]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, boundSshSessionId, isLoading, pendingToolCalls, clearSessionStopped, loadSessions]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
@@ -713,13 +718,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         selectedModelId,
         channelId,
         mode,
-        currentTabId,
+        boundSshSessionId,
         callsToExecute
       );
     } catch (err) {
       setGenerating(activeSessionId, false);
     }
-  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, currentTabId, setGenerating, storeSetPendingToolCalls, clearSessionStopped]);
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, boundSshSessionId, setGenerating, storeSetPendingToolCalls, clearSessionStopped]);
 
   const handleCancelTools = useCallback(() => {
     if (activeSessionId) {

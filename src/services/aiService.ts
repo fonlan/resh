@@ -2,8 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { ChatMessage, AISession } from '../types/ai';
 
 export const aiService = {
-  createSession: (serverId: string, modelId?: string) => 
-    invoke<string>('create_ai_session', { serverId, modelId }),
+  createSession: (serverId: string, modelId?: string, sshSessionId?: string) => 
+    invoke<string>('create_ai_session', { serverId, modelId, sshSessionId }),
     
   getSessions: (serverId: string) => 
     invoke<AISession[]>('get_ai_sessions', { serverId }),

@@ -13,7 +13,7 @@ interface AIState {
   stoppedSessions: Set<string>; // Track sessions that were manually stopped
   
   loadSessions: (serverId: string) => Promise<void>;
-  createSession: (serverId: string, modelId?: string) => Promise<string>;
+  createSession: (serverId: string, modelId?: string, sshSessionId?: string) => Promise<string>;
   selectSession: (sessionId: string | null, serverId?: string) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   newAssistantMessage: (sessionId: string) => void;
@@ -72,8 +72,8 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  createSession: async (serverId, modelId) => {
-    const id = await aiService.createSession(serverId, modelId);
+  createSession: async (serverId, modelId, sshSessionId) => {
+    const id = await aiService.createSession(serverId, modelId, sshSessionId);
     await get().loadSessions(serverId);
     await get().selectSession(id, serverId);
     return id;

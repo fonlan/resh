@@ -20,4 +20,5 @@ export interface AISession {
   title: string;
   createdAt: string;
   modelId: string | null;
+  sshSessionId?: string | null;
 }

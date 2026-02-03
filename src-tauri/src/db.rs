@@ -33,6 +33,7 @@ impl DatabaseManager {
                 server_id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 model_id TEXT,
+                ssh_session_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
@@ -61,6 +62,9 @@ impl DatabaseManager {
             "ALTER TABLE ai_messages ADD COLUMN reasoning_content TEXT",
             [],
         );
+
+        // Migration: Ensure ssh_session_id column exists for ai_sessions
+        let _ = conn.execute("ALTER TABLE ai_sessions ADD COLUMN ssh_session_id TEXT", []);
 
         let _ = conn.execute(
             "DELETE FROM ai_sessions 
