@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
 import { Server, Authentication, ProxyConfig as ProxyType, Snippet } from '../../types/config';
 import { FormModal } from '../FormModal';
@@ -14,6 +14,7 @@ interface ServerTabProps {
   snippets?: Snippet[];
   onServersUpdate: (servers: Server[]) => void;
   onConnectServer?: (serverId: string) => void;
+  editServerId?: string | null;
 }
 
 export const ServerTab: React.FC<ServerTabProps> = ({
@@ -23,6 +24,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   snippets = [],
   onServersUpdate,
   onConnectServer,
+  editServerId,
 }) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -31,32 +33,17 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   const [serverToDelete, setServerToDelete] = useState<{ id: string; isInUse: boolean } | null>(null);
   const formRef = useRef<ServerFormHandle>(null);
 
-  // Sync state with formref
-  useEffect(() => {
-    if (formRef.current) {
-      setIsSynced(formRef.current.synced);
-    }
-  }, [isFormOpen]);
-
-  const existingNames = servers
-    .filter((s) => s.id !== editingServer?.id)
-    .map((s) => s.name);
-
-  const globalSnippetGroups = Array.from(new Set(
-    snippets.map(s => s.group || t.snippetForm.defaultGroup)
-  ));
-
   const handleAddServer = () => {
     setEditingServer(null);
     setIsSynced(true);
     setIsFormOpen(true);
   };
 
-  const handleEditServer = (server: Server) => {
+  const handleEditServer = useCallback((server: Server) => {
     setEditingServer(server);
     setIsSynced(server.synced !== undefined ? server.synced : true);
     setIsFormOpen(true);
-  };
+  }, []);
 
   const handleDeleteServer = (serverId: string) => {
     const usingServers = servers.filter((s) => s.jumphostId === serverId);
@@ -75,11 +62,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({
 
   const handleSaveServer = (server: Server) => {
     if (editingServer) {
-      // Update existing
       const updatedServers = servers.map((s) => (s.id === editingServer.id ? { ...server, id: s.id } : s));
       onServersUpdate(updatedServers);
     } else {
-      // Add new
       onServersUpdate([...servers, { ...server, id: generateId() }]);
     }
     setIsFormOpen(false);
@@ -87,11 +72,33 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   };
 
   const handleFormSubmit = () => {
-    // Trigger form validation and submission via ref
     if (formRef.current) {
       formRef.current.submit();
     }
   };
+
+  useEffect(() => {
+    if (editServerId) {
+      const server = servers.find((s) => s.id === editServerId);
+      if (server) {
+        handleEditServer(server);
+      }
+    }
+  }, [editServerId, servers, handleEditServer]);
+
+  useEffect(() => {
+    if (formRef.current) {
+      setIsSynced(formRef.current.synced);
+    }
+  }, [isFormOpen]);
+
+  const existingNames = servers
+    .filter((s) => s.id !== editingServer?.id)
+    .map((s) => s.name);
+
+  const globalSnippetGroups = Array.from(new Set(
+    snippets.map(s => s.group || t.snippetForm.defaultGroup)
+  ));
 
   const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
 

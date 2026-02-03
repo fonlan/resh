@@ -14,6 +14,7 @@ import { NewTabButton } from './NewTabButton';
 import { SnippetsSidebar } from './SnippetsSidebar';
 import { AISidebar } from './AISidebar';
 import { TabContextMenu } from './TabContextMenu';
+import { ServerContextMenu } from './ServerContextMenu';
 import { ToastContainer, ToastItem } from './Toast';
 import { useConfig } from '../hooks/useConfig';
 import { generateId } from '../utils/idGenerator';
@@ -72,6 +73,8 @@ export const MainWindow: React.FC = () => {
   }, [config?.general]);
 
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
+  const [serverContextMenu, setServerContextMenu] = useState<{ x: number, y: number, serverId: string } | null>(null);
+  const [editServerId, setEditServerId] = useState<string | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId
 
@@ -231,15 +234,34 @@ export const MainWindow: React.FC = () => {
     });
   }, []);
 
+  const handleServerContextMenu = useCallback((e: React.MouseEvent, serverId: string) => {
+    e.preventDefault();
+    setServerContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      serverId
+    });
+  }, []);
+
   const handleConnectServer = useCallback((serverId: string) => {
     handleAddTab(serverId);
     setIsSettingsOpen(false);
+    setEditServerId(null);
   }, [handleAddTab]);
 
   const handleOpenSettings = useCallback((tab: 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' = 'servers') => {
     setSettingsInitialTab(tab);
     setIsSettingsOpen(true);
+    if (tab !== 'servers') {
+      setEditServerId(null);
+    }
   }, []);
+
+  const handleEditServerFromMenu = useCallback((serverId: string) => {
+    setEditServerId(serverId);
+    handleOpenSettings('servers');
+    setServerContextMenu(null);
+  }, [handleOpenSettings]);
 
   const handleToggleSnippetsLock = useCallback(async () => {
     if (!config) return;
@@ -382,6 +404,7 @@ export const MainWindow: React.FC = () => {
             servers={recentServers}
             onServerClick={handleAddTab}
             onOpenSettings={() => handleOpenSettings('servers')}
+            onServerContextMenu={handleServerContextMenu}
           />
         ) : (
           tabs.map((tab) => {
@@ -443,9 +466,13 @@ export const MainWindow: React.FC = () => {
         {isSettingsOpen && (
           <SettingsModal
             isOpen={isSettingsOpen}
-            onClose={() => setIsSettingsOpen(false)}
+            onClose={() => {
+              setIsSettingsOpen(false);
+              setEditServerId(null);
+            }}
             onConnectServer={handleConnectServer}
             initialTab={settingsInitialTab}
+            editServerId={editServerId}
           />
         )}
       </Suspense>
@@ -465,6 +492,17 @@ export const MainWindow: React.FC = () => {
           onStopRecording={handleStopRecording}
           onCloseTab={handleCloseTab}
           onCloseOthers={handleCloseOthers}
+        />
+      )}
+
+      {serverContextMenu && (
+        <ServerContextMenu
+          x={serverContextMenu.x}
+          y={serverContextMenu.y}
+          serverId={serverContextMenu.serverId}
+          onClose={() => setServerContextMenu(null)}
+          onEdit={handleEditServerFromMenu}
+          onConnect={(serverId) => handleAddTab(serverId)}
         />
       )}
 

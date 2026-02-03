@@ -8,12 +8,14 @@ interface WelcomeScreenProps {
   servers: Server[];
   onServerClick: (serverId: string) => void;
   onOpenSettings: () => void;
+  onServerContextMenu: (e: React.MouseEvent, serverId: string) => void;
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   servers,
   onServerClick,
   onOpenSettings,
+  onServerContextMenu,
 }) => {
   const { t } = useTranslation();
   const hasServers = servers.length > 0;
@@ -44,6 +46,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                   key={server.id}
                   className="server-card"
                   onClick={() => onServerClick(server.id)}
+                  onContextMenu={(e) => onServerContextMenu(e, server.id)}
                 >
                   <div className="server-card-icon">
                     <ServerIcon size={20} />

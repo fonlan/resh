@@ -17,17 +17,24 @@ export interface SettingsModalProps {
   onClose: () => void;
   onConnectServer?: (serverId: string) => void;
   initialTab?: TabType;
+  editServerId?: string | null;
 }
 
 type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers' }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers', editServerId }) => {
   const { config, loading, error, saveConfig } = useConfig();
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (editServerId) {
+      setActiveTab('servers');
+    }
+  }, [editServerId]);
 
   // Local state for config
   const [localConfig, setLocalConfig] = useState<Config | null>(null);
@@ -302,6 +309,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 snippets={localConfig.snippets}
                 onServersUpdate={handleServersUpdate}
                 onConnectServer={handleConnectServer}
+                editServerId={editServerId}
               />
             )}
             {activeTab === 'auth' && (
