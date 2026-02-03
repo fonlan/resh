@@ -695,14 +695,6 @@ impl SSHClient {
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
-            tracing::info!(
-                "[start_command_recording] {} - buffer_len={}, last_output_len={}, recorded_prompt={:?}",
-                session_id,
-                session_data.terminal_buffer.len(),
-                session_data.last_output_len,
-                session_data.recording_prompt
-            );
-
             Ok(())
         } else {
             Err("Session not found".to_string())
@@ -785,21 +777,13 @@ impl SSHClient {
             // Priority 2: Prompt suffix comparison
             // Record prompt suffix before command, compare after command
             // Simple and works with any shell/theme
-            let new_suffix = Self::extract_prompt_suffix(new_content, 3);
-            tracing::info!("[check_command_completed {} - new_suffix={:?}, recorded={:?}",
-                session_id, new_suffix, session_data.recording_prompt);
-
             if let Some(ref recorded) = session_data.recording_prompt {
+                let new_suffix = Self::extract_prompt_suffix(new_content, 3);
                 if new_suffix.as_ref().map(|s| s.as_str()) == Some(recorded.as_str()) {
                     tracing::debug!("[check_command_completed] {} - prompt suffix matches, command completed",
                         session_id);
                     return Ok(true);
-                } else {
-                    tracing::info!("[check_command_completed] {} - suffix differs: {:?} vs {:?}",
-                        session_id, new_suffix, recorded);
                 }
-            } else {
-                tracing::info!("[check_command_completed] {} - no recorded suffix", session_id);
             }
 
             tracing::debug!("[check_command_completed] {} - returning false", session_id);
