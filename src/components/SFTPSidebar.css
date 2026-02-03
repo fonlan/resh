@@ -65,7 +65,7 @@
 }
 
 .sftp-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
   display: flex;
@@ -114,10 +114,11 @@
 .sftp-tree-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 8px;
+  padding: 3px 8px !important;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  line-height: normal;
   color: var(--text-primary);
   white-space: nowrap;
   user-select: none;
@@ -178,7 +179,7 @@
   border: none;
   background: transparent;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
   border-radius: 6px;
   text-align: left;

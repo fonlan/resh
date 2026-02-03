@@ -37,7 +37,7 @@ const FileTreeItem: React.FC<{
     <div style={{ paddingLeft: `${depth * 12}px` }}>
       <button 
         type="button"
-        className={`sftp-tree-item ${entry.isExpanded ? 'expanded' : ''} w-full text-left bg-transparent border-0 p-0 m-0 flex items-center cursor-pointer hover:bg-[var(--bg-tertiary)]`}
+        className={`sftp-tree-item ${entry.isExpanded ? 'expanded' : ''} w-full text-left bg-transparent border-0 m-0 flex items-center cursor-pointer hover:bg-[var(--bg-tertiary)]`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         style={{ color: 'inherit' }}
