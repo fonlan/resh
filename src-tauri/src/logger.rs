@@ -48,7 +48,8 @@ pub fn init_logging(app_data_dir: PathBuf, debug_enabled: bool) {
                     || target.starts_with("h2")
                     || target.starts_with("hyper_util")
                     || target.starts_with("reqwest::connect")
-                    || target.starts_with("russh::")
+                    || target.starts_with("russh")
+                    || target.starts_with("tao")
                 {
                     // Completely disable these modules (they leak sensitive paths)
                     false
