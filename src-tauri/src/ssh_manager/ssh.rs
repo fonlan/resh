@@ -55,7 +55,6 @@ struct SessionData {
     command_recorder: Option<String>,
     last_output_len: usize,
     recording_prompt: Option<String>,
-    recording_line_count: usize,
     command_finished: bool,
     last_exit_code: Option<i32>,
     pub system_info: Option<SystemInfo>,
@@ -101,7 +100,6 @@ impl SSHClient {
                     command_recorder: None,
                     last_output_len: 0,
                     recording_prompt: None,
-                    recording_line_count: 0,
                     command_finished: false,
                     last_exit_code: None,
                     system_info: None,
@@ -693,8 +691,7 @@ impl SSHClient {
             session_data.command_recorder = Some(String::new());
             session_data.last_output_len = session_data.terminal_buffer.len();
             session_data.recording_prompt =
-                Self::extract_last_line_cleaned(&session_data.terminal_buffer);
-            session_data.recording_line_count = Self::count_non_empty_lines(&session_data.terminal_buffer);
+                Self::extract_last_line_raw(&session_data.terminal_buffer);
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
@@ -713,36 +710,21 @@ impl SSHClient {
     }
 
     /// Extract the last line from buffer, cleaned of ANSI escapes
-    fn extract_last_line_cleaned(buffer: &str) -> Option<String> {
+    /// Extract the RAW last line from buffer (without ANSI cleaning)
+    /// This preserves Nerd Font icon bytes which are different between icons
+    fn extract_last_line_raw(buffer: &str) -> Option<String> {
         let trimmed = buffer.trim_end();
         if trimmed.is_empty() {
             return None;
         }
         let lines: Vec<&str> = trimmed.lines().collect();
         if let Some(last_line) = lines.last() {
-            let cleaned: String = strip_ansi_escapes::strip(last_line)
-                .into_iter()
-                .map(|c| c as char)
-                .collect();
-            let cleaned = cleaned.trim_end().to_string();
-            if !cleaned.is_empty() {
-                return Some(cleaned);
+            let trimmed_line = last_line.trim_end();
+            if !trimmed_line.is_empty() {
+                return Some(trimmed_line.to_string());
             }
         }
         None
-    }
-
-    /// Count non-empty lines in buffer (lines that contain visible characters)
-    fn count_non_empty_lines(buffer: &str) -> usize {
-        let trimmed = buffer.trim_end();
-        if trimmed.is_empty() {
-            return 0;
-        }
-        trimmed.lines().filter(|line| {
-            let stripped = strip_ansi_escapes::strip(line.as_bytes());
-            let cleaned: String = stripped.into_iter().map(|c| c as char).collect();
-            !cleaned.trim().is_empty()
-        }).count()
     }
 
     /// Check if a line looks like a shell prompt
@@ -842,60 +824,39 @@ impl SSHClient {
             tracing::info!("[check_command_completed] {} - new_content has {} lines", session_id, lines.len());
             
             if let Some(last_line) = lines.last() {
-                let cleaned: String = strip_ansi_escapes::strip(last_line)
-                    .into_iter()
-                    .map(|c| c as char)
-                    .collect();
-                let cleaned = cleaned.trim();
-                
-                tracing::info!(
-                    "[check_command_completed] {} - last_line={:?}, cleaned={:?}, recorded={:?}",
-                    session_id, last_line, cleaned, session_data.recording_prompt
-                );
+                let last_line_trimmed = last_line.trim_end();
 
-                if !cleaned.is_empty() {
-                    // Check if line count increased (indicates new prompt appeared)
-                    let new_line_count = Self::count_non_empty_lines(new_content);
-                    tracing::info!("[check_command_completed] {} - new_line_count={}, recorded_line_count={}",
-                        session_id, new_line_count, session_data.recording_line_count);
+                // Compare RAW content (not cleaned) - Nerd Font icons have different UTF-8 bytes
+                // This avoids the issue where strip_ansi_escapes converts different icons to same garbled text
+                tracing::info!("[check_command_completed] {} - raw last_line={:?}, recorded={:?}",
+                    session_id, last_line_trimmed, session_data.recording_prompt);
 
-                    // Also check if the content changed significantly
-                    if new_line_count > session_data.recording_line_count {
-                        // More non-empty lines appeared, likely command finished
-                        tracing::debug!("[check_command_completed] {} - line count increased ({} -> {}), command completed",
-                            session_id, session_data.recording_line_count, new_line_count);
-                        return Ok(true);
-                    }
-
-                    // Check if this is a new prompt line (different from the one we recorded)
-                    if let Some(ref recorded_prompt) = session_data.recording_prompt {
-                        if cleaned != recorded_prompt {
-                            // New line appeared, check if it looks like a prompt
-                            if Self::is_prompt_like(cleaned) {
-                                tracing::debug!("[check_command_completed] {} - new prompt detected: {:?} (was: {:?}), returning true",
-                                    session_id, cleaned, recorded_prompt);
-                                return Ok(true);
-                            } else {
-                                tracing::info!("[check_command_completed] {} - line differs but not prompt-like: {:?}",
-                                    session_id, cleaned);
-                            }
-                        } else {
-                            tracing::info!("[check_command_completed] {} - line same as recorded: {:?}",
-                                session_id, cleaned);
-                        }
-                    } else {
-                        // No previous prompt recorded, just check if it looks like a prompt
-                        if Self::is_prompt_like(cleaned) {
-                            tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
-                                session_id, cleaned);
+                if let Some(ref recorded) = session_data.recording_prompt {
+                    // Check if the last line changed (indicates new prompt appeared)
+                    if last_line_trimmed != recorded {
+                        // New line appeared, check if it looks like a prompt
+                        if Self::is_prompt_like(last_line_trimmed) {
+                            tracing::debug!("[check_command_completed] {} - new prompt detected: {:?} (was: {:?}), returning true",
+                                session_id, last_line_trimmed, recorded);
                             return Ok(true);
                         } else {
-                            tracing::info!("[check_command_completed] {} - no recorded prompt and line not prompt-like: {:?}",
-                                session_id, cleaned);
+                            tracing::info!("[check_command_completed] {} - line differs but not prompt-like: {:?}",
+                                session_id, last_line_trimmed);
                         }
+                    } else {
+                        tracing::info!("[check_command_completed] {} - line same as recorded: {:?}",
+                            session_id, last_line_trimmed);
                     }
                 } else {
-                    tracing::info!("[check_command_completed] {} - cleaned line is empty", session_id);
+                    // No previous prompt recorded, just check if it looks like a prompt
+                    if Self::is_prompt_like(last_line_trimmed) {
+                        tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
+                            session_id, last_line_trimmed);
+                        return Ok(true);
+                    } else {
+                        tracing::info!("[check_command_completed] {} - no recorded prompt and line not prompt-like: {:?}",
+                            session_id, last_line_trimmed);
+                    }
                 }
             }
 
