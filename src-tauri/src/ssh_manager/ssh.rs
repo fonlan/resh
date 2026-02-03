@@ -662,8 +662,11 @@ impl SSHClient {
             session_data.terminal_buffer.push_str(data);
             
             if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
-                let excess = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
-                session_data.terminal_buffer = session_data.terminal_buffer[excess..].to_string();
+                let mut cut_off = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
+                while cut_off < session_data.terminal_buffer.len() && !session_data.terminal_buffer.is_char_boundary(cut_off) {
+                    cut_off += 1;
+                }
+                session_data.terminal_buffer = session_data.terminal_buffer[cut_off..].to_string();
             }
 
             if let Some(recorder) = session_data.command_recorder.as_mut() {
