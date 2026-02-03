@@ -28,7 +28,7 @@ impl ValidationResult {
 /// 严格规则：
 /// 1. 第一条必须是system消息
 /// 2. 严格遵循 User -> Assistant -> User -> Assistant 顺序
-/// 3. 严禁连续出现两条相同角色的消息
+/// 3. 严禁连续出现两条相同角色的消息（role: "tool" 除外，必须为每个 ID 独立回传消息）
 /// 4. 严禁以 Assistant 消息结尾（最后必须是 User 或 Tool）
 /// 5. 只有当 role: "assistant" 且包含 tool_calls 时，content 可以为 null，否则不能为空
 /// 6. role: "tool" 的消息中，tool_call_id 必须严格对应上一条 Assistant 消息中的 ID
@@ -41,16 +41,22 @@ impl ValidationResult {
 pub fn validate_and_fix_messages(messages: &mut Vec<MessagePayload>) -> ValidationResult {
     let mut result = ValidationResult::new();
 
-    // 1. 合并连续同角色消息
+    // 1. 修复工具调用序列（移除没有响应的 tool_calls 或没有对应 assistant 的 tool 消息）
+    fix_tool_call_sequences(messages, &mut result);
+
+    // 2. 移除空 Assistant 消息（可能由上一步产生）
+    remove_empty_assistant_messages(messages, &mut result);
+
+    // 3. 合并连续同角色消息（可能由上一步产生）
     merge_duplicate_roles(messages, &mut result);
 
-    // 2. 移除以Assistant结尾的空消息
+    // 4. 移除以 Assistant 结尾的空消息（冗余检查，但在某些边缘情况有用）
     trim_trailing_empty_assistant(messages, &mut result);
 
-    // 3. 验证tool_call_id对应关系
+    // 5. 验证 tool_call_id 对应关系
     validate_tool_call_ids(messages, &mut result);
 
-    // 4. 验证消息序列逻辑
+    // 6. 验证消息序列逻辑（生成警告日志）
     validate_message_sequence(messages, &mut result);
 
     result
@@ -80,13 +86,16 @@ fn merge_duplicate_roles(messages: &mut Vec<MessagePayload>, result: &mut Valida
         let current_role = messages[i].role.clone();
         let next_role = messages[i + 1].role.clone();
 
-        if current_role == next_role {
+        if current_role == next_role && current_role != "tool" {
             // 合并所有连续的相同角色消息
             let merged_content = merge_content(&messages[i].content, &messages[i + 1].content);
 
             // 对于 assistant 消息，还需要合并 reasoning_content
             let merged_reasoning = if current_role == "assistant" {
-                merge_content(&messages[i].reasoning_content, &messages[i + 1].reasoning_content)
+                merge_content(
+                    &messages[i].reasoning_content,
+                    &messages[i + 1].reasoning_content,
+                )
             } else {
                 messages[i].reasoning_content.clone()
             };
@@ -117,6 +126,125 @@ fn merge_content(a: &Option<String>, b: &Option<String>) -> Option<String> {
         (Some(a), None) => Some(a.clone()),
         (None, Some(b)) => Some(b.clone()),
         (None, None) => None,
+    }
+}
+
+/// 修复工具调用序列
+/// 1. 为没有响应的 tool_calls 补全 dummy 响应
+/// 2. 移除没有紧跟在 Assistant 消息后的 Tool 消息
+fn fix_tool_call_sequences(messages: &mut Vec<MessagePayload>, result: &mut ValidationResult) {
+    let mut i = 0;
+    while i < messages.len() {
+        if messages[i].role == "assistant" {
+            let tool_call_ids: Vec<String> = if let Some(calls) = &messages[i].tool_calls {
+                calls.iter().map(|c| c.id.clone()).collect()
+            } else {
+                Vec::new()
+            };
+
+            // 检查后续消息
+            let mut j = i + 1;
+            let mut responded_ids = HashSet::new();
+            while j < messages.len() && messages[j].role == "tool" {
+                let tool_id = messages[j].tool_call_id.as_ref();
+                let mut should_remove = false;
+
+                if let Some(id) = tool_id {
+                    if tool_call_ids.contains(id) {
+                        responded_ids.insert(id.clone());
+                    } else {
+                        // 该 tool 消息对应的 call_id 不在当前 assistant 消息中
+                        should_remove = true;
+                    }
+                } else {
+                    // Tool 消息缺少 ID
+                    should_remove = true;
+                }
+
+                if should_remove {
+                    result.add_fix(format!("Removing orphaned tool message at index {}", j));
+                    messages.remove(j);
+                    // 不递增 j，继续检查当前位置（原来的 j+1）
+                } else {
+                    j += 1;
+                }
+            }
+
+            // 检查是否有 tool_calls 未得到响应，补全 dummy 响应
+            // 注意：如果 assistant 是最后一条消息，暂不补全（可能正在等待执行）
+            if i < messages.len() - 1
+                && !tool_call_ids.is_empty()
+                && tool_call_ids.len() != responded_ids.len()
+            {
+                for call_id in &tool_call_ids {
+                    if !responded_ids.contains(call_id) {
+                        result.add_fix(format!(
+                            "Adding dummy tool response for unresponded call {} in assistant at {}",
+                            call_id, i
+                        ));
+                        messages.insert(
+                            j,
+                            MessagePayload {
+                                role: "tool".to_string(),
+                                content: Some("Interrupted or skipped by user".to_string()),
+                                reasoning_content: None,
+                                tool_calls: None,
+                                tool_call_id: Some(call_id.clone()),
+                            },
+                        );
+                        j += 1;
+                    }
+                }
+            }
+
+            // 移动 i 到处理过的工具消息之后
+            i = j;
+        } else if messages[i].role == "tool" {
+            // 没有紧跟在 assistant 后的 tool 消息
+            result.add_fix(format!(
+                "Removing orphaned tool message at index {} (no preceding assistant)",
+                i
+            ));
+            messages.remove(i);
+            // 不递增 i
+        } else {
+            i += 1;
+        }
+    }
+}
+
+/// 移除空 Assistant 消息
+fn remove_empty_assistant_messages(
+    messages: &mut Vec<MessagePayload>,
+    result: &mut ValidationResult,
+) {
+    let mut i = 0;
+    while i < messages.len() {
+        if messages[i].role == "assistant" {
+            let has_content = messages[i]
+                .content
+                .as_ref()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            let has_reasoning = messages[i]
+                .reasoning_content
+                .as_ref()
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            let has_tool_calls = messages[i]
+                .tool_calls
+                .as_ref()
+                .map(|calls| !calls.is_empty())
+                .unwrap_or(false);
+
+            if !has_content && !has_reasoning && !has_tool_calls {
+                result.add_fix(format!("Removing empty assistant message at index {}", i));
+                messages.remove(i);
+                // 不递增 i
+                continue;
+            }
+        }
+        i += 1;
     }
 }
 
@@ -216,9 +344,17 @@ fn validate_message_sequence(messages: &mut Vec<MessagePayload>, result: &mut Va
                 }
             }
             "assistant" => {
-                let has_tool_calls = msg.tool_calls.as_ref().map(|calls| !calls.is_empty()).unwrap_or(false);
+                let has_tool_calls = msg
+                    .tool_calls
+                    .as_ref()
+                    .map(|calls| !calls.is_empty())
+                    .unwrap_or(false);
                 let has_content = msg.content.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
-                let has_reasoning = msg.reasoning_content.as_ref().map(|s| !s.is_empty()).unwrap_or(false);
+                let has_reasoning = msg
+                    .reasoning_content
+                    .as_ref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
 
                 // 规则5: 只有包含 tool_calls 时，content 可以为空，否则不能为空
                 if !has_tool_calls && !has_content && !has_reasoning {
@@ -228,19 +364,15 @@ fn validate_message_sequence(messages: &mut Vec<MessagePayload>, result: &mut Va
                     ));
                 }
 
-                // 规则4: 不能以空 Assistant 消息结尾
+                // 规则4: 只有当没有内容且没有工具调用时，才认为结尾的 Assistant 消息有问题
                 if i == messages.len() - 1 {
                     if !has_tool_calls && !has_content && !has_reasoning {
                         result.add_fix(format!(
                             "Assistant message at {} (last message) is empty, should be removed",
                             i
                         ));
-                    } else {
-                        result.add_fix(format!(
-                            "Last message is Assistant at {}, should end with User or Tool",
-                            i
-                        ));
                     }
+                    // 如果有工具调用但没响应，且是最后一条，这是正常的（等待执行中）
                     break;
                 }
 
@@ -261,7 +393,8 @@ fn validate_message_sequence(messages: &mut Vec<MessagePayload>, result: &mut Va
                             let mut j = i + 1;
 
                             // 收集所有的 tool_call_id
-                            let call_ids: Vec<String> = calls.iter().map(|c| c.id.clone()).collect();
+                            let call_ids: Vec<String> =
+                                calls.iter().map(|c| c.id.clone()).collect();
                             let mut found_tool_ids: Vec<String> = Vec::new();
 
                             while j < messages.len() && messages[j].role == "tool" {
@@ -314,10 +447,7 @@ fn validate_message_sequence(messages: &mut Vec<MessagePayload>, result: &mut Va
             "tool" => {
                 // 规则6: Tool消息必须有tool_call_id
                 if msg.tool_call_id.is_none() {
-                    result.add_fix(format!(
-                        "Tool message at {} missing tool_call_id",
-                        i
-                    ));
+                    result.add_fix(format!("Tool message at {} missing tool_call_id", i));
                 }
 
                 // Tool消息可以是最后一条（这是允许的）
@@ -334,10 +464,7 @@ fn validate_message_sequence(messages: &mut Vec<MessagePayload>, result: &mut Va
                 }
             }
             _ => {
-                result.add_fix(format!(
-                    "Unknown role '{}' at position {}",
-                    role, i
-                ));
+                result.add_fix(format!("Unknown role '{}' at position {}", role, i));
             }
         }
 
@@ -424,6 +551,116 @@ mod tests {
 
         assert_eq!(messages.len(), 4);
         assert!(!result.was_fixed);
+    }
+
+    #[test]
+    fn test_fix_interrupted_tool_call() {
+        let mut messages = vec![
+            create_message("system", Some("You are a helpful assistant")),
+            create_message("user", Some("List files")),
+            MessagePayload {
+                role: "assistant".to_string(),
+                content: None,
+                reasoning_content: None,
+                tool_calls: Some(vec![
+                    ToolCallPayload {
+                        id: "tc1".to_string(),
+                        function: ToolCallFunction {
+                            name: "ls".to_string(),
+                            arguments: "{}".to_string(),
+                        },
+                    },
+                    ToolCallPayload {
+                        id: "tc2".to_string(),
+                        function: ToolCallFunction {
+                            name: "pwd".to_string(),
+                            arguments: "{}".to_string(),
+                        },
+                    },
+                ]),
+                tool_call_id: None,
+            },
+            MessagePayload {
+                role: "tool".to_string(),
+                content: Some("file1".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some("tc1".to_string()),
+            },
+            // 用户突然插嘴，中断了 tc2 的响应
+            create_message("user", Some("Actually, nevermind")),
+        ];
+
+        let result = validate_and_fix_messages(&mut messages);
+
+        assert!(result.was_fixed);
+        // tc2 不应该被移除，而是应该补充一个 tool 响应
+        let assistant = &messages[2];
+        assert_eq!(assistant.tool_calls.as_ref().unwrap().len(), 2);
+
+        // 检查补充的 tool 消息
+        assert_eq!(messages[4].role, "tool");
+        assert_eq!(messages[4].tool_call_id, Some("tc2".to_string()));
+    }
+
+    #[test]
+    fn test_fix_fully_interrupted_tool_call() {
+        let mut messages = vec![
+            create_message("system", Some("You are a helpful assistant")),
+            create_message("user", Some("List files")),
+            MessagePayload {
+                role: "assistant".to_string(),
+                content: None,
+                reasoning_content: None,
+                tool_calls: Some(vec![ToolCallPayload {
+                    id: "tc1".to_string(),
+                    function: ToolCallFunction {
+                        name: "ls".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+            },
+            // 用户突然插嘴，没有一个 tool 得到响应
+            create_message("user", Some("Actually, nevermind")),
+        ];
+
+        let result = validate_and_fix_messages(&mut messages);
+
+        assert!(result.was_fixed);
+        // Assistant 不应该被移除，应该补充 tool 响应
+        assert_eq!(messages[2].role, "assistant");
+        assert_eq!(messages[3].role, "tool");
+        assert_eq!(messages[3].tool_call_id, Some("tc1".to_string()));
+    }
+
+    #[test]
+    fn test_dont_fix_last_assistant_tool_call() {
+        let mut messages = vec![
+            create_message("system", Some("You are a helpful assistant")),
+            create_message("user", Some("List files")),
+            MessagePayload {
+                role: "assistant".to_string(),
+                content: None,
+                reasoning_content: None,
+                tool_calls: Some(vec![ToolCallPayload {
+                    id: "tc1".to_string(),
+                    function: ToolCallFunction {
+                        name: "ls".to_string(),
+                        arguments: "{}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+            },
+        ];
+
+        let result = validate_and_fix_messages(&mut messages);
+
+        // 既然是最后一条消息，不应该被修复（因为它可能正在等待执行）
+        assert!(!result.was_fixed);
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[2].role, "assistant");
+        assert!(messages[2].tool_calls.is_some());
     }
 
     #[test]
