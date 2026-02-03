@@ -691,7 +691,7 @@ impl SSHClient {
             session_data.command_recorder = Some(String::new());
             session_data.last_output_len = session_data.terminal_buffer.len();
             session_data.recording_prompt =
-                Self::extract_last_line_raw(&session_data.terminal_buffer);
+                Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
             session_data.command_finished = false;
             session_data.last_exit_code = None;
 
@@ -709,10 +709,8 @@ impl SSHClient {
         }
     }
 
-    /// Extract the last line from buffer, cleaned of ANSI escapes
-    /// Extract the RAW last line from buffer (without ANSI cleaning)
-    /// This preserves Nerd Font icon bytes which are different between icons
-    fn extract_last_line_raw(buffer: &str) -> Option<String> {
+    /// Extract the last N characters from buffer for prompt suffix comparison
+    fn extract_prompt_suffix(buffer: &str, n: usize) -> Option<String> {
         let trimmed = buffer.trim_end();
         if trimmed.is_empty() {
             return None;
@@ -720,49 +718,14 @@ impl SSHClient {
         let lines: Vec<&str> = trimmed.lines().collect();
         if let Some(last_line) = lines.last() {
             let trimmed_line = last_line.trim_end();
-            if !trimmed_line.is_empty() {
-                return Some(trimmed_line.to_string());
+            if trimmed_line.len() >= n {
+                Some(trimmed_line[trimmed_line.len() - n..].to_string())
+            } else {
+                Some(trimmed_line.to_string())
             }
+        } else {
+            None
         }
-        None
-    }
-
-    /// Check if a line looks like a shell prompt
-    fn is_prompt_like(line: &str) -> bool {
-        // Common prompt characters (including Nerd Font / Powerline symbols)
-        let prompt_chars = ['$', '#', '>', '%', '❯', '➜', '→', '»', 'λ', '♦', '', '▶'];
-        let trimmed = line.trim();
-
-        // Check if line ends with common prompt characters (after trimming whitespace)
-        for ch in &prompt_chars {
-            if trimmed.ends_with(*ch) {
-                return true;
-            }
-        }
-
-        // Also check if the line is very short (like just a prompt symbol)
-        // This handles cases where the prompt is just an icon like ""
-        // Note: use chars().count() for Unicode character count, not .len() which returns bytes
-        if trimmed.chars().count() <= 3 {
-            // Single character line is likely a prompt
-            return true;
-        }
-
-        // Check for patterns that look like paths (e.g., "/home/user" or "~/project")
-        // followed by a space or special character
-        if trimmed.contains('/') || trimmed.contains('~') || trimmed.contains('\\') {
-            // If line contains path-like patterns and is relatively short, likely a prompt
-            if trimmed.len() < 200 {
-                return true;
-            }
-        }
-
-        // Check for common prompt patterns (e.g., "user@host:path$" format)
-        if trimmed.contains('@') && (trimmed.contains(':') || trimmed.contains(' ')) {
-            return true;
-        }
-
-        false
     }
 
     /// Stop recording and get the recorded output since start_command_recording was called
@@ -819,38 +782,24 @@ impl SSHClient {
                 return Ok(true);
             }
 
-            // Priority 2: New prompt detection - check if a new prompt line appeared
-            let lines: Vec<&str> = new_content.lines().collect();
-            tracing::info!("[check_command_completed] {} - new_content has {} lines", session_id, lines.len());
-            
-            if let Some(last_line) = lines.last() {
-                let last_line_trimmed = last_line.trim_end();
+            // Priority 2: Prompt suffix comparison
+            // Record prompt suffix before command, compare after command
+            // Simple and works with any shell/theme
+            let new_suffix = Self::extract_prompt_suffix(new_content, 3);
+            tracing::info!("[check_command_completed {} - new_suffix={:?}, recorded={:?}",
+                session_id, new_suffix, session_data.recording_prompt);
 
-                tracing::info!("[check_command_completed] {} - raw last_line={:?}, recorded={:?}",
-                    session_id, last_line_trimmed, session_data.recording_prompt);
-
-                if let Some(ref recorded) = session_data.recording_prompt {
-                    // Check if last_line ends with the recorded prompt's ending
-                    // Starship two-line prompt: recorded contains "\r" between lines
-                    // We need to compare if last_line ENDS WITH the prompt pattern
-                    if last_line_trimmed.ends_with(recorded.trim_end()) {
-                        tracing::debug!("[check_command_completed] {} - last_line ends with recorded prompt, returning true",
-                            session_id);
-                        return Ok(true);
-                    } else {
-                        tracing::info!("[check_command_completed] {} - last_line does not end with recorded: {:?} vs {:?}",
-                            session_id, last_line_trimmed, recorded.trim_end());
-                    }
+            if let Some(ref recorded) = session_data.recording_prompt {
+                if new_suffix.as_ref().map(|s| s.as_str()) == Some(recorded.as_str()) {
+                    tracing::debug!("[check_command_completed] {} - prompt suffix matches, command completed",
+                        session_id);
+                    return Ok(true);
                 } else {
-                    if Self::is_prompt_like(last_line_trimmed) {
-                        tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
-                            session_id, last_line_trimmed);
-                        return Ok(true);
-                    } else {
-                        tracing::info!("[check_command_completed] {} - no recorded prompt and line not prompt-like: {:?}",
-                            session_id, last_line_trimmed);
-                    }
+                    tracing::info!("[check_command_completed] {} - suffix differs: {:?} vs {:?}",
+                        session_id, new_suffix, recorded);
                 }
+            } else {
+                tracing::info!("[check_command_completed] {} - no recorded suffix", session_id);
             }
 
             tracing::debug!("[check_command_completed] {} - returning false", session_id);
