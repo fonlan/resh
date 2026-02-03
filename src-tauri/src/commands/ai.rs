@@ -378,13 +378,16 @@ async fn execute_tools_and_save(
                             SSHClient::start_command_recording(ssh_id).await?;
                             tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
 
-                            // Chain command with marker output using semicolon
-                            // This ensures marker is output AFTER command completes
-                            let cmd_with_marker = format!("{}; printf '\x1b\x1b\n'\n", cmd);
-                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_with_marker.as_bytes()).await {
+                            // Send command first
+                            let cmd_nl = format!("{}\n", cmd);
+                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
                                 let _ = SSHClient::stop_command_recording(ssh_id).await;
                                 break;
                             }
+
+                            // Send invisible marker (completely invisible in terminal)
+                            let marker = "\x1b\x1b\n";
+                            let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
 
                             let mut interval =
                                 tokio::time::interval(tokio::time::Duration::from_millis(100));
@@ -1235,12 +1238,16 @@ pub async fn run_in_terminal(
 
     SSHClient::start_command_recording(&session_id).await?;
 
-    // Chain command with marker output using semicolon
-    let cmd_with_marker = format!("{}; printf '\x1b\x1b\n'\n", command);
-    if let Err(e) = SSHClient::send_input(&session_id, cmd_with_marker.as_bytes()).await {
+    // Send command first
+    let cmd_nl = format!("{}\n", command);
+    if let Err(e) = SSHClient::send_input(&session_id, cmd_nl.as_bytes()).await {
         let _ = SSHClient::stop_command_recording(&session_id).await;
         return Err(format!("Failed to send command: {}", e));
     }
+
+    // Send invisible marker (completely invisible in terminal)
+    let marker = "\x1b\x1b\n";
+    let _ = SSHClient::send_input(&session_id, marker.as_bytes()).await;
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
