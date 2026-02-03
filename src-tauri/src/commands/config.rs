@@ -59,25 +59,28 @@ pub async fn save_config(
             proxy,
         );
 
-        // Clone config for background sync (we need to work on a copy)
+        let app_state = state.inner().clone();
         let sync_config = config.clone();
         let sync_removed_ids = removed_ids;
-        let config_manager = state.config_manager.clone();
         let sync_path = local_path.clone();
 
-        // Spawn sync task in background - does not block local save
         let window = window.clone();
         tokio::spawn(async move {
             let mut local_copy = sync_config;
             if let Err(e) = sync_manager.sync(&mut local_copy, sync_removed_ids).await {
                 tracing::warn!("Background sync failed: {}", e);
-                // Emit event for frontend to show toast
                 let _ = window.emit("sync-failed", e);
             } else {
-                // Save merged config locally
-                if let Err(e) = config_manager.save_config(&local_copy, &sync_path) {
+                if let Err(e) = app_state.config_manager.save_config(&local_copy, &sync_path) {
                     tracing::error!("Failed to save merged config after sync: {}", e);
                 }
+                
+                {
+                    let mut in_memory = app_state.config.lock().await;
+                    *in_memory = local_copy.clone();
+                }
+                
+                let _ = window.emit("config-updated", local_copy);
             }
         });
     }

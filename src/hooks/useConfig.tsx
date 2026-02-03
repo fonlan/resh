@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useCallback, useEffect, useState, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { Config } from '../types/config';
 import { logger } from '../utils/logger';
 
@@ -83,6 +84,19 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    
+    listen<Config>('config-updated', (event) => {
+      logger.info('[ConfigProvider] Config updated from background sync');
+      setConfig(event.payload);
+    }).then(fn => { unlisten = fn; });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   return (
     <ConfigContext.Provider value={{ config, loading, error, loadConfig, saveConfig, triggerSync }}>

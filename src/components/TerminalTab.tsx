@@ -260,7 +260,12 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
             ...config,
             authentications: [...config.authentications, newAuth],
             servers: config.servers.map((s) =>
-              s.id === server.id ? { ...s, authId, username: manualCreds.username } : s
+              s.id === server.id ? { 
+                ...s, 
+                authId, 
+                username: manualCreds.username,
+                updatedAt: new Date().toISOString()
+              } : s
             ),
           };
 
