@@ -826,35 +826,22 @@ impl SSHClient {
             if let Some(last_line) = lines.last() {
                 let last_line_trimmed = last_line.trim_end();
 
-                // Compare ONLY the END of the recorded prompt (the last line)
-                // Starship outputs two-line prompts with \r\n in between
-                // recorded = "...\u{f432} \r\n...\u{f432}" (full two-line prompt)
-                // last_line = "\u{f432}" (just the last line)
-                // So we compare just the ending portion
                 tracing::info!("[check_command_completed] {} - raw last_line={:?}, recorded={:?}",
                     session_id, last_line_trimmed, session_data.recording_prompt);
 
                 if let Some(ref recorded) = session_data.recording_prompt {
-                    // Extract the ending portion of recorded prompt to compare with last_line
-                    let recorded_ending = recorded.lines().last().unwrap_or(recorded).trim_end();
-
-                    // Check if the last line changed (indicates new prompt appeared)
-                    if last_line_trimmed != recorded_ending {
-                        // New line appeared, check if it looks like a prompt
-                        if Self::is_prompt_like(last_line_trimmed) {
-                            tracing::debug!("[check_command_completed] {} - new prompt detected: {:?} (was: {:?}), returning true",
-                                session_id, last_line_trimmed, recorded_ending);
-                            return Ok(true);
-                        } else {
-                            tracing::info!("[check_command_completed] {} - line differs from recorded ending: {:?} vs {:?}",
-                                session_id, last_line_trimmed, recorded_ending);
-                        }
+                    // Check if last_line ends with the recorded prompt's ending
+                    // Starship two-line prompt: recorded contains "\r" between lines
+                    // We need to compare if last_line ENDS WITH the prompt pattern
+                    if last_line_trimmed.ends_with(recorded.trim_end()) {
+                        tracing::debug!("[check_command_completed] {} - last_line ends with recorded prompt, returning true",
+                            session_id);
+                        return Ok(true);
                     } else {
-                        tracing::info!("[check_command_completed] {} - line same as recorded ending: {:?}",
-                            session_id, last_line_trimmed);
+                        tracing::info!("[check_command_completed] {} - last_line does not end with recorded: {:?} vs {:?}",
+                            session_id, last_line_trimmed, recorded.trim_end());
                     }
                 } else {
-                    // No previous prompt recorded, just check if it looks like a prompt
                     if Self::is_prompt_like(last_line_trimmed) {
                         tracing::debug!("[check_command_completed] {} - prompt detected: {:?}, returning true",
                             session_id, last_line_trimmed);
