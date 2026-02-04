@@ -25,6 +25,7 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 - React 18 with TypeScript
 - xterm.js for terminal emulation
 - Vite for build tooling
+- Tailwind CSS v4 for styling
 
 **Backend:**
 - Rust with Tauri 2 framework
@@ -114,6 +115,7 @@ npm run tauri            # Direct access to Tauri CLI
 - Add components in `src/components/`
 - Use TypeScript for type safety
 - Follow React hooks pattern
+- Use Tailwind CSS v4 for styling (CSS-first configuration)
 
 **Backend:**
 - Add Tauri commands in `src-tauri/src/commands/`
@@ -186,8 +188,9 @@ Please report security vulnerabilities privately to the maintainers rather than 
 ## Acknowledgments
 
 - Built with [Tauri](https://tauri.app/)
-- Terminal emulation by [xterm.js](https://xtermjs.org/)
+- Terminal emulation by [xterm.js](https://term.js.org/)
 - SSH implementation via [russh](https://github.com/Eugeny/russh)
+- Styling by [Tailwind CSS](https://tailwindcss.com/)
 
 ## Support
 
