@@ -69,13 +69,23 @@ export const ServerContextMenu: React.FC<ServerContextMenuProps> = ({
   return (
     <div
       ref={menuRef}
-      className="tab-context-menu"
-      style={{ left: pos.left, top: pos.top }}
+      className="fixed z-[1000] bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-sm)] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.3),0_8px_10px_-6px_rgba(0,0,0,0.3)] p-1 min-w-[180px] backdrop-blur-[12px] animate-[contextMenuFadeIn_0.15s_ease-out]"
+      style={{ 
+        left: pos.left, 
+        top: pos.top,
+        animation: 'contextMenuFadeIn 0.15s ease-out'
+      }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      <style>{`
+        @keyframes contextMenuFadeIn {
+          from { opacity: 0; transform: scale(0.95); }
+          to { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
       <button
         type="button"
-        className="tab-context-menu-item"
+        className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
         onClick={() => {
           onConnect(serverId);
           onClose();
@@ -87,7 +97,7 @@ export const ServerContextMenu: React.FC<ServerContextMenuProps> = ({
 
       <button
         type="button"
-        className="tab-context-menu-item"
+        className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
         onClick={() => {
           onEdit(serverId);
           onClose();
