@@ -810,50 +810,39 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
             {!isDirectory(contextMenu.entry) && (
-                <div
-                    className="relative"
-                    onMouseEnter={() => {
-                        if (editSubmenuTimeout) {
-                            clearTimeout(editSubmenuTimeout);
-                            setEditSubmenuTimeout(null);
-                        }
-                        setShowEditSubmenu(true);
-                    }}
-                    onMouseLeave={() => {
-                        const timeout = setTimeout(() => {
-                            setShowEditSubmenu(false);
-                        }, 200);
-                        setEditSubmenuTimeout(timeout);
-                    }}
-                >
-                    <button type="button" onClick={() => setShowEditSubmenu(!showEditSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Edit size={14} /> {t.sftp.contextMenu.edit}
-                        <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
-                    </button>
-                    {showEditSubmenu && (
-                        <div
-                            className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
-                            onMouseEnter={() => {
-                                if (editSubmenuTimeout) {
-                                    clearTimeout(editSubmenuTimeout);
-                                    setEditSubmenuTimeout(null);
-                                }
-                            }}
-                            onMouseLeave={() => {
-                                const timeout = setTimeout(() => {
-                                    setShowEditSubmenu(false);
-                                }, 200);
-                                setEditSubmenuTimeout(timeout);
-                            }}
-                        >
-                            <button type="button" onClick={handleEditVim} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                                <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
-                            </button>
-                            <button type="button" onClick={handleEditLocal} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                                <FileCode size={14} /> {t.sftp.contextMenu.editLocal}
-                            </button>
-                        </div>
-                    )}
+                <div className="relative">
+                    <div
+                        onMouseEnter={() => {
+                            if (editSubmenuTimeout) {
+                                clearTimeout(editSubmenuTimeout);
+                                setEditSubmenuTimeout(null);
+                            }
+                            setShowEditSubmenu(true);
+                        }}
+                        onMouseLeave={() => {
+                            const timeout = setTimeout(() => {
+                                setShowEditSubmenu(false);
+                            }, 200);
+                            setEditSubmenuTimeout(timeout);
+                        }}
+                    >
+                        <button type="button" onClick={() => setShowEditSubmenu(!showEditSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                            <Edit size={14} /> {t.sftp.contextMenu.edit}
+                            <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                        </button>
+                        {showEditSubmenu && (
+                            <div
+                                className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
+                            >
+                                <button type="button" onClick={handleEditVim} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                    <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
+                                </button>
+                                <button type="button" onClick={handleEditLocal} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                    <FileCode size={14} /> {t.sftp.contextMenu.editLocal}
+                                </button>
+                            </div>
+                        )}
+                    </div>
                 </div>
             )}
             <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
@@ -872,58 +861,47 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                     </button>
                 </>
             )}
-            <div
-                className="relative"
-                onMouseEnter={() => {
-                    if (pathSubmenuTimeout) {
-                        clearTimeout(pathSubmenuTimeout);
-                        setPathSubmenuTimeout(null);
-                    }
-                    setShowPathSubmenu(true);
-                }}
-                onMouseLeave={() => {
-                    const timeout = setTimeout(() => {
-                        setShowPathSubmenu(false);
-                    }, 200);
-                    setPathSubmenuTimeout(timeout);
-                }}
-            >
-                <button type="button" onClick={() => setShowPathSubmenu(!showPathSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                    <Link size={14} /> {t.sftp.contextMenu.path}
-                    <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
-                </button>
-                        {showPathSubmenu && (
-                            <div
-                                className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
-                                onMouseEnter={() => {
-                                    if (pathSubmenuTimeout) {
-                                        clearTimeout(pathSubmenuTimeout);
-                                        setPathSubmenuTimeout(null);
-                                    }
-                                }}
-                                onMouseLeave={() => {
-                                    const timeout = setTimeout(() => {
-                                        setShowPathSubmenu(false);
-                                    }, 200);
-                                    setPathSubmenuTimeout(timeout);
-                                }}
-                            >
-                        <button type="button" onClick={handleCopyName} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                            <Copy size={14} /> {isDirectory(contextMenu.entry) ? t.sftp.contextMenu.copyFolderName : t.sftp.contextMenu.copyFileName}
-                        </button>
-                        <button type="button" onClick={handleCopyFullPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                            <Copy size={14} /> {t.sftp.contextMenu.copyFullPath}
-                        </button>
-                        <button type="button" onClick={handleSendPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                            <Terminal size={14} /> {t.sftp.contextMenu.sendPathToTerminal}
-                        </button>
-                        {isDirectory(contextMenu.entry) && (
-                            <button type="button" onClick={handleTerminalJump} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                                <Terminal size={14} /> {t.sftp.contextMenu.terminalJump}
+            <div className="relative">
+                <div
+                    onMouseEnter={() => {
+                        if (pathSubmenuTimeout) {
+                            clearTimeout(pathSubmenuTimeout);
+                            setPathSubmenuTimeout(null);
+                        }
+                        setShowPathSubmenu(true);
+                    }}
+                    onMouseLeave={() => {
+                        const timeout = setTimeout(() => {
+                            setShowPathSubmenu(false);
+                        }, 200);
+                        setPathSubmenuTimeout(timeout);
+                    }}
+                >
+                    <button type="button" onClick={() => setShowPathSubmenu(!showPathSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Link size={14} /> {t.sftp.contextMenu.path}
+                        <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                    </button>
+                    {showPathSubmenu && (
+                        <div
+                            className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
+                        >
+                            <button type="button" onClick={handleCopyName} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                <Copy size={14} /> {isDirectory(contextMenu.entry) ? t.sftp.contextMenu.copyFolderName : t.sftp.contextMenu.copyFileName}
                             </button>
-                        )}
-                    </div>
-                )}
+                            <button type="button" onClick={handleCopyFullPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                <Copy size={14} /> {t.sftp.contextMenu.copyFullPath}
+                            </button>
+                            <button type="button" onClick={handleSendPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                <Terminal size={14} /> {t.sftp.contextMenu.sendPathToTerminal}
+                            </button>
+                            {isDirectory(contextMenu.entry) && (
+                                <button type="button" onClick={handleTerminalJump} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                                    <Terminal size={14} /> {t.sftp.contextMenu.terminalJump}
+                                </button>
+                            )}
+                        </div>
+                    )}
+                </div>
             </div>
             <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Settings size={14} /> {t.sftp.contextMenu.properties}
