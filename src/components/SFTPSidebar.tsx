@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil } from 'lucide-react';
+import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../i18n';
 import './SFTPSidebar.css';
@@ -136,6 +136,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const [newItemName, setNewItemName] = useState('');
   const [permissionInput, setPermissionInput] = useState('');
+
+  const [showPathSubmenu, setShowPathSubmenu] = useState(false);
 
   // Close sort menu on click outside
   useEffect(() => {
@@ -291,6 +293,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
+    setShowPathSubmenu(false);
   }, []);
 
   useEffect(() => {
@@ -420,7 +423,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const confirmDelete = async () => {
     if (!deleteModal.entry || !sessionId) return;
     try {
-      await invoke('sftp_delete', { sessionId, path: deleteModal.entry.path });
+      await invoke('sftp_delete', { sessionId, path: deleteModal.entry.path, isDir: deleteModal.entry.is_dir });
       await reloadParentDirectory(deleteModal.entry);
     } catch (e) {
       console.error('Delete failed', e);
@@ -509,12 +512,39 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     if (!propertiesModal.entry || !sessionId) return;
     try {
       const permNum = parseInt(permissionInput, 8);
-      await invoke('sftp_chmod', { sessionId, path: propertiesModal.entry.path, permissions: permNum });
+      await invoke('sftp_chmod', { sessionId, path: propertiesModal.entry.path, mode: permNum });
       await reloadParentDirectory(propertiesModal.entry);
     } catch (e) {
       console.error('Chmod failed', e);
     }
     setPropertiesModal({ isOpen: false, entry: null, permissions: '' });
+  };
+
+  const handleCopyName = () => {
+    if (!contextMenu) return;
+    navigator.clipboard.writeText(contextMenu.entry.name);
+    handleCloseContextMenu();
+  };
+
+  const handleCopyFullPath = () => {
+    if (!contextMenu) return;
+    navigator.clipboard.writeText(contextMenu.entry.path);
+    handleCloseContextMenu();
+  };
+
+  const handleSendPath = () => {
+    if (!contextMenu) return;
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: contextMenu.entry.path }));
+    handleCloseContextMenu();
+  };
+
+  const handleTerminalJump = () => {
+    if (!contextMenu) return;
+    // Escape double quotes in path if present
+    const path = contextMenu.entry.path.replace(/"/g, '\\"');
+    const command = `cd "${path}"\r`;
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: command }));
+    handleCloseContextMenu();
   };
 
   return (
@@ -635,6 +665,30 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                     </button>
                 </>
             )}
+            <div style={{ position: 'relative' }} onMouseEnter={() => setShowPathSubmenu(true)} onMouseLeave={() => setShowPathSubmenu(false)}>
+                <button type="button" onClick={() => setShowPathSubmenu(!showPathSubmenu)}>
+                    <Link size={14} /> {t.sftp.contextMenu.path}
+                    <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                </button>
+                {showPathSubmenu && (
+                    <div className="sftp-submenu">
+                        <button type="button" onClick={handleCopyName}>
+                            <Copy size={14} /> {isDirectory(contextMenu.entry) ? t.sftp.contextMenu.copyFolderName : t.sftp.contextMenu.copyFileName}
+                        </button>
+                        <button type="button" onClick={handleCopyFullPath}>
+                            <Copy size={14} /> {t.sftp.contextMenu.copyFullPath}
+                        </button>
+                        <button type="button" onClick={handleSendPath}>
+                            <Terminal size={14} /> {t.sftp.contextMenu.sendPathToTerminal}
+                        </button>
+                        {isDirectory(contextMenu.entry) && (
+                            <button type="button" onClick={handleTerminalJump}>
+                                <Terminal size={14} /> {t.sftp.contextMenu.terminalJump}
+                            </button>
+                        )}
+                    </div>
+                )}
+            </div>
             <button type="button" onClick={handleProperties}>
                 <Settings size={14} /> {t.sftp.contextMenu.properties}
             </button>
