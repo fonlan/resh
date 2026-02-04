@@ -34,6 +34,10 @@ pub struct Server {
     #[serde(default)]
     #[serde(alias = "codeSnippets", alias = "code_snippets")]
     pub snippets: Vec<Snippet>,
+    #[serde(default)]
+    #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_prompt: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
     #[serde(default = "default_updated_at")]
@@ -254,6 +258,17 @@ pub struct Config {
     #[serde(default)]
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,
+    #[serde(default)]
+    #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_prompt: Option<String>,
+    #[serde(default)]
+    #[serde(
+        alias = "additionalPromptUpdatedAt",
+        alias = "additional_prompt_updated_at"
+    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_prompt_updated_at: Option<String>,
     pub general: GeneralSettings,
 }
 
@@ -277,6 +292,16 @@ pub struct SyncConfig {
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,
     #[serde(default)]
+    #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub additional_prompt: Option<String>,
+    #[serde(default)]
+    #[serde(
+        alias = "additionalPromptUpdatedAt",
+        alias = "additional_prompt_updated_at"
+    )]
+    pub additional_prompt_updated_at: Option<String>,
+    #[serde(default)]
     pub removed_ids: Vec<String>,
 }
 
@@ -290,6 +315,8 @@ impl Config {
             snippets: vec![],
             ai_channels: vec![],
             ai_models: vec![],
+            additional_prompt: None,
+            additional_prompt_updated_at: None,
             general: GeneralSettings {
                 theme: "dark".to_string(),
                 language: "en".to_string(),

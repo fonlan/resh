@@ -33,6 +33,8 @@ impl SyncManager {
                     snippets: vec![],
                     ai_channels: vec![],
                     ai_models: vec![],
+                    additional_prompt: local_config.additional_prompt.clone(),
+                    additional_prompt_updated_at: local_config.additional_prompt_updated_at.clone(),
                     removed_ids: vec![],
                 }
             }
@@ -225,6 +227,21 @@ impl SyncManager {
             }
         }
         local.ai_models = local_models.into_values().collect();
+
+        let remote_ts = remote.additional_prompt_updated_at.as_deref();
+        let local_ts = local.additional_prompt_updated_at.as_deref();
+
+        let should_update = match (remote_ts, local_ts) {
+            (Some(rt), Some(lt)) => is_newer(rt, lt),
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => false,
+        };
+
+        if should_update {
+            local.additional_prompt = remote.additional_prompt.clone();
+            local.additional_prompt_updated_at = remote.additional_prompt_updated_at.clone();
+        }
     }
 
     fn merge_local_to_remote(&self, local: &Config, remote: &mut SyncConfig) {
@@ -418,6 +435,9 @@ impl SyncManager {
             }
         }
         remote.ai_models = remote_models.into_values().collect();
+
+        remote.additional_prompt = local.additional_prompt.clone();
+        remote.additional_prompt_updated_at = local.additional_prompt_updated_at.clone();
     }
 }
 

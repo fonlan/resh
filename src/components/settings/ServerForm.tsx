@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Settings, Network, Terminal, Code, Trash2, Edit2, Check, X } from 'lucide-react';
+import { Settings, Network, Terminal, Code, Trash2, Edit2, Check, X, Bot } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
@@ -23,7 +23,7 @@ export interface ServerFormHandle {
   setSynced: (synced: boolean) => void;
 }
 
-type TabId = 'general' | 'routing' | 'advanced' | 'snippets';
+type TabId = 'general' | 'routing' | 'advanced' | 'snippets' | 'ai';
 
 export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   server,
@@ -55,6 +55,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         snippets: server.snippets || [],
         synced: server.synced !== undefined ? server.synced : true,
         updatedAt: server.updatedAt || new Date().toISOString(),
+        additionalPrompt: server.additionalPrompt || '',
       };
     }
     return {
@@ -73,6 +74,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       snippets: [],
       synced: true,
       updatedAt: new Date().toISOString(),
+      additionalPrompt: '',
     };
   });
 
@@ -232,6 +234,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       routing: ['proxyId', 'jumphostId', 'keepAlive'],
       advanced: ['portForwards', 'autoExecCommands', 'envVars'],
       snippets: [],
+      ai: [],
     };
     return fieldsByTab[tab].some(field => errors[field]);
   };
@@ -241,6 +244,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     { id: 'routing' as TabId, label: t.routing, icon: <Network size={18} /> },
     { id: 'advanced' as TabId, label: t.advanced, icon: <Terminal size={18} /> },
     { id: 'snippets' as TabId, label: t.snippetsTab.title, icon: <Code size={18} /> },
+    { id: 'ai' as TabId, label: t.ai.tabTitle, icon: <Bot size={18} /> },
   ];
 
   return (
@@ -675,6 +679,27 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
               onSnippetsUpdate={(newSnippets) => handleChange('snippets', newSnippets)}
               availableGroups={globalSnippetGroups}
             />
+          )}
+
+          {activeTab === 'ai' && (
+             <div>
+               <div className="form-group">
+                 <label htmlFor="server-additional-prompt" className="block text-sm font-medium text-gray-300 mb-1">
+                    {t.ai.serverAdditionalPrompt}
+                 </label>
+                 <div className="text-xs text-gray-400 mb-2">
+                    {t.ai.serverAdditionalPromptDesc}
+                 </div>
+                 <textarea
+                   id="server-additional-prompt"
+                   value={formData.additionalPrompt || ''}
+                   onChange={(e) => handleChange('additionalPrompt', e.target.value)}
+                   className="w-full h-48 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                   placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
+                   style={{ resize: 'vertical' }}
+                 />
+               </div>
+             </div>
           )}
         </div>
       </div>

@@ -55,11 +55,8 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       logger.info('[ConfigProvider] Saving config...');
       await invoke('save_config', { config: newConfig });
       logger.info('[ConfigProvider] Config saved successfully');
-      
-      // The backend might have modified the config (e.g., after a sync)
-      // So we reload it
-      const cfg = await invoke<Config>('get_config');
-      setConfig(cfg);
+
+      setConfig(newConfig);
       setError(null);
     } catch (err) {
       logger.error('[ConfigProvider] Failed to save config', err);

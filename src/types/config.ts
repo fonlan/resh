@@ -14,6 +14,7 @@ export interface Server {
   autoExecCommands: string[];
   envVars: Record<string, string>;
   snippets?: Snippet[];
+  additionalPrompt?: string | null;
   synced: boolean;
   updatedAt: string;
 }
@@ -123,6 +124,8 @@ export interface Config {
   snippets: Snippet[];
   aiChannels: AIChannel[];
   aiModels: AIModel[];
+  additionalPrompt?: string | null;
+  additionalPromptUpdatedAt?: string | null;
   general: GeneralSettings;
 }
 

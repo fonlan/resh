@@ -185,9 +185,27 @@ async fn load_history(
     is_agent_mode: bool,
     ssh_session_id: Option<&str>,
 ) -> Result<Vec<ChatMessage>, String> {
-    let max_history = {
+    let server_id = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+        conn.query_row(
+            "SELECT server_id FROM ai_sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+    };
+
+    let (max_history, global_prompt, server_prompt) = {
         let config = state.config.lock().await;
-        config.general.ai_max_history as usize
+        let max = config.general.ai_max_history as usize;
+        let gp = config.additional_prompt.clone();
+        let sp = if let Some(sid) = &server_id {
+            config.servers.iter().find(|s| s.id == *sid).and_then(|s| s.additional_prompt.clone())
+        } else {
+            None
+        };
+        (max, gp, sp)
     };
 
     let dialog_messages: Vec<ChatMessage> = {
@@ -273,7 +291,19 @@ async fn load_history(
         }
     }
 
-    let full_system_prompt = format!("{}\n\n{}{}", SYSTEM_PROMPT, mode_desc, system_context);
+    let mut full_system_prompt = format!("{}\n\n{}", SYSTEM_PROMPT, mode_desc);
+
+    if let Some(gp) = global_prompt {
+        full_system_prompt.push_str("\n\nGlobal Additional Prompt:\n");
+        full_system_prompt.push_str(&gp);
+    }
+
+    if let Some(sp) = server_prompt {
+        full_system_prompt.push_str("\n\nServer Additional Prompt:\n");
+        full_system_prompt.push_str(&sp);
+    }
+
+    full_system_prompt.push_str(&system_context);
 
     messages.push(ChatMessage {
         role: "system".to_string(),

@@ -60,10 +60,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   // Track if mouse down was inside the modal
   const mouseDownInsideRef = useRef(false);
 
-  // Initialize local config when config loads
+  const initializedRef = useRef(false);
+
   useEffect(() => {
-    if (config) {
-      // Only set original config if not already set
+    if (config && !initializedRef.current) {
       if (!originalConfigRef.current) {
         originalConfigRef.current = config;
       }
@@ -71,8 +71,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
       setLocalConfig(config);
       setSaveError(null);
       lastSavedConfigRef.current = JSON.stringify(config);
+      initializedRef.current = true;
     }
   }, [config]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      initializedRef.current = false;
+      setLocalConfig(null);
+    }
+  }, [isOpen]);
 
   // Auto-save when localConfig changes
   useEffect(() => {
@@ -196,6 +204,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   const handleAIModelsUpdate = (aiModels: AIModel[]) => {
     setLocalConfig((prev) => (prev ? { ...prev, aiModels } : null));
+  };
+
+  const handleAdditionalPromptUpdate = (prompt: string | undefined) => {
+    setLocalConfig((prev) => (prev ? { 
+      ...prev, 
+      additionalPrompt: prompt || null,
+      additionalPromptUpdatedAt: prompt ? new Date().toISOString() : null
+    } : null));
   };
 
   const handleConnectServer = async (serverId: string) => {
@@ -342,9 +358,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 aiModels={localConfig.aiModels || []}
                 proxies={localConfig.proxies || []}
                 general={localConfig.general}
+                additionalPrompt={localConfig.additionalPrompt}
                 onAIChannelsUpdate={handleAIChannelsUpdate}
                 onAIModelsUpdate={handleAIModelsUpdate}
                 onGeneralUpdate={handleGeneralUpdate}
+                onAdditionalPromptUpdate={handleAdditionalPromptUpdate}
               />
             )}
             {activeTab === 'general' && (

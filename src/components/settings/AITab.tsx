@@ -14,9 +14,11 @@ interface AITabProps {
   aiModels: AIModel[];
   proxies: ProxyConfig[];
   general: GeneralSettings;
+  additionalPrompt?: string | null;
   onAIChannelsUpdate: (channels: AIChannel[]) => void;
   onAIModelsUpdate: (models: AIModel[]) => void;
   onGeneralUpdate: (settings: GeneralSettings) => void;
+  onAdditionalPromptUpdate: (prompt: string | null | undefined) => void;
 }
 
 interface DeviceCodeResponse {
@@ -32,9 +34,11 @@ export const AITab: React.FC<AITabProps> = ({
   aiModels,
   proxies,
   general,
+  additionalPrompt,
   onAIChannelsUpdate,
   onAIModelsUpdate,
   onGeneralUpdate,
+  onAdditionalPromptUpdate,
 }) => {
   const { t } = useTranslation();
   // State for Channel Form
@@ -365,10 +369,27 @@ export const AITab: React.FC<AITabProps> = ({
                    max={600}
                />
             </div>
-         </div>
-      </div>
+          </div>
+       </div>
 
-      {/* AI Channels Section */}
+       <div className="mb-8">
+          <div className="form-group">
+             <label htmlFor="ai-additional-prompt" className="form-label">{t.ai.globalAdditionalPrompt}</label>
+             <div className="text-xs text-gray-400 mb-2">
+                 {t.ai.globalAdditionalPromptDesc}
+             </div>
+             <textarea
+                 id="ai-additional-prompt"
+                 className="form-input w-full h-32 py-2"
+                 style={{ resize: 'vertical', minHeight: '100px' }}
+                 value={additionalPrompt || ''}
+                 onChange={(e) => onAdditionalPromptUpdate(e.target.value)}
+                 placeholder="e.g. Always answer in Chinese. Be concise."
+             />
+          </div>
+       </div>
+
+       {/* AI Channels Section */}
       <div className="section-header flex justify-between items-center mb-4">
         <h3 className="section-title">{t.ai.channels}</h3>
         <button type="button" onClick={handleAddChannel} className="btn btn-primary">
