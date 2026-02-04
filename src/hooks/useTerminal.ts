@@ -244,7 +244,15 @@ export const useTerminal = (
     for (let i = 0; i < buffer.length; i++) {
       const line = buffer.getLine(i);
       if (line) {
-        text += line.translateToString(true) + '\n';
+        // translateToString(true) trims the trailing whitespace
+        const lineText = line.translateToString(true);
+        text += lineText;
+        
+        // If this line is NOT wrapped to the next line, it means it's a real newline
+        const nextLine = buffer.getLine(i + 1);
+        if (!nextLine || !nextLine.isWrapped) {
+          text += '\n';
+        }
       }
     }
     return text;
