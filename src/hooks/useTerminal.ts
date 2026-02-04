@@ -137,14 +137,32 @@ export const useTerminal = (
             // Fit failed
         }
       }
-    }, 50); // Reduced debounce to 50ms to be more responsive
-    
-    const resizeObserver = new ResizeObserver(handleResize);
+    }, 50);
+
+    const resizeObserver = new ResizeObserver(() => {
+      // Use requestAnimationFrame to ensure we run after the CSS transition completes
+      requestAnimationFrame(() => {
+        handleResize();
+      });
+    });
+
     resizeObserver.observe(container);
-    // Also observe the parent to catch layout shifts faster
+
+    // Also observe the parent to catch layout shifts (e.g., sidebar toggle)
     if (container.parentElement) {
-        resizeObserver.observe(container.parentElement);
+      resizeObserver.observe(container.parentElement);
     }
+
+    // Observe the grandparent (the main flex container) to catch broader layout changes
+    if (container.parentElement?.parentElement) {
+      resizeObserver.observe(container.parentElement.parentElement);
+    }
+
+    // Listen for explicit resize requests (e.g., from sidebar toggle)
+    const forceResizeHandler = () => {
+      handleResize();
+    };
+    window.addEventListener('resh-force-terminal-resize', forceResizeHandler);
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -155,6 +173,7 @@ export const useTerminal = (
       selectionDisposable.dispose();
       oscDisposable.dispose();
       resizeObserver.disconnect();
+      window.removeEventListener('resh-force-terminal-resize', forceResizeHandler);
       webglAddonRef.current?.dispose();
       term.dispose();
       terminalRef.current = null;

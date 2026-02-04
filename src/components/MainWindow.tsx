@@ -77,6 +77,15 @@ export const MainWindow: React.FC = () => {
     }
   }, [config?.general]);
 
+  // Trigger terminal resize when SFTP sidebar locked state changes
+  useEffect(() => {
+    if (config?.general.sftpSidebarLocked !== undefined) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('resh-force-terminal-resize'));
+      }, 250);
+    }
+  }, [config?.general.sftpSidebarLocked]);
+
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, tabId: string } | null>(null);
   const [serverContextMenu, setServerContextMenu] = useState<{ x: number, y: number, serverId: string } | null>(null);
   const [editServerId, setEditServerId] = useState<string | null>(null);
@@ -393,7 +402,13 @@ export const MainWindow: React.FC = () => {
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isSFTPOpen ? 'bg-gray-700 text-white' : ''}`}
-            onClick={() => setIsSFTPOpen(!isSFTPOpen)}
+            onClick={() => {
+              setIsSFTPOpen(!isSFTPOpen);
+              // Force terminal resize after sidebar animation completes
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('resh-force-terminal-resize'));
+              }, 250);
+            }}
             aria-label="SFTP"
             title="SFTP"
           >

@@ -153,6 +153,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [showPathSubmenu, setShowPathSubmenu] = useState(false);
   const [showEditSubmenu, setShowEditSubmenu] = useState(false);
 
+  // Trigger terminal resize when locked state changes
+  useEffect(() => {
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('resh-force-terminal-resize'));
+    }, 250);
+  }, [isLocked]);
+
   const updateSession = useCallback((sid: string, updates: Partial<SessionState> | ((prev: SessionState) => Partial<SessionState>)) => {
       setSessions(prev => {
           const current = prev[sid] || { rootFiles: [], currentPath: '/', sortState: { type: 'name', order: 'asc' }, isLoading: false };
@@ -702,8 +709,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     <>
     <div
       ref={sidebarRef}
-      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col z-20 transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? 'opacity-100 visible border-r-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? 'relative shadow-none z-10 left-auto top-auto bottom-auto h-full' : ''}`}
-      style={{ width: isOpen ? `${width}px` : '0px', left: isLocked ? 'auto' : 0, right: 'auto' }}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col z-20 transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? 'opacity-100 visible border-r-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none z-10 !left-auto !top-auto !bottom-auto h-full' : ''}`}
+      style={{ width: isOpen ? `${width}px` : '0px' }}
       aria-hidden={!isOpen}
     >
       <div
