@@ -454,4 +454,10 @@ impl SftpManager {
         sftp.set_metadata(path, attrs).await.map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    pub async fn rename_item(session_id: &str, old_path: &str, new_path: &str) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+        sftp.rename(old_path, new_path).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus } from 'lucide-react';
+import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../i18n';
 import './SFTPSidebar.css';
@@ -131,6 +131,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
   const [newFileModal, setNewFileModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
   const [newFolderModal, setNewFolderModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
+  const [renameModal, setRenameModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
   const [propertiesModal, setPropertiesModal] = useState<{ isOpen: boolean, entry: FileEntry | null, permissions: string }>({ isOpen: false, entry: null, permissions: '' });
 
   const [newItemName, setNewItemName] = useState('');
@@ -453,6 +454,33 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     setNewItemName('');
   };
 
+  const handleRename = () => {
+    if (!contextMenu) return;
+    setRenameModal({ isOpen: true, entry: contextMenu.entry });
+    setNewItemName(contextMenu.entry.name);
+    handleCloseContextMenu();
+  };
+
+  const confirmRename = async () => {
+    if (!sessionId || !renameModal.entry || !newItemName.trim()) return;
+    if (newItemName.trim() === renameModal.entry.name) {
+      setRenameModal({ isOpen: false, entry: null });
+      setNewItemName('');
+      return;
+    }
+    
+    try {
+      const parentPath = getParentPath(renameModal.entry.path);
+      const newPath = `${parentPath}/${newItemName.trim()}`;
+      await invoke('sftp_rename', { sessionId, oldPath: renameModal.entry.path, newPath });
+      await reloadParentDirectory(renameModal.entry);
+    } catch (e) {
+      console.error('Rename failed', e);
+    }
+    setRenameModal({ isOpen: false, entry: null });
+    setNewItemName('');
+  };
+
   const handleProperties = () => {
     if (!contextMenu) return;
     const octalPerms = permissionsToOctal(contextMenu.entry.permissions);
@@ -594,6 +622,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             <button type="button" onClick={handleProperties}>
                 <Settings size={14} /> {t.sftp.contextMenu.properties}
             </button>
+            <button type="button" onClick={handleRename}>
+                <Pencil size={14} /> {t.sftp.contextMenu.rename}
+            </button>
             <button type="button" onClick={handleDelete}>
                 <Trash size={14} /> {t.sftp.contextMenu.delete}
             </button>
@@ -639,6 +670,29 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       onSubmit={confirmNewFolder}
       onClose={() => setNewFolderModal({ isOpen: false, parentPath: '' })}
       submitText={t.common.create}
+    >
+      <input
+        type="text"
+        value={newItemName}
+        onChange={(e) => setNewItemName(e.target.value)}
+        placeholder={t.sftp.modals.itemNameLabel}
+        className="sftp-input"
+        style={{
+          width: '100%',
+          padding: '8px',
+          background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border-color)',
+          color: 'var(--text-primary)'
+        }}
+      />
+    </FormModal>
+
+    <FormModal
+      isOpen={renameModal.isOpen}
+      title={t.sftp.modals.renameTitle}
+      onSubmit={confirmRename}
+      onClose={() => setRenameModal({ isOpen: false, entry: null })}
+      submitText={t.common.save}
     >
       <input
         type="text"
