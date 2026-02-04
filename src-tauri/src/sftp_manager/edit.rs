@@ -25,76 +25,110 @@ impl SftpEditManager {
         let watched_files_clone = watched_files.clone();
         let app_clone = app.clone();
 
-        // Spawn background task to handle file changes
+        // Spawn background task to handle file changes with debouncing
         tokio::spawn(async move {
-            while let Some(path) = rx.recv().await {
-                info!("File modified: {:?}", path);
-                
-                let (session_id, remote_path) = {
-                    let files = watched_files_clone.lock().unwrap();
-                    if let Some((sid, rpath)) = files.get(&path) {
-                        (sid.clone(), rpath.clone())
-                    } else {
-                        continue;
+            let mut pending_updates: HashMap<PathBuf, tokio::time::Instant> = HashMap::new();
+            let mut check_interval = tokio::time::interval(Duration::from_millis(100));
+
+            loop {
+                tokio::select! {
+                    Some(path) = rx.recv() => {
+                        // Only debounce files we are actually watching
+                        let is_watched = {
+                            let files = watched_files_clone.lock().unwrap();
+                            files.contains_key(&path)
+                        };
+                        
+                        if is_watched {
+                            // Delay upload by 500ms to allow atomic writes to complete
+                            pending_updates.insert(path, tokio::time::Instant::now() + Duration::from_millis(500));
+                        }
                     }
-                };
+                    _ = check_interval.tick() => {
+                        let now = tokio::time::Instant::now();
+                        let mut ready_paths = Vec::new();
+                        
+                        pending_updates.retain(|path, deadline| {
+                            if now >= *deadline {
+                                ready_paths.push(path.clone());
+                                false
+                            } else {
+                                true
+                            }
+                        });
 
-                info!("Uploading modified file {:?} to remote {}", path, remote_path);
+                        for path in ready_paths {
+                            let info = {
+                                let files = watched_files_clone.lock().unwrap();
+                                files.get(&path).cloned()
+                            };
 
-                let task_id = Uuid::new_v4().to_string();
-                let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            if let Some((session_id, remote_path)) = info {
+                                let app_inner = app_clone.clone();
+                                let path_inner = path.clone();
+                                
+                                tokio::spawn(async move {
+                                    info!("Uploading modified file {:?} to remote {}", path_inner, remote_path);
 
-                // 1. Emit Initial Progress (Pending/Started)
-                let _ = app_clone.emit("transfer-progress", TransferProgress {
-                    task_id: task_id.clone(),
-                    type_: "upload".to_string(),
-                    session_id: session_id.clone(),
-                    file_name: file_name.clone(),
-                    source: path.to_string_lossy().to_string(),
-                    destination: remote_path.clone(),
-                    total_bytes: 0,
-                    transferred_bytes: 0,
-                    speed: 0.0,
-                    eta: None,
-                    status: "transferring".to_string(),
-                    error: None,
-                });
+                                    let task_id = Uuid::new_v4().to_string();
+                                    let file_name = path_inner.file_name().unwrap_or_default().to_string_lossy().to_string();
 
-                // Perform upload
-                let result = async {
-                    let content = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-                    let total_bytes = content.len() as u64;
-                    
-                    let sftp = SftpManager::get_session(&session_id).await?;
-                    let mut remote_file = sftp.create(&remote_path).await.map_err(|e| e.to_string())?;
-                    remote_file.write_all(&content).await.map_err(|e| e.to_string())?;
-                    
-                    Ok(total_bytes)
-                }.await;
+                                    // 1. Emit Initial Progress
+                                    let _ = app_inner.emit("transfer-progress", TransferProgress {
+                                        task_id: task_id.clone(),
+                                        type_: "upload".to_string(),
+                                        session_id: session_id.clone(),
+                                        file_name: file_name.clone(),
+                                        source: path_inner.to_string_lossy().to_string(),
+                                        destination: remote_path.clone(),
+                                        total_bytes: 0,
+                                        transferred_bytes: 0,
+                                        speed: 0.0,
+                                        eta: None,
+                                        status: "transferring".to_string(),
+                                        error: None,
+                                    });
 
-                // 2. Emit Final Progress (Completed/Failed)
-                let (final_status, final_error, total_bytes) = match result {
-                    Ok(bytes) => ("completed".to_string(), None, bytes),
-                    Err(e) => {
-                        error!("Upload failed: {}", e);
-                        ("failed".to_string(), Some(e), 0)
+                                    // Perform upload
+                                    let result = async {
+                                        let content = tokio::fs::read(&path_inner).await.map_err(|e| e.to_string())?;
+                                        let total_bytes = content.len() as u64;
+                                        
+                                        let sftp = SftpManager::get_session(&session_id).await?;
+                                        let mut remote_file = sftp.create(&remote_path).await.map_err(|e| e.to_string())?;
+                                        remote_file.write_all(&content).await.map_err(|e| e.to_string())?;
+                                        
+                                        Ok(total_bytes)
+                                    }.await;
+
+                                    // 2. Emit Final Progress
+                                    let (final_status, final_error, total_bytes) = match result {
+                                        Ok(bytes) => ("completed".to_string(), None, bytes),
+                                        Err(e) => {
+                                            error!("Upload failed: {}", e);
+                                            ("failed".to_string(), Some(e), 0)
+                                        }
+                                    };
+
+                                    let _ = app_inner.emit("transfer-progress", TransferProgress {
+                                        task_id,
+                                        type_: "upload".to_string(),
+                                        session_id,
+                                        file_name,
+                                        source: path_inner.to_string_lossy().to_string(),
+                                        destination: remote_path,
+                                        total_bytes,
+                                        transferred_bytes: total_bytes,
+                                        speed: 0.0,
+                                        eta: None,
+                                        status: final_status,
+                                        error: final_error,
+                                    });
+                                });
+                            }
+                        }
                     }
-                };
-
-                let _ = app_clone.emit("transfer-progress", TransferProgress {
-                    task_id,
-                    type_: "upload".to_string(),
-                    session_id,
-                    file_name,
-                    source: path.to_string_lossy().to_string(),
-                    destination: remote_path,
-                    total_bytes,
-                    transferred_bytes: total_bytes,
-                    speed: 0.0,
-                    eta: None,
-                    status: final_status,
-                    error: final_error,
-                });
+                }
             }
         });
 
