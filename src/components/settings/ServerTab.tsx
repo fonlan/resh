@@ -6,6 +6,7 @@ import { ConfirmationModal } from '../ConfirmationModal';
 import { ServerForm, ServerFormHandle } from './ServerForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
+import { EmojiText } from '../EmojiText';
 
 interface ServerTabProps {
   servers: Server[];
@@ -141,7 +142,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                 className="bg-[var(--bg-tertiary)] border border-[var(--glass-border)] rounded-lg p-4 flex items-center justify-between hover:border-[var(--accent-primary)]/30 transition-all"
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-medium text-[var(--text-primary)] m-0 mb-1">{server.name}</p>
+                  <p className="text-[14px] font-medium text-[var(--text-primary)] m-0 mb-1">
+                    <EmojiText text={server.name} />
+                  </p>
                   <p className="text-[12px] text-[var(--text-muted)] m-0 mb-2">
                     {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
                   </p>

@@ -330,13 +330,13 @@ export const AITab: React.FC<AITabProps> = ({
     <div className="w-full max-w-full">
       {/* General Settings Section */}
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-base font-semibold tracking-tight">{t.ai.configuration}</h3>
+        <h3 className="text-base font-semibold ">{t.ai.configuration}</h3>
       </div>
 
       <div className="mb-8">
          <div className="flex gap-4">
             <div className="flex flex-col gap-1.5 mb-4 flex-1">
-               <label htmlFor="ai-max-history" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.maxChatContext}</label>
+               <label htmlFor="ai-max-history" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.maxChatContext}</label>
                <input
 id="ai-max-history"
                     type="number"
@@ -353,7 +353,7 @@ id="ai-max-history"
                />
             </div>
             <div className="flex flex-col gap-1.5 mb-4 flex-1">
-               <label htmlFor="ai-timeout" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.requestTimeout}</label>
+               <label htmlFor="ai-timeout" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.requestTimeout}</label>
                <input
 id="ai-timeout"
                     type="number"
@@ -374,7 +374,7 @@ id="ai-timeout"
 
        <div className="mb-8">
           <div className="flex flex-col gap-1.5 mb-4">
-             <label htmlFor="ai-additional-prompt" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.globalAdditionalPrompt}</label>
+             <label htmlFor="ai-additional-prompt" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.globalAdditionalPrompt}</label>
              <div className="text-xs text-zinc-400 mb-2">
                  {t.ai.globalAdditionalPromptDesc}
              </div>
@@ -390,7 +390,7 @@ id="ai-timeout"
 
        {/* AI Channels Section */}
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-base font-semibold tracking-tight">{t.ai.channels}</h3>
+        <h3 className="text-base font-semibold ">{t.ai.channels}</h3>
         <button type="button" onClick={handleAddChannel} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans">
           <Plus size={16} />
           {t.ai.addChannel}
@@ -437,7 +437,7 @@ id="ai-timeout"
 
       {/* AI Models Section */}
       <div className="flex justify-between items-center mb-4 mt-8">
-        <h3 className="text-base font-semibold tracking-tight">{t.ai.models}</h3>
+        <h3 className="text-base font-semibold ">{t.ai.models}</h3>
         <button type="button" onClick={handleAddModel} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans">
           <Plus size={16} />
           {t.ai.addModel}
@@ -515,7 +515,7 @@ id="ai-timeout"
         }
       >
         <div className="flex flex-col gap-1.5 mb-4">
-          <label htmlFor="channel-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.name}</label>
+          <label htmlFor="channel-name" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.name}</label>
           <input
             id="channel-name"
             type="text"
@@ -526,7 +526,7 @@ id="ai-timeout"
           />
         </div>
         <div className="flex flex-col gap-1.5 mb-4">
-          <label htmlFor="channel-type" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.type}</label>
+          <label htmlFor="channel-type" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.type}</label>
           <CustomSelect
             id="channel-type"
             value={channelFormData.type || 'openai'}
@@ -551,7 +551,7 @@ id="ai-timeout"
 
 {channelFormData.type === 'copilot' ? (
            <div className="flex flex-col gap-1.5 mb-4 p-4 bg-[var(--bg-primary)] rounded-lg border border-zinc-700/50">
-              <label className="block text-sm font-medium text-zinc-400 mb-2 tracking-tight">GitHub Authentication</label>
+              <label className="block text-sm font-medium text-zinc-400 mb-2 ">GitHub Authentication</label>
 
              {channelFormData.apiKey ? (
                <div className="flex items-center gap-2 text-green-400 mb-4">
@@ -622,7 +622,7 @@ disabled={isAuthLoading}
         ) : (
           <>
             <div className="flex flex-col gap-1.5 mb-4">
-              <label htmlFor="channel-endpoint" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.endpoint}</label>
+              <label htmlFor="channel-endpoint" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.endpoint}</label>
               <input
                 id="channel-endpoint"
                 type="text"
@@ -633,7 +633,7 @@ disabled={isAuthLoading}
               />
             </div>
             <div className="flex flex-col gap-1.5 mb-4">
-              <label htmlFor="channel-apikey" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.apiKey}</label>
+              <label htmlFor="channel-apikey" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.apiKey}</label>
               <input
                 id="channel-apikey"
                 type="password"
@@ -659,7 +659,7 @@ disabled={isAuthLoading}
         </div>
 
         <div className="flex flex-col gap-1.5 mb-4 mt-4 pt-4 border-t border-zinc-700/50">
-          <label htmlFor="channel-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.common.proxy}</label>
+          <label htmlFor="channel-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.common.proxy}</label>
           <CustomSelect
             id="channel-proxy"
             value={channelFormData.proxyId || ''}
@@ -697,7 +697,7 @@ disabled={isAuthLoading}
         }
       >
           <div className="flex flex-col gap-1.5 mb-4 relative">
-            <label htmlFor="model-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.modelForm.name}</label>
+            <label htmlFor="model-name" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.modelForm.name}</label>
              <div className="relative">
                <input
                  id="model-name"
@@ -758,7 +758,7 @@ disabled={isAuthLoading}
              </div>
            </div>
          <div className="flex flex-col gap-1.5 mb-4">
-           <label htmlFor="model-channel" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.modelForm.channel}</label>
+           <label htmlFor="model-channel" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.modelForm.channel}</label>
           <CustomSelect
             id="model-channel"
             value={modelFormData.channelId || ''}

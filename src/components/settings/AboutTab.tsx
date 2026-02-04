@@ -34,7 +34,7 @@ export const AboutTab: React.FC = () => {
         <div className="relative mb-6 p-6 rounded-3xl shadow-[0_8px_32px_rgba(0,0,0,0.2)] border border-white/10 transition-transform duration-300 hover:scale-105 hover:rotate-5 bg-[var(--bg-secondary,#1a1b1e)]">
           <Terminal size={48} className="text-[var(--accent-color,#f97316)]" style={{ filter: 'drop-shadow(0 0 8px rgba(249, 115, 22, 0.4))' }} />
         </div>
-        <h1 className="text-[2.5rem] font-extrabold m-0 tracking-tight" style={{
+        <h1 className="text-[2.5rem] font-extrabold m-0 " style={{
           background: 'linear-gradient(135deg, #fff 0%, #a1a1aa 100%)',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent'
@@ -52,7 +52,7 @@ export const AboutTab: React.FC = () => {
 
       <div className="grid grid-cols-2 gap-6 w-full max-w-[600px] mb-12 animate-[fadeIn_0.6s_cubic-bezier(0.22,1,0.36,1)_0.2s_forwards] opacity-0" style={{ animationFillMode: 'forwards' }}>
         <div className="bg-white/[0.03] border border-white/[0.05] p-5 rounded-2xl transition-all duration-200 hover:bg-white/[0.05] hover:border-white/10 hover:-translate-y-0.5 flex flex-col gap-2">
-          <span className="text-[0.75rem] uppercase tracking-[0.05em] text-zinc-500 font-semibold">
+          <span className="text-[0.75rem] uppercase  text-zinc-500 font-semibold">
             {t.about.author}
           </span>
           <div className="text-base text-zinc-100 font-medium flex items-center min-h-6">
@@ -61,7 +61,7 @@ export const AboutTab: React.FC = () => {
         </div>
 
         <div className="bg-white/[0.03] border border-white/[0.05] p-5 rounded-2xl transition-all duration-200 hover:bg-white/[0.05] hover:border-white/10 hover:-translate-y-0.5 flex flex-col gap-2">
-          <span className="text-[0.75rem] uppercase tracking-[0.05em] text-zinc-500 font-semibold">
+          <span className="text-[0.75rem] uppercase  text-zinc-500 font-semibold">
             {t.about.github}
           </span>
           <button
@@ -76,7 +76,7 @@ export const AboutTab: React.FC = () => {
         </div>
 
         <div className="bg-white/[0.03] border border-white/[0.05] p-5 rounded-2xl transition-all duration-200 hover:bg-white/[0.05] hover:border-white/10 hover:-translate-y-0.5 flex flex-col gap-2">
-          <span className="text-[0.75rem] uppercase tracking-[0.05em] text-zinc-500 font-semibold">
+          <span className="text-[0.75rem] uppercase  text-zinc-500 font-semibold">
             {t.about.license}
           </span>
           <div className="text-base text-zinc-100 font-medium flex items-center min-h-6 gap-2">
@@ -86,7 +86,7 @@ export const AboutTab: React.FC = () => {
         </div>
 
         <div className="bg-white/[0.03] border border-white/[0.05] p-5 rounded-2xl transition-all duration-200 hover:bg-white/[0.05] hover:border-white/10 hover:-translate-y-0.5 flex flex-col gap-2">
-          <span className="text-[0.75rem] uppercase tracking-[0.05em] text-zinc-500 font-semibold">
+          <span className="text-[0.75rem] uppercase  text-zinc-500 font-semibold">
             {t.about.techStack}
           </span>
           <div className="text-base text-zinc-100 font-medium flex items-center min-h-6 gap-2">

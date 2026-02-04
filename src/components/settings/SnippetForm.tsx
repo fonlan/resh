@@ -111,7 +111,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
    return (
      <div className="space-y-4">
        <div className="flex flex-col gap-1.5 mb-4">
-         <label htmlFor="snippet-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+         <label htmlFor="snippet-name" className="block text-sm font-medium text-zinc-400 mb-1.5 ">
            {t.snippetForm.nameLabel}
          </label>
          <input
@@ -126,7 +126,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
        </div>
 
        <div className="flex flex-col gap-1.5 mb-4 relative" ref={suggestionsRef}>
-         <label htmlFor="snippet-group" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+         <label htmlFor="snippet-group" className="block text-sm font-medium text-zinc-400 mb-1.5 ">
            {t.snippetForm.groupLabel}
          </label>
          <div className="relative w-full">
@@ -175,7 +175,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
        </div>
 
        <div className="flex flex-col gap-1.5 mb-4">
-         <label htmlFor="snippet-content" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+         <label htmlFor="snippet-content" className="block text-sm font-medium text-zinc-400 mb-1.5 ">
            {t.snippetForm.contentLabel}
          </label>
          <textarea
@@ -190,7 +190,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
        </div>
 
        <div className="flex flex-col gap-1.5 mb-4">
-         <label htmlFor="snippet-description" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+         <label htmlFor="snippet-description" className="block text-sm font-medium text-zinc-400 mb-1.5 ">
            {t.snippetForm.descriptionLabel}
          </label>
          <input

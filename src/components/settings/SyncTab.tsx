@@ -45,7 +45,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
       <div>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
-            <h3 className="text-base font-semibold tracking-tight mb-0">{t.webdav}</h3>
+            <h3 className="text-base font-semibold  mb-0">{t.webdav}</h3>
             {general.webdav.enabled && (
               <button
                 type="button"
@@ -95,7 +95,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
 
         <div className={`space-y-4 ${!general.webdav.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="webdav-url" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.webdavUrl}</label>
+            <label htmlFor="webdav-url" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.webdavUrl}</label>
             <input
               id="webdav-url"
               type="text"
@@ -107,7 +107,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="webdav-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.webdavProxy}</label>
+            <label htmlFor="webdav-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.webdavProxy}</label>
             <CustomSelect
               id="webdav-proxy"
               value={general.webdav.proxyId || ''}
@@ -123,7 +123,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="webdav-username" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.username}</label>
+            <label htmlFor="webdav-username" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.username}</label>
             <input
               id="webdav-username"
               type="text"
@@ -134,7 +134,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="webdav-password" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.password}</label>
+            <label htmlFor="webdav-password" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.password}</label>
             <input
               id="webdav-password"
               type="password"

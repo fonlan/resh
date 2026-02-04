@@ -65,7 +65,7 @@ export const FormModal: React.FC<FormModalProps> = ({
 
         {/* Header */}
         <div className="px-6 py-4 border-b border-[var(--glass-border)]" style={{ background: 'rgba(255, 255, 255, 0.02)' }}>
-          <h2 className="text-[18px] font-bold text-[var(--text-primary)] tracking-[-0.02em] m-0">{title}</h2>
+          <h2 className="text-[18px] font-bold text-[var(--text-primary)]  m-0">{title}</h2>
         </div>
 
         {/* Content */}

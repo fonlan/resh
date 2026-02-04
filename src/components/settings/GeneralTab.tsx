@@ -38,10 +38,10 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
     <div className="w-full max-w-full space-y-6">
       {/* Appearance Section */}
       <div>
-        <h3 className="text-base font-semibold tracking-tight mb-4">{t.appearance}</h3>
+        <h3 className="text-base font-semibold  mb-4">{t.appearance}</h3>
         <div className="space-y-4">
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="theme-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.theme}</label>
+            <label htmlFor="theme-select" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.theme}</label>
             <CustomSelect
               id="theme-select"
               value={general.theme}
@@ -57,7 +57,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="language-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.language}</label>
+            <label htmlFor="language-select" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.language}</label>
             <CustomSelect
               id="language-select"
               value={general.language}
@@ -70,7 +70,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="recording-mode-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.recordingMode}</label>
+            <label htmlFor="recording-mode-select" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.recordingMode}</label>
             <CustomSelect
               id="recording-mode-select"
               value={general.recordingMode || 'raw'}
@@ -83,7 +83,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="max-recent-servers" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.maxRecentServers}</label>
+            <label htmlFor="max-recent-servers" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.maxRecentServers}</label>
             <input
               id="max-recent-servers"
               type="number"
@@ -99,10 +99,10 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
       {/* Terminal Settings Section */}
       <div>
-        <h3 className="text-base font-semibold tracking-tight mb-4">{t.terminal}</h3>
+        <h3 className="text-base font-semibold  mb-4">{t.terminal}</h3>
         <div className="space-y-4">
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="font-family" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.fontFamily}</label>
+            <label htmlFor="font-family" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.fontFamily}</label>
             <input
               id="font-family"
               type="text"
@@ -114,7 +114,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="font-size" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.fontSize}</label>
+            <label htmlFor="font-size" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.fontSize}</label>
             <input
               id="font-size"
               type="number"
@@ -127,7 +127,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="cursor-style" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.cursorStyle}</label>
+            <label htmlFor="cursor-style" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.cursorStyle}</label>
             <CustomSelect
               id="cursor-style"
               value={general.terminal.cursorStyle}
@@ -141,7 +141,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
           </div>
 
           <div className="flex flex-col gap-1.5 mb-4">
-            <label htmlFor="scrollback-limit" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.scrollback}</label>
+            <label htmlFor="scrollback-limit" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.scrollback}</label>
             <input
               id="scrollback-limit"
               type="number"
@@ -157,7 +157,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
       {/* Confirmations Section */}
       <div>
-        <h3 className="text-base font-semibold tracking-tight mb-4">{t.confirmations}</h3>
+        <h3 className="text-base font-semibold  mb-4">{t.confirmations}</h3>
         <div className="space-y-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -166,7 +166,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleConfirmationChange('confirmCloseTab', e.target.checked)}
               className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmCloseTab}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 ">{t.confirmCloseTab}</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -176,7 +176,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleConfirmationChange('confirmExitApp', e.target.checked)}
               className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmExitApp}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 ">{t.confirmExitApp}</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -186,7 +186,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleConfirmationChange('debugEnabled', e.target.checked)}
               className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.debugEnabled}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 ">{t.debugEnabled}</span>
           </label>
         </div>
       </div>

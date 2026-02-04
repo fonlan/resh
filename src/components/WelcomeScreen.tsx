@@ -2,6 +2,7 @@ import React from 'react';
 import { Server as ServerIcon, Plus, Terminal } from 'lucide-react';
 import { Server } from '../types/config';
 import { useTranslation } from '../i18n';
+import { EmojiText } from './EmojiText';
 
 interface WelcomeScreenProps {
   servers: Server[];
@@ -26,10 +27,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
           <div className="inline-flex items-center justify-center w-20 h-20 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-lg)] text-[var(--accent-primary)] mb-6 shadow-[var(--glow-primary)] transition-transform duration-300 hover:scale-105 hover:rotate-5">
             <Terminal size={48} />
           </div>
-          <h1 className="text-[36px] font-extrabold text-[var(--text-primary)] my-0 mx-0 mb-2 tracking-tight leading-[1.2] font-[var(--font-display)]">
+          <h1 className="text-[36px] font-extrabold text-[var(--text-primary)] my-0 mx-0 mb-2  leading-[1.2] font-[var(--font-display)]">
             {t.welcome.title}
           </h1>
-          <p className="text-base text-[var(--text-secondary)] my-0 leading-[1.6] -tracking-[0.01em]">
+          <p className="text-base text-[var(--text-secondary)] my-0 leading-[1.6]">
             {t.welcome.subtitle}
           </p>
         </div>
@@ -37,7 +38,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         {hasServers ? (
           <div className="mb-10">
             <div className="flex items-center justify-between mb-5">
-              <h2 className="text-[14px] font-semibold text-zinc-500 uppercase tracking-[0.05em] my-0 leading-[1.4]">
+              <h2 className="text-[14px] font-semibold text-zinc-500 uppercase  my-0 leading-[1.4]">
                 {t.welcome.recentTitle}
               </h2>
               <button type="button" className="bg-transparent border-0 text-[var(--accent-primary)] text-[13px] font-semibold cursor-pointer px-2 py-1 rounded transition-all hover:bg-[rgba(59,130,246,0.1)]" onClick={onOpenSettings}>
@@ -57,10 +58,10 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                     <ServerIcon size={20} />
                   </div>
                   <div className="flex flex-col items-start min-w-0 flex-1">
-                    <h3 className="text-[14px] font-semibold text-[var(--text-primary)] my-0 mx-0 mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis -tracking-[0.01em] leading-[1.4]">
-                      {server.name}
+                    <h3 className="text-[14px] font-semibold text-[var(--text-primary)] my-0 mx-0 mb-0.5 whitespace-nowrap overflow-hidden text-ellipsis leading-[1.4]">
+                      <EmojiText text={server.name} />
                     </h3>
-                    <p className="text-xs text-zinc-500 my-0 whitespace-nowrap overflow-hidden text-ellipsis -tracking-[0.01em] leading-[1.5] w-full">
+                    <p className="text-xs text-zinc-500 my-0 whitespace-nowrap overflow-hidden text-ellipsis leading-[1.5] w-full">
                       {server.username ? `${server.username}@` : ''}{server.host}
                     </p>
                   </div>
@@ -73,13 +74,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             <div className="w-16 h-16 mx-auto mb-6 flex items-center justify-center bg-[var(--bg-primary)] border border-[var(--glass-border)] rounded-full text-zinc-500">
               <ServerIcon size={32} />
             </div>
-            <h3 className="text-[18px] font-semibold text-[var(--text-primary)] my-0 mx-0 mb-2 -tracking-[0.01em] leading-[1.4]">
+            <h3 className="text-[18px] font-semibold text-[var(--text-primary)] my-0 mx-0 mb-2 leading-[1.4]">
               {t.welcome.noServers}
             </h3>
-            <p className="text-[14px] text-[var(--text-secondary)] my-0 mx-0 mb-8 leading-[1.6] -tracking-[0.01em]">
+            <p className="text-[14px] text-[var(--text-secondary)] my-0 mx-0 mb-8 leading-[1.6]">
               {t.welcome.getFirstStarted}
             </p>
-            <button type="button" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent-success)] text-white border-0 rounded-[var(--radius-md)] text-[14px] font-semibold cursor-pointer transition-all shadow-[var(--glow-success)] -tracking-[0.01em] leading-[1.4] hover:brightness-110 hover:-translate-y-px" onClick={onOpenSettings}>
+            <button type="button" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent-success)] text-white border-0 rounded-[var(--radius-md)] text-[14px] font-semibold cursor-pointer transition-all shadow-[var(--glow-success)]  leading-[1.4] hover:brightness-110 hover:-translate-y-px" onClick={onOpenSettings}>
               <Plus size={18} />
               <span>{t.serverTab.addServer}</span>
             </button>

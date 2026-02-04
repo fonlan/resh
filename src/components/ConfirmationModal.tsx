@@ -64,7 +64,7 @@ export const ConfirmationModal: React.FC<ConfirmationModalProps> = ({
           className="px-5 py-4 border-b border-[var(--glass-border)]"
           style={{ background: 'rgba(255, 255, 255, 0.02)' }}
         >
-          <h3 className="text-[16px] font-bold text-[var(--text-primary)] tracking-[-0.01em] m-0">{title}</h3>
+          <h3 className="text-[16px] font-bold text-[var(--text-primary)] m-0">{title}</h3>
         </div>
         <div className="p-5 text-[var(--text-secondary)] text-[14px] leading-relaxed">
           <p>{message}</p>

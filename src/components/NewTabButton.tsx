@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Settings, Server as ServerIcon } from 'lucide-react';
 import { Server } from '../types/config';
 import { useTranslation } from '../i18n';
+import { EmojiText } from './EmojiText';
 
 interface NewTabButtonProps {
   servers: Server[];
@@ -78,7 +79,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               to { opacity: 1; transform: translateY(0) scale(1); }
             }
           `}</style>
-          <div className="p-[14px_20px] border-b border-[var(--glass-border)] text-[11px] font-bold text-[var(--text-muted)] uppercase tracking-[0.1em] bg-[rgba(255,255,255,0.02)]">
+          <div className="p-[14px_20px] border-b border-[var(--glass-border)] text-[11px] font-bold text-[var(--text-muted)] uppercase  bg-[rgba(255,255,255,0.02)]">
             <span>{t.newTabButton.connectTo}</span>
           </div>
 
@@ -106,7 +107,9 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
                 >
                   <ServerIcon size={18} className="text-[var(--accent-primary)] opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110" />
                   <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-[14px] font-bold text-[var(--text-primary)] tracking-[-0.01em] whitespace-nowrap overflow-hidden text-ellipsis">{server.name}</span>
+                    <span className="text-[14px] font-bold text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis">
+                      <EmojiText text={server.name} />
+                    </span>
                     <span className="text-[11px] text-[var(--text-muted)] font-mono opacity-70 whitespace-nowrap overflow-hidden text-ellipsis">
                       {server.username ? `${server.username}@` : ''}{server.host}
                     </span>

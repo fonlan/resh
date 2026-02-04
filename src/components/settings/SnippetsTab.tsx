@@ -80,7 +80,7 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
   return (
     <div className="w-full max-w-full">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-base font-semibold tracking-tight">{t.snippetsTab.title}</h3>
+        <h3 className="text-base font-semibold ">{t.snippetsTab.title}</h3>
         <button
           type="button"
           onClick={handleAddSnippet}

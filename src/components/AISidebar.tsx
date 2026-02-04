@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
 import { CustomSelect } from './CustomSelect';
+import { EmojiText } from './EmojiText';
 
 interface AISidebarProps {
   isOpen: boolean;
@@ -941,11 +942,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                     <div className="flex items-center justify-center w-8 h-8 rounded-md bg-white/5 text-[var(--text-muted)] flex-shrink-0 transition-all duration-200">
                       <MessageSquare size={16} />
                     </div>
-                    <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                      <div className="text-[13px] font-medium text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis" title={session.title || t.ai.newChat}>
-                       {session.title || t.ai.newChat}
-                      </div>
-                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
+                     <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                       <div className="text-[13px] font-medium text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis" title={session.title || t.ai.newChat}>
+                        <EmojiText text={session.title || t.ai.newChat} />
+                       </div>
+                       <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
                        <Clock size={10} />
                        {new Date(session.createdAt).toLocaleString(undefined, {
                          month: 'short',

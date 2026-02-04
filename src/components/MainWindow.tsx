@@ -22,6 +22,7 @@ import { generateId } from '../utils/idGenerator';
 import { addRecentServer, getRecentServers } from '../utils/recentServers';
 import { useTranslation } from '../i18n';
 import { useTabDragDrop } from '../hooks/useTabDragDrop';
+import { EmojiText } from './EmojiText';
 
 interface Tab {
   id: string;
@@ -347,7 +348,7 @@ export const MainWindow: React.FC = () => {
               tabIndex={activeTabId === tab.id ? 0 : -1}
               aria-selected={activeTabId === tab.id}
               aria-label={t.mainWindow.tabAriaLabel.replace('{index}', (index + 1).toString()).replace('{total}', tabs.length.toString())}
-              className={`flex items-center gap-2 px-4 h-10 w-[200px] bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium tracking-tight leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
+              className={`flex items-center gap-2 px-4 h-10 w-[200px] bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
                 draggedTabIndex === index ? 'opacity-40 cursor-grabbing' : ''
               } ${dropTargetIndex === index ? 'border-l-2 border-l-[var(--accent-primary)]' : ''}`}
               onClick={() => setActiveTabId(tab.id)}
@@ -356,7 +357,9 @@ export const MainWindow: React.FC = () => {
               {recordingTabs.has(tab.id) && (
                 <Circle size={8} fill="#ef4444" stroke="#ef4444" className="mr-2 animate-pulse" />
               )}
-              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{tab.label}</span>
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+                <EmojiText text={tab.label} />
+              </span>
               <button
                 type="button"
                 className="flex items-center justify-center w-[18px] h-[18px] bg-transparent border-none text-[var(--text-muted)] text-[14px] cursor-pointer rounded-[4px] transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
