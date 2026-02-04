@@ -40,6 +40,16 @@ export const MainWindow: React.FC = () => {
   const [isSnippetsOpen, setIsSnippetsOpen] = useState(false);
   const [isSFTPOpen, setIsSFTPOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
+  const [isSidebarsInitialized, setIsSidebarsInitialized] = useState(false);
+
+  useEffect(() => {
+    if (config && !isSidebarsInitialized) {
+      if (config.general.sftpSidebarLocked) setIsSFTPOpen(true);
+      if (config.general.aiSidebarLocked) setIsAIOpen(true);
+      if (config.general.snippetsSidebarLocked) setIsSnippetsOpen(true);
+      setIsSidebarsInitialized(true);
+    }
+  }, [config, isSidebarsInitialized]);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Listen for sync failed events
@@ -390,10 +400,12 @@ export const MainWindow: React.FC = () => {
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
               e.stopPropagation();
-              if (config?.general.sftpSidebarLocked) {
+              if (!isSFTPOpen) {
+                setIsSFTPOpen(true);
+              } else if (config?.general.sftpSidebarLocked) {
                 handleToggleSFTPLock();
               } else {
-                setIsSFTPOpen(prev => !prev);
+                setIsSFTPOpen(false);
               }
             }}
             aria-label="SFTP"
@@ -406,10 +418,12 @@ export const MainWindow: React.FC = () => {
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isAIOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
               e.stopPropagation();
-              if (config?.general.aiSidebarLocked) {
+              if (!isAIOpen) {
+                setIsAIOpen(true);
+              } else if (config?.general.aiSidebarLocked) {
                 handleToggleAILock();
               } else {
-                setIsAIOpen(prev => !prev);
+                setIsAIOpen(false);
               }
             }}
             aria-label={t.mainWindow.aiAssistant}
@@ -422,10 +436,12 @@ export const MainWindow: React.FC = () => {
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSnippetsOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
               e.stopPropagation();
-              if (config?.general.snippetsSidebarLocked) {
+              if (!isSnippetsOpen) {
+                setIsSnippetsOpen(true);
+              } else if (config?.general.snippetsSidebarLocked) {
                 handleToggleSnippetsLock();
               } else {
-                setIsSnippetsOpen(prev => !prev);
+                setIsSnippetsOpen(false);
               }
             }}
             aria-label={t.mainWindow.snippetsTooltip}

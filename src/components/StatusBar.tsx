@@ -1,5 +1,4 @@
 import React from 'react';
-import { useConfig } from '../hooks/useConfig';
 import { EmojiText } from './EmojiText';
 
 interface StatusBarProps {
@@ -10,7 +9,6 @@ interface StatusBarProps {
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme, connected }) => {
-  const { config } = useConfig();
   // Determine colors based on theme
   const isDark = theme === 'dark' || theme === 'orange' || theme === 'green' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   
