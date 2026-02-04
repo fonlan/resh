@@ -384,22 +384,6 @@ export const MainWindow: React.FC = () => {
         <div className="flex items-center">
           <button
             type="button"
-            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isAIOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
-            onMouseDown={(e) => {
-              e.stopPropagation();
-              if (config?.general.aiSidebarLocked) {
-                handleToggleAILock();
-              } else {
-                setIsAIOpen(prev => !prev);
-              }
-            }}
-            aria-label={t.mainWindow.aiAssistant}
-            title={t.mainWindow.aiAssistant}
-          >
-            <MessageSquare size={18} />
-          </button>
-          <button
-            type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
               e.stopPropagation();
@@ -413,6 +397,22 @@ export const MainWindow: React.FC = () => {
             title="SFTP"
           >
             <Folder size={18} />
+          </button>
+          <button
+            type="button"
+            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isAIOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              if (config?.general.aiSidebarLocked) {
+                handleToggleAILock();
+              } else {
+                setIsAIOpen(prev => !prev);
+              }
+            }}
+            aria-label={t.mainWindow.aiAssistant}
+            title={t.mainWindow.aiAssistant}
+          >
+            <MessageSquare size={18} />
           </button>
           <button
             type="button"
