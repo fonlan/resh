@@ -12,6 +12,8 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 use std::time::Instant;
 
+pub mod edit;
+
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<SftpSession>>> = Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());

@@ -221,21 +221,20 @@ pub async fn export_terminal_log(
 }
 
 #[tauri::command]
-pub async fn select_save_path(default_name: String) -> Result<Option<String>, String> {
+pub async fn select_save_path(default_name: String, initial_dir: Option<String>) -> Result<Option<String>, String> {
     use rfd::FileDialog;
-    
-    // Run in blocking task to avoid blocking the async runtime
     let path = tokio::task::spawn_blocking(move || {
-        FileDialog::new()
-            .set_file_name(&default_name)
-            .add_filter("Text", &["txt", "log"])
-            .add_filter("All Files", &["*"])
-            .save_file()
+        let mut dialog = FileDialog::new()
+            .set_file_name(&default_name);
+        
+        if let Some(dir) = initial_dir {
+            if !dir.is_empty() {
+                dialog = dialog.set_directory(dir);
+            }
+        }
+        
+        dialog.save_file()
     }).await.map_err(|e| e.to_string())?;
 
-    if let Some(path) = path {
-        Ok(Some(path.to_string_lossy().to_string()))
-    } else {
-        Ok(None)
-    }
+    Ok(path.map(|p| p.to_string_lossy().to_string()))
 }

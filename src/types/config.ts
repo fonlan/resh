@@ -75,6 +75,17 @@ export interface WebDAVSettings {
   proxyId?: string | null;
 }
 
+export interface EditorRule {
+  id: string;
+  pattern: string;
+  editor: string;
+}
+
+export interface SftpSettings {
+  defaultDownloadPath: string;
+  editors: EditorRule[];
+}
+
 export interface GeneralSettings {
   theme: 'light' | 'dark' | 'orange' | 'green' | 'system';
   language: 'en' | 'zh-CN';
@@ -86,6 +97,7 @@ export interface GeneralSettings {
   snippetsSidebarLocked: boolean;
   aiSidebarLocked: boolean;
   sftpSidebarLocked: boolean;
+  sftp: SftpSettings;
   aiMode: 'ask' | 'agent';
   aiMaxHistory: number;
   aiTimeout: number;

@@ -310,6 +310,9 @@ export const locales = {
         copyFullPath: 'Copy Full Path',
         sendPathToTerminal: 'Send Path to Terminal',
         terminalJump: 'Terminal Jump to This Path',
+        edit: 'Edit',
+        editServerVim: 'Open with Server Vim',
+        editLocal: 'Open with Local Editor',
       },
       tooltips: {
         sort: 'Sort',
@@ -328,6 +331,19 @@ export const locales = {
         permissionsLabel: 'Permissions (Octal)',
         permissionsPlaceholder: 'e.g., 755',
         itemNameLabel: 'Name',
+      },
+      settings: {
+        defaultDownloadPath: 'Default Download Path',
+        defaultDownloadPathDesc: 'Default directory for SFTP file downloads.',
+        browse: 'Select Folder',
+        editorAssociations: 'Editor Associations',
+        addRule: 'Add Rule',
+        filePattern: 'File Pattern',
+        editorPath: 'Editor Path',
+        browseFile: 'Select Editor',
+        noRules: 'No editor rules defined. Add one to associate file types with local editors.',
+        patternPlaceholder: '*.log',
+        editorPlaceholder: 'C:\\Windows\\notepad.exe',
       }
     },
     about: {
@@ -652,6 +668,9 @@ export const locales = {
         copyFullPath: '复制完整路径',
         sendPathToTerminal: '发送路径到终端',
         terminalJump: '终端跳转到此路径',
+        edit: '编辑',
+        editServerVim: '使用服务器 Vim 打开',
+        editLocal: '使用本地编辑器打开',
       },
       tooltips: {
         sort: '排序',
@@ -670,6 +689,19 @@ export const locales = {
         permissionsLabel: '权限 (八进制)',
         permissionsPlaceholder: '例如：755',
         itemNameLabel: '名称',
+      },
+      settings: {
+        defaultDownloadPath: '默认下载路径',
+        defaultDownloadPathDesc: 'SFTP 文件下载的默认存放目录。',
+        browse: '选择文件夹',
+        editorAssociations: '编辑器关联',
+        addRule: '添加规则',
+        filePattern: '文件名模式',
+        editorPath: '编辑器路径',
+        browseFile: '选择编辑器',
+        noRules: '暂无关联规则。添加规则以将文件类型关联到本地编辑器。',
+        patternPlaceholder: '*.log',
+        editorPlaceholder: 'C:\\Windows\\notepad.exe',
       }
     },
     about: {

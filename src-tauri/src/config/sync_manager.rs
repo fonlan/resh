@@ -233,9 +233,15 @@ impl SyncManager {
 
         let should_update = match (remote_ts, local_ts) {
             (Some(rt), Some(lt)) => is_newer(rt, lt),
-            (Some(_), None) => true,
+            (Some(_), None) => {
+                // Only update if remote has a non-null value
+                remote.additional_prompt.is_some()
+            },
             (None, Some(_)) => false,
-            (None, None) => false,
+            (None, None) => {
+                // Both have no timestamps, only update if local is None and remote has a value
+                local.additional_prompt.is_none() && remote.additional_prompt.is_some()
+            },
         };
 
         if should_update {

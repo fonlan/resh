@@ -7,6 +7,7 @@ use resh::commands;
 use resh::config::ConfigManager;
 use resh::master_password::MasterPasswordManager;
 use resh::db::DatabaseManager;
+use resh::sftp_manager::edit::SftpEditManager;
 use resh::logger;
 use std::sync::Arc;
 use tauri::Manager;
@@ -120,6 +121,7 @@ async fn main() {
                 config: Mutex::new(local_config.clone()),
                 ai_cancellation_tokens: dashmap::DashMap::new(),
                 ai_manager: resh::ai::manager::AiManager::new(),
+                sftp_edit_manager: SftpEditManager::new(app.handle().clone()),
             });
 
             // Apply window state
@@ -225,6 +227,10 @@ async fn main() {
             commands::sftp::sftp_create_file,
             commands::sftp::sftp_chmod,
             commands::sftp::sftp_rename,
+            commands::sftp_edit::sftp_edit_file,
+            commands::sftp_edit::open_local_editor,
+            commands::sftp_edit::pick_folder,
+            commands::sftp_edit::pick_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

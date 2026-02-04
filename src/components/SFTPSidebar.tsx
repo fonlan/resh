@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link } from 'lucide-react';
+import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link, Edit, FileCode } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../i18n';
+import { useConfig } from '../hooks/useConfig';
 import './SFTPSidebar.css';
 
 import { TransferStatusPanel } from './TransferStatusPanel';
@@ -117,6 +118,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   sessionId
 }) => {
   const { t } = useTranslation();
+  const { config } = useConfig();
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -138,6 +140,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [permissionInput, setPermissionInput] = useState('');
 
   const [showPathSubmenu, setShowPathSubmenu] = useState(false);
+  const [showEditSubmenu, setShowEditSubmenu] = useState(false);
 
   // Close sort menu on click outside
   useEffect(() => {
@@ -294,7 +297,44 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
     setShowPathSubmenu(false);
+    setShowEditSubmenu(false);
   }, []);
+
+  const handleEditVim = () => {
+    if (!contextMenu || !sessionId) return;
+    const path = contextMenu.entry.path.replace(/"/g, '\\"');
+    const command = `vim "${path}"\r`;
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: command }));
+    handleCloseContextMenu();
+  };
+
+  const matchPattern = (filename: string, pattern: string) => {
+      const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
+      return regex.test(filename);
+  };
+
+  const handleEditLocal = async () => {
+    if (!contextMenu || !sessionId || !config) return;
+    try {
+        const localPath = await invoke<string>('sftp_edit_file', { 
+            sessionId, 
+            remotePath: contextMenu.entry.path 
+        });
+        
+        let editorCmd = undefined;
+        if (config.general.sftp?.editors) {
+            const rule = config.general.sftp.editors.find(r => matchPattern(contextMenu.entry.name, r.pattern));
+            if (rule) {
+                editorCmd = rule.editor;
+            }
+        }
+
+        await invoke('open_local_editor', { path: localPath, editor: editorCmd });
+    } catch (e) {
+        console.error('Edit failed', e);
+    }
+    handleCloseContextMenu();
+  };
 
   useEffect(() => {
     const handleClick = () => handleCloseContextMenu();
@@ -356,9 +396,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   }, [isOpen, isLocked, onClose]);
 
   const handleDownload = async () => {
-    if (!contextMenu || !sessionId) return;
+    if (!contextMenu || !sessionId || !config) return;
     try {
-        const localPath = await invoke<string>('select_save_path', { defaultName: contextMenu.entry.name });
+        const localPath = await invoke<string>('select_save_path', { 
+            defaultName: contextMenu.entry.name,
+            initialDir: config.general.sftp?.defaultDownloadPath 
+        });
         if (localPath) {
              await invoke('sftp_download', { sessionId, remotePath: contextMenu.entry.path, localPath });
         }
@@ -649,6 +692,24 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             className="sftp-context-menu"
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
+            {!isDirectory(contextMenu.entry) && (
+                <div style={{ position: 'relative' }} onMouseEnter={() => setShowEditSubmenu(true)} onMouseLeave={() => setShowEditSubmenu(false)}>
+                    <button type="button" onClick={() => setShowEditSubmenu(!showEditSubmenu)}>
+                        <Edit size={14} /> {t.sftp.contextMenu.edit}
+                        <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                    </button>
+                    {showEditSubmenu && (
+                        <div className="sftp-submenu">
+                            <button type="button" onClick={handleEditVim}>
+                                <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
+                            </button>
+                            <button type="button" onClick={handleEditLocal}>
+                                <FileCode size={14} /> {t.sftp.contextMenu.editLocal}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
             <button type="button" onClick={handleDownload}>
                 <Download size={14} /> {t.sftp.contextMenu.download}
             </button>

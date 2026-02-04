@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw, Bot, Info } from 'lucide-react';
+import { X, Server, Key, Globe, Settings, Loader2, Check, AlertCircle, Code, RefreshCw, Bot, Info, Folder } from 'lucide-react';
 import { Config, Server as ServerType, Authentication, ProxyConfig as ProxyType, GeneralSettings, Snippet, AIChannel, AIModel } from '../../types/config';
 import { useConfig } from '../../hooks/useConfig';
 import { ServerTab } from './ServerTab';
@@ -10,6 +10,7 @@ import { SyncTab } from './SyncTab';
 import { SnippetsTab } from './SnippetsTab';
 import { AITab } from './AITab';
 import { AboutTab } from './AboutTab';
+import { SFTPTab } from './SFTPTab';
 import { useTranslation } from '../../i18n';
 import './SettingsModal.css';
 
@@ -21,7 +22,7 @@ export interface SettingsModalProps {
   editServerId?: string | null;
 }
 
-type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai' | 'about';
+type TabType = 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' | 'sync' | 'ai' | 'about' | 'sftp';
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onConnectServer, initialTab = 'servers', editServerId }) => {
@@ -206,11 +207,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     setLocalConfig((prev) => (prev ? { ...prev, aiModels } : null));
   };
 
-  const handleAdditionalPromptUpdate = (prompt: string | undefined) => {
-    setLocalConfig((prev) => (prev ? { 
-      ...prev, 
-      additionalPrompt: prompt || null,
-      additionalPromptUpdatedAt: prompt ? new Date().toISOString() : null
+  const handleAdditionalPromptUpdate = (prompt: string | null | undefined) => {
+    setLocalConfig((prev) => (prev ? {
+      ...prev,
+      additionalPrompt: prompt === null ? undefined : prompt,
+      additionalPromptUpdatedAt: prompt !== null && prompt !== undefined ? new Date().toISOString() : undefined
     } : null));
   };
 
@@ -252,6 +253,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     { id: 'proxies', label: t.proxies, icon: <Globe size={18} /> },
     { id: 'snippets', label: t.snippets, icon: <Code size={18} /> },
     { id: 'ai', label: t.ai.tabTitle, icon: <Bot size={18} /> },
+    { id: 'sftp', label: t.sftp.title, icon: <Folder size={18} /> },
     { id: 'sync', label: t.sync, icon: <RefreshCw size={18} /> },
     { id: 'general', label: t.general, icon: <Settings size={18} /> },
     { id: 'about', label: t.about.tabTitle, icon: <Info size={18} /> },
@@ -363,6 +365,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 onAIModelsUpdate={handleAIModelsUpdate}
                 onGeneralUpdate={handleGeneralUpdate}
                 onAdditionalPromptUpdate={handleAdditionalPromptUpdate}
+              />
+            )}
+            {activeTab === 'sftp' && (
+              <SFTPTab
+                config={localConfig}
+                onChange={(newConfig) => setLocalConfig(newConfig)}
               />
             )}
             {activeTab === 'general' && (

@@ -224,15 +224,23 @@
 
 .sftp-submenu {
   position: absolute;
-  top: 0;
+  top: -4px; /* Align top with parent item */
   left: 100%;
-  margin-left: 4px;
+  margin-left: 8px; /* Slightly more gap */
   background: var(--bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  min-width: 180px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2), 0 4px 6px -2px rgba(0, 0, 0, 0.1);
+  min-width: 200px;
   padding: 4px;
   z-index: 1001;
-  overflow: hidden;
+  overflow: visible;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: sftp-fade-in 0.15s ease-out;
+}
+
+@keyframes sftp-fade-in {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
 }

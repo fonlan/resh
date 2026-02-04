@@ -159,6 +159,23 @@ pub struct WebDAVSettings {
     pub proxy_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorRule {
+    pub id: String,
+    pub pattern: String,
+    pub editor: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpSettings {
+    #[serde(default)]
+    pub default_download_path: String,
+    #[serde(default)]
+    pub editors: Vec<EditorRule>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WindowState {
@@ -189,6 +206,8 @@ pub struct GeneralSettings {
     #[serde(default)]
     #[serde(alias = "sftpSidebarLocked", alias = "sftp_sidebar_locked")]
     pub sftp_sidebar_locked: bool,
+    #[serde(default)]
+    pub sftp: SftpSettings,
     #[serde(default = "default_ai_mode")]
     #[serde(alias = "aiMode", alias = "ai_mode")]
     pub ai_mode: String,
@@ -339,6 +358,10 @@ impl Config {
                 snippets_sidebar_locked: false,
                 ai_sidebar_locked: false,
                 sftp_sidebar_locked: false,
+                sftp: SftpSettings {
+                    default_download_path: String::new(),
+                    editors: vec![],
+                },
                 ai_mode: default_ai_mode(),
                 ai_max_history: 20,
                 ai_timeout: 120,
