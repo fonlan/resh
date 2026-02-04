@@ -1,5 +1,7 @@
 use crate::sftp_manager::{SftpManager, FileEntry};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use std::sync::Arc;
+use crate::commands::AppState;
 
 #[tauri::command]
 pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileEntry>, String> {
@@ -8,12 +10,14 @@ pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileE
 
 #[tauri::command]
 pub async fn sftp_download(app: AppHandle, session_id: String, remote_path: String, local_path: String) -> Result<String, String> {
-    SftpManager::download_file(app, session_id, remote_path, local_path).await
+    let db = app.state::<Arc<AppState>>().db_manager.clone();
+    SftpManager::download_file(app, db, session_id, remote_path, local_path, None).await
 }
 
 #[tauri::command]
 pub async fn sftp_upload(app: AppHandle, session_id: String, local_path: String, remote_path: String) -> Result<String, String> {
-    SftpManager::upload_file(app, session_id, local_path, remote_path).await
+    let db = app.state::<Arc<AppState>>().db_manager.clone();
+    SftpManager::upload_file(app, db, session_id, local_path, remote_path, None).await
 }
 
 #[tauri::command]

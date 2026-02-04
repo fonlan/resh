@@ -2,6 +2,7 @@ use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct DatabaseManager {
     conn: Arc<Mutex<Connection>>,
 }

@@ -5,7 +5,7 @@ use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use rusqlite::params;
 use std::sync::Arc;
-use tauri::{Emitter, State, Window};
+use tauri::{Emitter, State, Window, Manager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use serde::{Serialize, Deserialize};
@@ -137,6 +137,50 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                 }),
             },
         });
+
+        tools.push(ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "sftp_download".to_string(),
+                description: "Download a file or folder from the remote server to the local machine. If target local directory is not specified, it will use the default download path in settings.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "remote_path": {
+                            "type": "string",
+                            "description": "The absolute path of the file or folder on the remote server to download"
+                        },
+                        "local_path": {
+                            "type": "string",
+                            "description": "The local path where the file or folder should be saved. If omitted, the default download directory will be used."
+                        }
+                    },
+                    "required": ["remote_path"]
+                }),
+            },
+        });
+
+        tools.push(ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "sftp_upload".to_string(),
+                description: "Upload a local file or folder to the remote server.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "local_path": {
+                            "type": "string",
+                            "description": "The absolute path of the file or folder on the local machine to upload"
+                        },
+                        "remote_path": {
+                            "type": "string",
+                            "description": "The target absolute path on the remote server where the file or folder should be saved"
+                        }
+                    },
+                    "required": ["local_path", "remote_path"]
+                }),
+            },
+        });
     }
 
     tools
@@ -159,11 +203,7 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
                         }
                     }).collect();
                     
-                    if content.is_empty() {
-                        GenaiMessage::assistant(genai_tool_calls)
-                    } else {
-                        GenaiMessage::assistant(genai_tool_calls)
-                    }
+                    GenaiMessage::assistant(genai_tool_calls)
                 } else {
                     GenaiMessage::assistant(content)
                 }
@@ -212,7 +252,6 @@ async fn load_history(
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
 
-        // 加载所有非system消息，按时间排序
         let mut stmt = conn
             .prepare(
                 "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
@@ -252,20 +291,17 @@ async fn load_history(
             })
             .map_err(|e| e.to_string())?;
 
-        // 收集所有消息
         let mut all_messages: Vec<ChatMessage> = Vec::new();
         for row in rows {
             let msg: ChatMessage = row.map_err(|e| e.to_string())?;
             all_messages.push(msg);
         }
 
-        // 分离system消息和对话消息
         let dialog_messages: Vec<ChatMessage> = all_messages
             .into_iter()
             .filter(|m| m.role != "system")
             .collect();
 
-        // 从最早的消息开始删除超出max_history的部分
         if dialog_messages.len() > max_history {
             dialog_messages[dialog_messages.len() - max_history..].to_vec()
         } else {
@@ -313,10 +349,8 @@ async fn load_history(
         tool_call_id: None,
     });
 
-    // 添加所有对话消息（已经在数据库中按正确顺序存储）
     messages.extend(dialog_messages);
 
-    // 验证并修复消息序列
     let mut payload_messages: Vec<MessagePayload> = messages
         .iter()
         .map(|m| MessagePayload {
@@ -343,7 +377,6 @@ async fn load_history(
         tracing::warn!("[AI] Message sequence fixed: {:?}", result.fixes);
     }
 
-    // 转换回ChatMessage格式
     let validated_messages: Vec<ChatMessage> = payload_messages
         .into_iter()
         .map(|m| ChatMessage {
@@ -370,6 +403,7 @@ async fn load_history(
 }
 
 async fn execute_tools_and_save(
+    app_handle: tauri::AppHandle,
     state: &Arc<AppState>,
     session_id: &str,
     ssh_session_id: Option<&str>,
@@ -408,14 +442,12 @@ async fn execute_tools_and_save(
                             SSHClient::start_command_recording(ssh_id).await?;
                             tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
 
-                            // Send command first
                             let cmd_nl = format!("{}\n", cmd);
                             if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
                                 let _ = SSHClient::stop_command_recording(ssh_id).await;
                                 break;
                             }
 
-                            // Send invisible marker (completely invisible in terminal)
                             let marker = "\x1b\x1b\n";
                             let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
 
@@ -461,6 +493,161 @@ async fn execute_tools_and_save(
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            }
+            "sftp_download" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                        let remote_path = args["remote_path"].as_str().unwrap_or_default().to_string();
+                        let local_path = args["local_path"].as_str().map(|s| s.to_string());
+
+                        if remote_path.is_empty() {
+                            "Error: Missing 'remote_path' argument".to_string()
+                        } else {
+                            match crate::sftp_manager::SftpManager::get_session(ssh_id).await {
+                                Ok(sftp) => {
+                                    let metadata_res = tokio::time::timeout(
+                                        std::time::Duration::from_secs(5),
+                                        sftp.metadata(&remote_path)
+                                    ).await;
+
+                                    match metadata_res {
+                                        Ok(Ok(_)) => {
+                                            let final_local_path = if let Some(lp) = local_path {
+                                                lp
+                                            } else {
+                                                let config = state.config.lock().await;
+                                                let default_path = config.general.sftp.default_download_path.clone();
+                                                if default_path.is_empty() {
+                                                    app_handle.path().download_dir()
+                                                        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
+                                                        .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
+                                                        .to_string_lossy()
+                                                        .to_string()
+                                                } else {
+                                                    std::path::Path::new(&default_path)
+                                                        .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
+                                                        .to_string_lossy()
+                                                        .to_string()
+                                                }
+                                            };
+
+                                            let local_p = std::path::Path::new(&final_local_path);
+                                            let mut parent_ok = true;
+                                            let mut prep_error = String::new();
+                                            if let Some(parent) = local_p.parent() {
+                                                if !parent.exists() {
+                                                    if let Err(e) = std::fs::create_dir_all(parent) {
+                                                        parent_ok = false;
+                                                        prep_error = format!("Error creating local directory: {}", e);
+                                                    }
+                                                }
+                                            }
+
+                                            if parent_ok {
+                                                match crate::sftp_manager::SftpManager::download_file(
+                                                    app_handle.clone(),
+                                                    state.db_manager.clone(),
+                                                    ssh_id.to_string(),
+                                                    remote_path,
+                                                    final_local_path.clone(),
+                                                    Some(session_id.to_string()),
+                                                ).await {
+                                                    Ok(task_id) => format!("Download started in background. Task ID: {}. Local path: {}. I will notify you once it's finished.", task_id, final_local_path),
+                                                    Err(e) => format!("Error starting download: {}", e),
+                                                }
+                                            } else {
+                                                prep_error
+                                            }
+                                        }
+                                        Ok(Err(_)) => format!("Error: Remote path '{}' does not exist or is inaccessible. Please confirm the path with the user.", remote_path),
+                                        Err(_) => {
+                                            match crate::sftp_manager::SftpManager::download_file(
+                                                app_handle.clone(),
+                                                state.db_manager.clone(),
+                                                ssh_id.to_string(),
+                                                remote_path,
+                                                "queued_download".to_string(),
+                                                Some(session_id.to_string()),
+                                            ).await {
+                                                Ok(task_id) => format!("SFTP session is busy. Download task {} has been queued and will start as soon as possible.", task_id),
+                                                Err(e) => format!("Error queuing download: {}", e),
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => format!("Error connecting to SFTP: {}", e),
+                            }
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            }
+            "sftp_upload" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
+                        let local_path = args["local_path"].as_str().unwrap_or_default().to_string();
+                        let remote_path = args["remote_path"].as_str().unwrap_or_default().to_string();
+
+                        if local_path.is_empty() || remote_path.is_empty() {
+                            "Error: Missing 'local_path' or 'remote_path' argument".to_string()
+                        } else {
+                            let local_p = std::path::Path::new(&local_path);
+                            if !local_p.exists() {
+                                format!("Error: Local source path '{}' does not exist.", local_path)
+                            } else {
+                                match crate::sftp_manager::SftpManager::get_session(ssh_id).await {
+                                    Ok(sftp) => {
+                                        let remote_p = std::path::Path::new(&remote_path);
+                                        let remote_parent = remote_p.parent().and_then(|p| p.to_str()).unwrap_or("/");
+
+                                        let metadata_res = tokio::time::timeout(
+                                            std::time::Duration::from_secs(5),
+                                            sftp.metadata(remote_parent)
+                                        ).await;
+
+                                        match metadata_res {
+                                            Ok(Ok(_)) => {
+                                                match crate::sftp_manager::SftpManager::upload_file(
+                                                    app_handle.clone(),
+                                                    state.db_manager.clone(),
+                                                    ssh_id.to_string(),
+                                                    local_path,
+                                                    remote_path.clone(),
+                                                    Some(session_id.to_string()),
+                                                ).await {
+                                                    Ok(task_id) => format!("Upload started in background. Task ID: {}. Target: {}. I will notify you once it's finished.", task_id, remote_path),
+                                                    Err(e) => format!("Error starting upload: {}", e),
+                                                }
+                                            }
+                                            Ok(Err(_)) => format!("Error: Remote target directory '{}' does not exist. Please confirm with the user whether to create it.", remote_parent),
+                                            Err(_) => {
+                                                match crate::sftp_manager::SftpManager::upload_file(
+                                                    app_handle.clone(),
+                                                    state.db_manager.clone(),
+                                                    ssh_id.to_string(),
+                                                    local_path,
+                                                    remote_path.clone(),
+                                                    Some(session_id.to_string()),
+                                                ).await {
+                                                    Ok(task_id) => format!("SFTP session is busy. Upload task {} has been queued and will start as soon as possible.", task_id),
+                                                    Err(e) => format!("Error queuing upload: {}", e),
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => format!("Error connecting to SFTP: {}", e),
+                                }
+                            }
                         }
                     } else {
                         "Error: Invalid arguments JSON".to_string()
@@ -570,7 +757,6 @@ pub fn run_ai_turn(
                 Ok(event) => {
                     match event {
                         ChatStreamEvent::Chunk(chunk) => {
-                            // 如果之前有思考内容，先发送结束标记
                             if has_pending_reasoning {
                                 window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
                                 has_pending_reasoning = false;
@@ -584,7 +770,6 @@ pub fn run_ai_turn(
                             window.emit(&format!("ai-reasoning-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
-                            // 累积工具调用 chunk（用于某些提供商，End 事件可能没有 captured_content）
                             tracing::debug!("[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
                                 chunk.tool_call.call_id, chunk.tool_call.fn_name, chunk.tool_call.fn_arguments);
 
@@ -594,12 +779,9 @@ pub fn run_ai_turn(
 
                             tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
 
-                            // 查找是否已有相同 call_id 的工具调用
                             if let Some(existing) = accumulated_tool_calls.iter_mut().find(|tc| tc.id == chunk.tool_call.call_id) {
-                                // 累积 arguments（某些流式响应会分块发送参数）
                                 existing.function.arguments.push_str(&args);
 
-                                // 如果之前没有 fn_name，现在有了，就更新
                                 if existing.function.name.is_empty() && !chunk.tool_call.fn_name.is_empty() {
                                     existing.function.name = chunk.tool_call.fn_name.clone();
                                 }
@@ -607,8 +789,6 @@ pub fn run_ai_turn(
                                 tracing::debug!("[AI] ToolCallChunk (append by id): id={}, name={}, args_len={}, total_len={}",
                                     chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
                             } else if chunk.tool_call.call_id == "call_0" && accumulated_tool_calls.len() == 1 {
-                                // 处理 call_id 变化的情况（如 DeepSeek）：
-                                // 如果 call_id 是 "call_0" 且只有一个工具调用在进行中，则累积到那个工具调用
                                 let existing = &mut accumulated_tool_calls[0];
                                 existing.function.arguments.push_str(&args);
 
@@ -619,7 +799,6 @@ pub fn run_ai_turn(
                                 tracing::debug!("[AI] ToolCallChunk (append by fallback): original_id={}, fallback_id={}, name={}, args_len={}, total_len={}",
                                     existing.id, chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
                             } else if !chunk.tool_call.fn_name.is_empty() || !args.is_empty() {
-                                // 新工具调用（只要有 fn_name 或 arguments 就创建）
                                 accumulated_tool_calls.push(ToolCall {
                                     id: chunk.tool_call.call_id.clone(),
                                     tool_type: "function".to_string(),
@@ -635,13 +814,11 @@ pub fn run_ai_turn(
                             }
                         }
                         ChatStreamEvent::End(end) => {
-                            // 发送思考结束标记
                             if has_pending_reasoning {
                                 window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
                                 has_pending_reasoning = false;
                             }
 
-                            // 优先使用 End 事件中的完整 tool_calls，但如果为空则回退到累积的 tool_calls
                             let tool_calls = if let Some(content) = end.captured_content {
                                 let raw_tool_calls = content.tool_calls();
                                 tracing::debug!("[AI] End event captured_content tool_calls count: {}", raw_tool_calls.len());
@@ -664,7 +841,6 @@ pub fn run_ai_turn(
                                     })
                                     .collect();
 
-                                // 如果 captured_content 的 tool_calls 为空，回退到累积的 tool_calls
                                 if calls_from_captured.is_empty() && !accumulated_tool_calls.is_empty() {
                                     tracing::debug!("[AI] captured_content tool_calls is empty, fallback to accumulated tool_calls: {}", accumulated_tool_calls.len());
                                     for acc_call in &accumulated_tool_calls {
@@ -676,7 +852,6 @@ pub fn run_ai_turn(
                                     calls_from_captured
                                 }
                             } else {
-                                // 如果 End 事件没有 captured_content，则使用累积的 tool_calls
                                 tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
                                 for acc_call in &accumulated_tool_calls {
                                     tracing::debug!("[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
@@ -685,7 +860,6 @@ pub fn run_ai_turn(
                                 accumulated_tool_calls.clone()
                             };
 
-                            // 记录所有工具调用的详细信息
                             for call in &tool_calls {
                                 let timeout = extract_timeout(&call.function.arguments);
                                 let command = extract_command(&call.function.arguments);
@@ -707,7 +881,6 @@ pub fn run_ai_turn(
                     }
                 }
                 Err(e) => {
-                    // 发送思考结束标记（如果有的话）
                     if has_pending_reasoning {
                         window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
                     }
@@ -718,7 +891,6 @@ pub fn run_ai_turn(
             }
         }
 
-        // 流结束后也发送思考结束标记（以防万一）
         if has_pending_reasoning {
             window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
         }
@@ -743,7 +915,6 @@ pub fn run_ai_turn(
 
         if let Some(calls) = &final_tool_calls {
             if !calls.is_empty() {
-                // 分类工具：get_terminal_output 自动执行，其他工具需要确认
                 let auto_exec_calls: Vec<ToolCall> = calls.iter()
                     .filter(|c| c.function.name == "get_terminal_output")
                     .cloned()
@@ -754,10 +925,10 @@ pub fn run_ai_turn(
                     .cloned()
                     .collect();
 
-                // 自动执行 get_terminal_output 工具（Ask 和 Agent 模式都支持）
                 if !auto_exec_calls.is_empty() {
                     tracing::info!("[AI] Auto-executing {} get_terminal_output tools", auto_exec_calls.len());
                     execute_tools_and_save(
+                        window.app_handle().clone(),
                         &state,
                         &session_id,
                         ssh_session_id.as_deref(),
@@ -766,21 +937,17 @@ pub fn run_ai_turn(
                     ).await?;
                 }
 
-                // 需要确认的工具（仅在 Agent 模式下允许）
                 if !confirm_calls.is_empty() {
                     if is_agent_mode {
                         tracing::info!("[AI] {} tools need confirmation, emitting for frontend countdown", confirm_calls.len());
-                        // 发送完整的tool_calls到前端（完整接收后才发送）
                         window.emit(&format!("ai-tool-call-{}", session_id), confirm_calls.clone())
                             .map_err(|e| e.to_string())?;
                         return Ok(Some(confirm_calls));
                     } else {
-                        // Ask 模式下不允许执行除 get_terminal_output 以外的工具
                         tracing::warn!("[AI] Ask mode cannot execute tools other than get_terminal_output, ignoring {} tool calls", confirm_calls.len());
                     }
                 }
 
-                // 继续 AI 轮次
                 return run_ai_turn(
                     window,
                     state,
@@ -1029,7 +1196,6 @@ pub async fn send_chat_message(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
-    // 绑定 SSH 会话 ID 到 AI 会话（如果尚未绑定）
     let bound_ssh_session_id = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
@@ -1133,7 +1299,6 @@ pub async fn execute_agent_tools(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
-    // 获取绑定的 SSH 会话 ID
     let bound_ssh_session_id = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
@@ -1152,16 +1317,6 @@ pub async fn execute_agent_tools(
     };
 
     let is_agent_mode = mode.as_deref() == Some("agent");
-
-    let _provider = {
-        let config = state.config.lock().await;
-        config
-            .ai_channels
-            .iter()
-            .find(|c| c.id == channel_id)
-            .map(|c| c.provider.clone())
-            .unwrap_or_else(|| "openai".to_string())
-    };
 
     let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, bound_ssh_session_id.as_deref()).await?;
     let last_msg = history.last().ok_or("No history found")?;
@@ -1199,6 +1354,7 @@ pub async fn execute_agent_tools(
         .insert(session_id.clone(), token.clone());
 
     let exec_res = execute_tools_and_save(
+        window.app_handle().clone(),
         &state,
         &session_id,
         bound_ssh_session_id.as_deref(),
@@ -1268,30 +1424,23 @@ pub async fn run_in_terminal(
 
     SSHClient::start_command_recording(&session_id).await?;
 
-    // Send command first
     let cmd_nl = format!("{}\n", command);
     if let Err(e) = SSHClient::send_input(&session_id, cmd_nl.as_bytes()).await {
         let _ = SSHClient::stop_command_recording(&session_id).await;
         return Err(format!("Failed to send command: {}", e));
     }
 
-    // Send invisible marker (completely invisible in terminal)
     let marker = "\x1b\x1b\n";
     let _ = SSHClient::send_input(&session_id, marker.as_bytes()).await;
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
 
-    tracing::debug!("[run_in_terminal] Starting countdown, timeout={}ms", timeout_ms);
-
     loop {
         interval.tick().await;
         elapsed += 100;
 
-        tracing::debug!("[run_in_terminal] Elapsed={}ms, checking...", elapsed);
-
         if elapsed >= timeout_ms {
-            tracing::warn!("[run_in_terminal] Timeout reached ({}ms), sending interrupt", elapsed);
             let _ = SSHClient::send_interrupt(&session_id).await;
             tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
             break;
@@ -1299,15 +1448,12 @@ pub async fn run_in_terminal(
 
         match SSHClient::check_command_completed(&session_id).await {
             Ok(true) => {
-                tracing::debug!("[run_in_terminal] Command completed at {}ms", elapsed);
                 break;
             }
             Ok(false) => {
-                tracing::debug!("[run_in_terminal] Command not completed yet, continuing...");
                 continue;
             }
-            Err(e) => {
-                tracing::warn!("[run_in_terminal] check_command_completed error: {}, continuing...", e);
+            Err(_) => {
                 continue;
             }
         }

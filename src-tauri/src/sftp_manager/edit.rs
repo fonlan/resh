@@ -14,8 +14,8 @@ pub struct SftpEditManager {
     watched_files: Arc<Mutex<HashMap<PathBuf, (String, String)>>>,
     // watcher must be kept alive
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
-    tx: mpsc::Sender<PathBuf>,
-    app: AppHandle,
+    _tx: mpsc::Sender<PathBuf>,
+    _app: AppHandle,
 }
 
 impl SftpEditManager {
@@ -153,8 +153,8 @@ impl SftpEditManager {
         SftpEditManager {
             watched_files,
             watcher: Arc::new(Mutex::new(watcher)),
-            tx,
-            app,
+            _tx: tx,
+            _app: app,
         }
     }
 
