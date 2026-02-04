@@ -392,7 +392,7 @@ export const MainWindow: React.FC = () => {
         <div className="flex items-center">
           <button
             type="button"
-            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isAIOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isAIOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onClick={() => setIsAIOpen(!isAIOpen)}
             aria-label={t.mainWindow.aiAssistant}
             title={t.mainWindow.aiAssistant}
@@ -401,7 +401,7 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
-            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isSFTPOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onClick={() => {
               setIsSFTPOpen(!isSFTPOpen);
               // Force terminal resize after sidebar animation completes
@@ -416,7 +416,7 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
-            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSnippetsOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
