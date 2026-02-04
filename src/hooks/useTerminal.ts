@@ -48,7 +48,7 @@ export const useTerminal = (
     const term = new Terminal({
       cursorBlink: true,
       fontSize: settings?.fontSize || 14,
-      fontFamily: settings?.fontFamily || 'Consolas, monospace',
+      fontFamily: settings?.fontFamily || "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace",
       cursorStyle: (settings?.cursorStyle as 'block' | 'underline' | 'bar') || 'block',
       scrollback: settings?.scrollback || 25000,
       theme: actualTheme === 'light' ? {
@@ -190,7 +190,7 @@ export const useTerminal = (
 
     if (settings) {
       term.options.fontSize = settings.fontSize || 14;
-      term.options.fontFamily = settings.fontFamily || 'Consolas, monospace';
+      term.options.fontFamily = settings.fontFamily || "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace";
       term.options.cursorStyle = (settings.cursorStyle as 'block' | 'underline' | 'bar') || 'block';
       term.options.scrollback = settings.scrollback || 25000;
     }

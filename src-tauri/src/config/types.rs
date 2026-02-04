@@ -340,7 +340,8 @@ impl Config {
                 theme: "dark".to_string(),
                 language: "en".to_string(),
                 terminal: TerminalSettings {
-                    font_family: "Consolas".to_string(),
+                    font_family: "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace"
+                        .to_string(),
                     font_size: 14,
                     cursor_style: "block".to_string(),
                     scrollback: 25000,
