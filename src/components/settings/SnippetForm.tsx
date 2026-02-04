@@ -120,7 +120,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
            value={formData.name}
            onChange={(e) => handleChange('name', e.target.value)}
            placeholder={t.snippetForm.namePlaceholder}
-           className={`w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 ${errors.name ? 'border-red-500' : ''}`}
+           className={`w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] ${errors.name ? 'border-red-500' : ''}`}
          />
          {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
        </div>
@@ -139,7 +139,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
              onFocus={() => setShowSuggestions(true)}
              onClick={() => setShowSuggestions(true)}
              placeholder={t.snippetForm.groupPlaceholder}
-             className="w-full px-3 py-2 pr-10 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+             className="w-full px-3 py-2 pr-10 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
              />
              <div
                  className="absolute text-zinc-400 pointer-events-none"
@@ -155,13 +155,13 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
              </div>
          </div>
 
-         {showSuggestions && (
-             <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000]">
+{showSuggestions && (
+              <div className="flex flex-wrap gap-1.5 p-2 bg-[var(--bg-primary)] border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000]">
                  {allGroups.map((group) => (
                      <button
                          key={group}
                          type="button"
-                         className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+                         className="p-1 px-2.5 text-xs bg-[var(--bg-primary)] text-[var(--text-muted)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500"
                          onClick={() => {
                              handleChange('group', group);
                              setShowSuggestions(false);
@@ -184,7 +184,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
            onChange={(e) => handleChange('content', e.target.value)}
            placeholder={t.snippetForm.contentPlaceholder}
            rows={6}
-           className={`w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 font-mono text-xs ${errors.content ? 'border-red-500' : ''}`}
+           className={`w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-mono text-xs ${errors.content ? 'border-red-500' : ''}`}
          />
          {errors.content && <p className="text-red-500 text-xs mt-1">{errors.content}</p>}
        </div>
@@ -199,7 +199,7 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
            value={formData.description || ''}
            onChange={(e) => handleChange('description', e.target.value)}
            placeholder={t.snippetForm.descriptionPlaceholder}
-           className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+           className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
          />
        </div>
      </div>

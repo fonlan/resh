@@ -285,7 +285,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-secondary)]">
+      <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-primary)]">
         <div className="space-y-6">
           {activeTab === 'general' && (
             <>
@@ -300,9 +300,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   value={formData.name}
                   onChange={(e) => handleChange('name', e.target.value)}
                   placeholder={t.serverForm.namePlaceholder}
-                  className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                  className={`w-full px-3 py-2 rounded-md border ${
                     errors.name ? 'border-red-500' : 'border-gray-600'
-                  } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
                 />
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
               </div>
@@ -318,9 +318,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   value={formData.host}
                   onChange={(e) => handleChange('host', e.target.value)}
                   placeholder={t.serverForm.hostPlaceholder}
-                  className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                  className={`w-full px-3 py-2 rounded-md border ${
                     errors.host ? 'border-red-500' : 'border-gray-600'
-                  } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
                 />
                 {errors.host && <p className="text-red-400 text-xs mt-1">{errors.host}</p>}
               </div>
@@ -338,9 +338,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) => handleChange('port', parseInt(e.target.value, 10))}
                     min={1}
                     max={65535}
-                    className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
+                    className={`w-full px-3 py-2 rounded-md border ${
                       errors.port ? 'border-red-500' : 'border-gray-600'
-                    } text-white focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    } bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
                   />
                   {errors.port && <p className="text-red-400 text-xs mt-1">{errors.port}</p>}
                 </div>
@@ -359,7 +359,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     value={formData.username}
                     onChange={(e) => handleChange('username', e.target.value)}
                     placeholder={t.serverForm.usernamePlaceholder}
-                    className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
@@ -453,7 +453,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                       value={formData.keepAlive}
                       onChange={(e) => handleChange('keepAlive', parseInt(e.target.value, 10))}
                       min={0}
-                      className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                 </div>
@@ -475,7 +475,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     {formData.portForwards.map((pf, index) => (
                       <div
                         key={`${pf.local}-${pf.remote}`}
-                        className="flex items-center justify-between bg-gray-800 px-3 py-2 rounded-md"
+                        className="flex items-center justify-between bg-[var(--bg-primary)] px-3 py-2 rounded-md"
                       >
                         <span className="text-gray-300 text-sm">
                           {pf.local} → {pf.remote}
@@ -501,7 +501,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, local: e.target.value }))
                     }
-                    className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-gray-500 self-center">→</span>
                   <input
@@ -511,7 +511,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, remote: e.target.value }))
                     }
-                    className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -539,7 +539,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           value={cmd}
                           onChange={(e) => handleAutoExecCommandChange(index, e.target.value)}
                           placeholder="e.g., cd /var/log"
-                          className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <button
                           type="button"
@@ -581,14 +581,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                               type="text"
                               value={editingEnvVar.newKey}
                               onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newKey: e.target.value })}
-                              className="w-24 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="w-24 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                             <span className="text-gray-500 self-center">=</span>
                             <input
                               type="text"
                               value={editingEnvVar.newValue}
                               onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newValue: e.target.value })}
-                              className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                              <button
                                type="button"
@@ -621,14 +621,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                             type="text"
                             value={key}
                             disabled
-                            className="w-24 px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400 cursor-not-allowed"
+                            className="w-24 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
                           />
                           <span className="text-gray-500 self-center">=</span>
                           <input
                             type="text"
                             value={value}
                             disabled
-                            className="flex-1 px-3 py-2 rounded-md bg-gray-900 border border-gray-600 text-gray-400 cursor-not-allowed"
+                            className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
                           />
                           <button
                             type="button"
@@ -658,14 +658,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     type="text"
                     placeholder={t.serverForm.varNamePlaceholder}
                     id="envVarName"
-                    className="w-32 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-32 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-gray-500 self-center">=</span>
                   <input
                     type="text"
                     placeholder={t.serverForm.varValuePlaceholder}
                     id="envVarValue"
-                    className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -707,8 +707,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                  <textarea
                    id="server-additional-prompt"
                    value={formData.additionalPrompt || ''}
-                   onChange={(e) => handleChange('additionalPrompt', e.target.value)}
-                   className="w-full h-48 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+onChange={(e) => handleChange('additionalPrompt', e.target.value)}
+                    className="w-full h-48 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                    placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
                    style={{ resize: 'vertical' }}
                  />

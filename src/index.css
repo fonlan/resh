@@ -9,6 +9,16 @@
   --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', 'Lucida Console', 'Monaco', monospace;
 }
 
+@utility input-bg {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+@utility input-bg-disabled {
+  background-color: var(--bg-secondary);
+  color: var(--text-muted);
+}
+
 html, body, #root {
   height: 100%;
 }

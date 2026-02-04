@@ -338,9 +338,9 @@ export const AITab: React.FC<AITabProps> = ({
             <div className="flex flex-col gap-1.5 mb-4 flex-1">
                <label htmlFor="ai-max-history" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.maxChatContext}</label>
                <input
-                   id="ai-max-history"
-                   type="number"
-                   className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+id="ai-max-history"
+                    type="number"
+                    className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                    value={general.aiMaxHistory || 10}
                    onChange={(e) => {
                        const val = parseInt(e.target.value);
@@ -355,9 +355,9 @@ export const AITab: React.FC<AITabProps> = ({
             <div className="flex flex-col gap-1.5 mb-4 flex-1">
                <label htmlFor="ai-timeout" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.requestTimeout}</label>
                <input
-                   id="ai-timeout"
-                   type="number"
-                   className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+id="ai-timeout"
+                    type="number"
+                    className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                    value={general.aiTimeout || 120}
                    onChange={(e) => {
                        const val = parseInt(e.target.value);
@@ -380,7 +380,7 @@ export const AITab: React.FC<AITabProps> = ({
              </div>
              <textarea
                  id="ai-additional-prompt"
-                 className="w-full h-32 py-2 px-3 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 font-sans resize-y min-h-[100px]"
+                 className="w-full h-32 py-2 px-3 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-sans resize-y min-h-[100px]"
                  value={additionalPrompt || ''}
                  onChange={(e) => onAdditionalPromptUpdate(e.target.value)}
                  placeholder="e.g. Always answer in Chinese. Be concise."
@@ -399,24 +399,24 @@ export const AITab: React.FC<AITabProps> = ({
 
       <div className="flex flex-col gap-2 mb-8">
         {sortedChannels.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-center bg-zinc-900 border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
-            <p className="text-sm text-zinc-500 m-0">{t.ai.noChannels}</p>
+          <div className="flex flex-col items-center justify-center p-12 text-center bg-[var(--bg-primary)] border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
+            <p className="text-sm text-[var(--text-muted)] m-0">{t.ai.noChannels}</p>
           </div>
         ) : (
           sortedChannels.map((channel) => (
-            <div key={channel.id} className={`flex items-center justify-between p-3 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!channel.isActive ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
+            <div key={channel.id} className={`flex items-center justify-between p-3 bg-[var(--bg-primary)] border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!channel.isActive ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
               <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-zinc-100 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{channel.name}</span>
-                  {!channel.isActive && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-800 text-zinc-400 rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
+                  <span className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{channel.name}</span>
+                  {!channel.isActive && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-[var(--bg-primary)] text-[var(--text-muted)] rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
                 </div>
-                <p className="text-xs text-zinc-400 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Type: {channel.type}</p>
+                <p className="text-xs text-[var(--text-muted)] m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Type: {channel.type}</p>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => handleEditChannel(channel)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500"
                   title={t.common.edit}
                 >
                   <Edit2 size={14} />
@@ -424,7 +424,7 @@ export const AITab: React.FC<AITabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleDeleteChannel(channel.id)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500 hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
+                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
                   title={t.common.delete}
                 >
                   <Trash2 size={14} />
@@ -446,8 +446,8 @@ export const AITab: React.FC<AITabProps> = ({
 
       <div className="flex flex-col gap-2">
         {sortedModels.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-center bg-zinc-900 border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
-            <p className="text-sm text-zinc-500 m-0">{t.ai.noModels}</p>
+          <div className="flex flex-col items-center justify-center p-12 text-center bg-[var(--bg-primary)] border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
+            <p className="text-sm text-[var(--text-muted)] m-0">{t.ai.noModels}</p>
           </div>
         ) : (
           sortedModels.map((model) => {
@@ -456,24 +456,24 @@ export const AITab: React.FC<AITabProps> = ({
             const effectivelyEnabled = model.enabled && isChannelActive;
 
             return (
-              <div key={model.id} className={`flex items-center justify-between p-3 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!effectivelyEnabled ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
+              <div key={model.id} className={`flex items-center justify-between p-3 bg-[var(--bg-primary)] border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!effectivelyEnabled ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-zinc-100 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{model.name}</span>
-                    {!model.enabled && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-800 text-zinc-400 rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
+                    <span className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{model.name}</span>
+                    {!model.enabled && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-[var(--bg-primary)] text-[var(--text-muted)] rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
                     {model.enabled && !isChannelActive && (
-                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-yellow-900 text-yellow-200 rounded border border-zinc-700/50 whitespace-nowrap" title="Parent channel is disabled">
+                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-yellow-900/50 text-yellow-200 rounded border border-zinc-700/50 whitespace-nowrap" title="Parent channel is disabled">
                         {t.ai.channelDisabled}
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-zinc-400 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Channel: {channel ? channel.name : 'Unknown Channel'}</p>
+                  <p className="text-xs text-[var(--text-muted)] m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Channel: {channel ? channel.name : 'Unknown Channel'}</p>
                 </div>
                 <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => handleEditModel(model)}
-                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500"
                     title={t.common.edit}
                   >
                     <Edit2 size={14} />
@@ -481,7 +481,7 @@ export const AITab: React.FC<AITabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDeleteModel(model.id)}
-                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500 hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
+                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
                     title={t.common.delete}
                   >
                     <Trash2 size={14} />
@@ -506,7 +506,7 @@ export const AITab: React.FC<AITabProps> = ({
               id="channel-synced"
               checked={channelFormData.synced ?? true}
               onChange={(e) => setChannelFormData({ ...channelFormData, synced: e.target.checked })}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <label htmlFor="channel-synced" className="text-sm font-medium text-zinc-300 cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}
@@ -519,7 +519,7 @@ export const AITab: React.FC<AITabProps> = ({
           <input
             id="channel-name"
             type="text"
-            className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+            className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             value={channelFormData.name || ''}
             onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })}
             placeholder="e.g. OpenAI Personal"
@@ -549,9 +549,9 @@ export const AITab: React.FC<AITabProps> = ({
           />
         </div>
 
-        {channelFormData.type === 'copilot' ? (
-           <div className="flex flex-col gap-1.5 mb-4 p-4 bg-zinc-800 rounded-lg border border-zinc-700/50">
-             <label className="block text-sm font-medium text-zinc-400 mb-2 tracking-tight">GitHub Authentication</label>
+{channelFormData.type === 'copilot' ? (
+           <div className="flex flex-col gap-1.5 mb-4 p-4 bg-[var(--bg-primary)] rounded-lg border border-zinc-700/50">
+              <label className="block text-sm font-medium text-zinc-400 mb-2 tracking-tight">GitHub Authentication</label>
 
              {channelFormData.apiKey ? (
                <div className="flex items-center gap-2 text-green-400 mb-4">
@@ -571,8 +571,8 @@ export const AITab: React.FC<AITabProps> = ({
                    <button
                      type="button"
                      onClick={startCopilotAuth}
-                     disabled={isAuthLoading}
-                     className="inline-flex items-center justify-center w-full gap-2 px-4 py-2 text-sm font-medium rounded bg-zinc-800 text-zinc-100 border-[1.5px] border-zinc-700/50 cursor-pointer transition-all whitespace-nowrap hover:bg-zinc-700 hover:border-blue-500 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
+disabled={isAuthLoading}
+                      className="inline-flex items-center justify-center w-full gap-2 px-4 py-2 text-sm font-medium rounded bg-[var(--bg-primary)] text-[var(--text-primary)] border border-zinc-700/50 cursor-pointer transition-all whitespace-nowrap hover:bg-[var(--bg-elevated)] hover:border-blue-500 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
                    >
                      {isAuthLoading ? <Loader2 size={16} className="animate-spin" /> : null}
                      Sign in with GitHub
@@ -626,7 +626,7 @@ export const AITab: React.FC<AITabProps> = ({
               <input
                 id="channel-endpoint"
                 type="text"
-                className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+                className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                 value={channelFormData.endpoint || ''}
                 onChange={(e) => setChannelFormData({ ...channelFormData, endpoint: e.target.value })}
                 placeholder="https://api.openai.com/v1"
@@ -637,7 +637,7 @@ export const AITab: React.FC<AITabProps> = ({
               <input
                 id="channel-apikey"
                 type="password"
-                className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+                className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                 value={channelFormData.apiKey || ''}
                 onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
                 placeholder="sk-..."
@@ -650,7 +650,7 @@ export const AITab: React.FC<AITabProps> = ({
           <input
             type="checkbox"
             id="channel-active"
-            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             checked={channelFormData.isActive ?? true}
             onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
             disabled={channelFormData.type === 'copilot' && !channelFormData.apiKey}
@@ -688,7 +688,7 @@ export const AITab: React.FC<AITabProps> = ({
               id="model-synced"
               checked={modelFormData.synced ?? true}
               onChange={(e) => setModelFormData({ ...modelFormData, synced: e.target.checked })}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <label htmlFor="model-synced" className="text-sm font-medium text-zinc-300 cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}
@@ -720,9 +720,9 @@ export const AITab: React.FC<AITabProps> = ({
                  </div>
                )}
 
-               {showModelSuggestions && fetchedModels.length > 0 && dropdownPosition && createPortal(
-                 <ul
-                   className="flex flex-wrap gap-1.5 p-2 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000] fixed"
+{showModelSuggestions && fetchedModels.length > 0 && dropdownPosition && createPortal(
+                  <ul
+                    className="flex flex-wrap gap-1.5 p-2 bg-[var(--bg-primary)] border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000] fixed"
                    style={{
                        top: dropdownPosition.top,
                        left: dropdownPosition.left,
@@ -735,9 +735,9 @@ export const AITab: React.FC<AITabProps> = ({
                    {fetchedModels
                      .filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase()))
                      .map(model => (
-                     <li
-                       key={model}
-                       className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+<li
+                        key={model}
+                        className="p-1 px-2.5 text-xs bg-[var(--bg-primary)] text-[var(--text-muted)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500"
                        onMouseDown={(e) => {
                          e.preventDefault();
                          setModelFormData({ ...modelFormData, name: model });
@@ -747,8 +747,8 @@ export const AITab: React.FC<AITabProps> = ({
                        {model}
                      </li>
                    ))}
-                   {fetchedModels.filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase())).length === 0 && (
-                      <li className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500" style={{ cursor: 'default', opacity: 0.5 }}>
+{fetchedModels.filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase())).length === 0 && (
+                       <li className="p-1 px-2.5 text-xs bg-[var(--bg-primary)] text-[var(--text-muted)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500" style={{ cursor: 'default', opacity: 0.5 }}>
                          No matches found
                       </li>
                    )}

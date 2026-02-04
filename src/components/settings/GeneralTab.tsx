@@ -91,7 +91,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleConfirmationChange('maxRecentServers', parseInt(e.target.value) || 0)}
               min="0"
               max="20"
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
         </div>
@@ -108,7 +108,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="text"
               value={general.terminal.fontFamily}
               onChange={(e) => handleTerminalUpdate('fontFamily', e.target.value)}
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               placeholder="e.g., 'Courier New', monospace"
             />
           </div>
@@ -122,7 +122,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleTerminalUpdate('fontSize', parseInt(e.target.value) || 14)}
               min="8"
               max="32"
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
 
@@ -149,7 +149,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleTerminalUpdate('scrollback', parseInt(e.target.value) || 1000)}
               min="100"
               max="50000"
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
         </div>
@@ -164,7 +164,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.confirmCloseTab}
               onChange={(e) => handleConfirmationChange('confirmCloseTab', e.target.checked)}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowe"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmCloseTab}</span>
           </label>
@@ -174,7 +174,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.confirmExitApp}
               onChange={(e) => handleConfirmationChange('confirmExitApp', e.target.checked)}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmExitApp}</span>
           </label>
@@ -184,7 +184,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.debugEnabled}
               onChange={(e) => handleConfirmationChange('debugEnabled', e.target.checked)}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.debugEnabled}</span>
           </label>

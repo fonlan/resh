@@ -54,7 +54,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
                 className={`inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded border-none cursor-pointer transition-all whitespace-nowrap font-sans ${
                   syncStatus === 'success' ? 'bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.2)]' :
                   syncStatus === 'error' ? 'bg-red-500 text-white' :
-                  'bg-zinc-800 text-zinc-100 border border-zinc-700/50'
+                  'bg-[var(--bg-primary)] text-[var(--text-primary)] border border-zinc-700/50'
                 } hover:brightness-110 hover:-translate-y-px active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed`}
                 title={t.syncNow}
               >
@@ -80,7 +80,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
               type="checkbox"
               checked={general.webdav.enabled}
               onChange={(e) => handleWebDAVUpdate('enabled', e.target.checked)}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
             <span className="text-sm text-zinc-400">{t.common.enableSync}</span>
           </label>
@@ -101,7 +101,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
               type="text"
               value={general.webdav.url}
               onChange={(e) => handleWebDAVUpdate('url', e.target.value)}
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               placeholder="https://example.com/webdav"
             />
           </div>
@@ -129,7 +129,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
               type="text"
               value={general.webdav.username}
               onChange={(e) => handleWebDAVUpdate('username', e.target.value)}
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
 
@@ -140,7 +140,7 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
               type="password"
               value={general.webdav.password}
               onChange={(e) => handleWebDAVUpdate('password', e.target.value)}
-              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
         </div>
