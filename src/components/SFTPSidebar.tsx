@@ -181,6 +181,22 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       if (path === '/' || path === '.') {
         setRootFiles(sortedFiles);
         setCurrentPath(path);
+      } else {
+        setRootFiles(prev => {
+          const targetPath = path.replace(/\\/g, '/');
+          const updateNode = (nodes: FileEntry[]): FileEntry[] => {
+            return nodes.map(node => {
+              if (node.path.replace(/\\/g, '/') === targetPath) {
+                return { ...node, children: sortedFiles };
+              }
+              if (node.children) {
+                return { ...node, children: updateNode(node.children) };
+              }
+              return node;
+            });
+          };
+          return updateNode(prev);
+        });
       }
       return sortedFiles;
     } catch (error) {
