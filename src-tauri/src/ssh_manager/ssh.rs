@@ -129,6 +129,8 @@ impl SSHClient {
         String,
     > {
         let mut config = client::Config::default();
+        config.window_size = 64 * 1024 * 1024; // 64MB window size
+        config.maximum_packet_size = 128 * 1024; // 128KB packet size
 
         config.preferred.key = std::borrow::Cow::Owned(vec![
             russh::keys::key::Name("ssh-ed25519"),
@@ -928,6 +930,8 @@ impl SSHClient {
 
     pub async fn gather_system_info(params: ConnectParams) -> Result<SystemInfo, String> {
         let mut config = client::Config::default();
+        config.window_size = 64 * 1024 * 1024; // 64MB window size
+        config.maximum_packet_size = 128 * 1024; // 128KB packet size
         config.preferred.key = std::borrow::Cow::Owned(vec![
             russh::keys::key::Name("ssh-ed25519"),
             russh::keys::key::Name("rsa-sha2-256"),

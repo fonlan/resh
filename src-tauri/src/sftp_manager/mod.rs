@@ -218,8 +218,8 @@ impl SftpManager {
                         .map_err(|e| e.to_string())?;
                     
                     let mut transferred = 0u64;
-                    let chunk_size = 128 * 1024;
-                    let max_concurrent_requests = 16;
+                    let chunk_size = 256 * 1024;
+                    let max_concurrent_requests = 64;
                     let start_time = Instant::now();
                     let mut last_emit = Instant::now();
 
@@ -407,7 +407,7 @@ impl SftpManager {
                                     let _ = sftp.close(dir_handle).await;
                                     return Err("Cancelled".to_string());
                                 }
-                                match sftp.read(&handle, offset, (128 * 1024) as u32).await {
+                                match sftp.read(&handle, offset, (256 * 1024) as u32).await {
                                     Ok(data) => {
                                         if data.data.is_empty() { break; }
                                         local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
@@ -474,8 +474,8 @@ impl SftpManager {
                     let handle = sftp.open(&remote_path_clone, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                     
                     let mut transferred = 0u64;
-                    let chunk_size = 128 * 1024;
-                    let max_concurrent_requests = 16;
+                    let chunk_size = 256 * 1024;
+                    let max_concurrent_requests = 64;
                     let start_time = Instant::now();
                     let mut last_emit = Instant::now();
 
@@ -655,7 +655,7 @@ impl SftpManager {
             } else {
                 let mut local_file = tokio::fs::File::open(&local_path).await.map_err(|e| e.to_string())?;
                 let handle = sftp.open(&remote_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
-                let mut buffer = [0u8; 128 * 1024];
+                let mut buffer = [0u8; 256 * 1024];
                 let mut offset = 0u64;
                 
                 loop {
