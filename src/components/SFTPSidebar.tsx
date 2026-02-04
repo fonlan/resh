@@ -110,6 +110,13 @@ interface SortState {
   order: SortOrder;
 }
 
+interface SessionState {
+  rootFiles: FileEntry[];
+  currentPath: string;
+  sortState: SortState;
+  isLoading: boolean;
+}
+
 export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   isOpen,
   onClose,
@@ -122,10 +129,15 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  const [rootFiles, setRootFiles] = useState<FileEntry[]>([]);
-  const [currentPath, setCurrentPath] = useState('/');
-  const [isLoading, setIsLoading] = useState(false);
-  const [sortState, setSortState] = useState<SortState>({ type: 'name', order: 'asc' });
+  
+  const [sessions, setSessions] = useState<Record<string, SessionState>>({});
+  
+  const currentSession = sessionId ? sessions[sessionId] : undefined;
+  const rootFiles = currentSession?.rootFiles || [];
+  const currentPath = currentSession?.currentPath || '/';
+  const isLoading = currentSession?.isLoading || false;
+  const sortState = currentSession?.sortState || { type: 'name', order: 'asc' };
+
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry: FileEntry } | null>(null);
@@ -142,7 +154,17 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [showPathSubmenu, setShowPathSubmenu] = useState(false);
   const [showEditSubmenu, setShowEditSubmenu] = useState(false);
 
-  // Close sort menu on click outside
+  const updateSession = useCallback((sid: string, updates: Partial<SessionState> | ((prev: SessionState) => Partial<SessionState>)) => {
+      setSessions(prev => {
+          const current = prev[sid] || { rootFiles: [], currentPath: '/', sortState: { type: 'name', order: 'asc' }, isLoading: false };
+          const newValues = typeof updates === 'function' ? updates(current) : updates;
+          return {
+              ...prev,
+              [sid]: { ...current, ...newValues }
+          };
+      });
+  }, []);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
         if (showSortMenu && !(e.target as Element).closest('.sftp-sort-menu') && !(e.target as Element).closest('.sftp-sort-btn')) {
@@ -155,12 +177,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const sortFiles = useCallback((files: FileEntry[], sort: SortState) => {
       return [...files].sort((a, b) => {
-          // Always directories first
           if (a.is_dir !== b.is_dir) {
               return a.is_dir ? -1 : 1;
           }
           if (a.is_symlink && a.target_is_dir !== b.target_is_dir) {
-               // Treat symlink to dir as dir
                if (a.target_is_dir) return -1;
                if (b.target_is_dir) return 1;
           }
@@ -176,115 +196,204 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       });
   }, []);
 
-  const loadDirectory = useCallback(async (path: string) => {
-    if (!sessionId) return;
-    setIsLoading(true);
+  const loadDirectory = useCallback(async (path: string, targetSessionId?: string) => {
+    const sid = targetSessionId || sessionId;
+    if (!sid) return;
+
+    updateSession(sid, { isLoading: true });
+    
     try {
-      const files = await invoke<FileEntry[]>('sftp_list_dir', { sessionId, path });
-      const sortedFiles = sortFiles(files, sortState);
+      const files = await invoke<FileEntry[]>('sftp_list_dir', { sessionId: sid, path });
       
-      if (path === '/' || path === '.') {
-        setRootFiles(sortedFiles);
-        setCurrentPath(path);
-      } else {
-        setRootFiles(prev => {
-          const targetPath = path.replace(/\\/g, '/');
-          const updateNode = (nodes: FileEntry[]): FileEntry[] => {
-            return nodes.map(node => {
-              if (node.path.replace(/\\/g, '/') === targetPath) {
-                return { ...node, children: sortedFiles };
+      setSessions(prev => {
+          const session = prev[sid];
+          const currentSort = session?.sortState || { type: 'name', order: 'asc' };
+          const sortedFiles = sortFiles(files, currentSort);
+          
+          let newRootFiles: FileEntry[];
+          
+          if (path === '/' || path === '.') {
+            newRootFiles = sortedFiles;
+          } else {
+            const targetPath = path.replace(/\\/g, '/');
+            const updateNode = (nodes: FileEntry[]): FileEntry[] => {
+              return nodes.map(node => {
+                if (node.path.replace(/\\/g, '/') === targetPath) {
+                  return { ...node, children: sortedFiles };
+                }
+                if (node.children) {
+                  return { ...node, children: updateNode(node.children) };
+                }
+                return node;
+              });
+            };
+            newRootFiles = updateNode(session?.rootFiles || []);
+          }
+
+          return {
+              ...prev,
+              [sid]: { 
+                  ...session, 
+                  rootFiles: newRootFiles,
+                  currentPath: (path === '/' || path === '.') ? path : session.currentPath,
+                  isLoading: false
               }
-              if (node.children) {
-                return { ...node, children: updateNode(node.children) };
-              }
-              return node;
-            });
           };
-          return updateNode(prev);
-        });
-      }
-      return sortedFiles;
+      });
+
+      return files;
     } catch (error) {
       console.error('Failed to load directory:', error);
+      updateSession(sid, { isLoading: false });
       return [];
-    } finally {
-      setIsLoading(false);
     }
-  }, [sessionId, sortFiles, sortState]); // Added sortState dependency
-
-  // Re-sort when sort state changes
-  useEffect(() => {
-      setRootFiles(prev => sortFiles(prev, sortState));
-  }, [sortState, sortFiles]);
+  }, [sessionId, sortFiles, updateSession]);
 
   useEffect(() => {
     if (isOpen && sessionId) {
-      loadDirectory('/');
-    } else if (!sessionId) {
-      setRootFiles([]);
+      setSessions(prev => {
+          if (!prev[sessionId]) {
+              return {
+                  ...prev,
+                  [sessionId]: { 
+                      rootFiles: [], 
+                      currentPath: '/', 
+                      sortState: { type: 'name', order: 'asc' }, 
+                      isLoading: true 
+                  }
+              };
+          }
+          return prev;
+      });
+
+      const sessionState = sessions[sessionId];
+      const shouldLoad = !sessionState || (sessionState.rootFiles.length === 0 && !sessionState.isLoading);
+      
+      if (shouldLoad) {
+          loadDirectory('/', sessionId);
+      }
     }
-  }, [isOpen, sessionId, loadDirectory]);
+  }, [isOpen, sessionId, loadDirectory, sessions]);
+
 
   const handleToggle = async (entry: FileEntry) => {
     // Allow toggling if it's a directory OR a symlink to a directory
     if (!entry.is_dir && !(entry.is_symlink && entry.target_is_dir)) return;
+    if (!sessionId) return;
 
     if (entry.isExpanded) {
-        const toggleNode = (nodes: FileEntry[]): FileEntry[] => {
-            return nodes.map(node => {
-                if (node.path === entry.path) {
-                    return { ...node, isExpanded: false };
-                }
-                if (node.children) {
-                    return { ...node, children: toggleNode(node.children) };
-                }
-                return node;
-            });
-        };
-        setRootFiles(toggleNode(rootFiles));
-    } else {
-        const setLoading = (nodes: FileEntry[], loading: boolean): FileEntry[] => {
-             return nodes.map(node => {
-                if (node.path === entry.path) {
-                    return { ...node, isLoading: loading };
-                }
-                if (node.children) {
-                    return { ...node, children: setLoading(node.children, loading) };
-                }
-                return node;
-            });
-        }
-        setRootFiles(setLoading(rootFiles, true));
-
-        try {
-            const children = await invoke<FileEntry[]>('sftp_list_dir', { sessionId, path: entry.path });
-            const sortedChildren = sortFiles(children, sortState);
-            
-            const updateChildren = (nodes: FileEntry[]): FileEntry[] => {
+        // Collapse
+        updateSession(sessionId, (prev) => {
+            const toggleNode = (nodes: FileEntry[]): FileEntry[] => {
                 return nodes.map(node => {
                     if (node.path === entry.path) {
-                        return { ...node, isExpanded: true, isLoading: false, children: sortedChildren };
+                        return { ...node, isExpanded: false };
                     }
                     if (node.children) {
-                        return { ...node, children: updateChildren(node.children) };
+                        return { ...node, children: toggleNode(node.children) };
                     }
                     return node;
                 });
             };
-            setRootFiles(updateChildren(rootFiles));
+            return { rootFiles: toggleNode(prev.rootFiles) };
+        });
+    } else {
+        // Expand
+        // Set loading state for this node
+        updateSession(sessionId, (prev) => {
+             const setLoading = (nodes: FileEntry[], loading: boolean): FileEntry[] => {
+                 return nodes.map(node => {
+                    if (node.path === entry.path) {
+                        return { ...node, isLoading: loading };
+                    }
+                    if (node.children) {
+                        return { ...node, children: setLoading(node.children, loading) };
+                    }
+                    return node;
+                });
+            };
+            return { rootFiles: setLoading(prev.rootFiles, true) };
+        });
+
+        try {
+            const children = await invoke<FileEntry[]>('sftp_list_dir', { sessionId, path: entry.path });
+            
+            // We need current sort state
+            setSessions(prev => {
+                const session = prev[sessionId];
+                if (!session) return prev;
+                
+                const sortedChildren = sortFiles(children, session.sortState);
+                
+                const updateChildren = (nodes: FileEntry[]): FileEntry[] => {
+                    return nodes.map(node => {
+                        if (node.path === entry.path) {
+                            return { ...node, isExpanded: true, isLoading: false, children: sortedChildren };
+                        }
+                        if (node.children) {
+                            return { ...node, children: updateChildren(node.children) };
+                        }
+                        return node;
+                    });
+                };
+                
+                return {
+                    ...prev,
+                    [sessionId]: { ...session, rootFiles: updateChildren(session.rootFiles) }
+                };
+            });
         } catch (error) {
              console.error('Failed to load children:', error);
-             setRootFiles(setLoading(rootFiles, false));
+             updateSession(sessionId, (prev) => {
+                 const setLoading = (nodes: FileEntry[], loading: boolean): FileEntry[] => {
+                     return nodes.map(node => {
+                        if (node.path === entry.path) {
+                            return { ...node, isLoading: loading }; // Should probably set false
+                        }
+                        if (node.children) {
+                            return { ...node, children: setLoading(node.children, loading) };
+                        }
+                        return node;
+                    });
+                };
+                return { rootFiles: setLoading(prev.rootFiles, false) };
+             });
         }
     }
   };
 
   const handleSort = (type: SortType) => {
-      setSortState(prev => ({
-          type,
-          // If clicking same type, toggle order. If new type, default to asc (or desc for date? usually desc for date is better but let's stick to simple toggle)
-          order: prev.type === type && prev.order === 'asc' ? 'desc' : 'asc'
-      }));
+      if (!sessionId) return;
+      
+      setSessions(prev => {
+          const session = prev[sessionId];
+          if (!session) return prev;
+
+          const newOrder: SortOrder = session.sortState.type === type && session.sortState.order === 'asc' ? 'desc' : 'asc';
+          const newSortState: SortState = { type, order: newOrder };
+
+          // Re-sort the entire tree? Or just root?
+          // Recursively sorting the tree would be ideal but expensive. 
+          // For now let's sort root and rely on lazy load for children, 
+          // OR we should implement a recursive sort helper.
+          
+          const recursiveSort = (nodes: FileEntry[]): FileEntry[] => {
+              const sorted = sortFiles(nodes, newSortState);
+              return sorted.map(node => ({
+                  ...node,
+                  children: node.children ? recursiveSort(node.children) : undefined
+              }));
+          };
+
+          return {
+              ...prev,
+              [sessionId]: {
+                  ...session,
+                  sortState: newSortState,
+                  rootFiles: recursiveSort(session.rootFiles)
+              }
+          };
+      });
       setShowSortMenu(false);
   };
 
