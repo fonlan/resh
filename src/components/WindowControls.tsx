@@ -30,12 +30,12 @@ export const WindowControls: React.FC = () => {
   };
 
   return (
-    <div className="window-controls">
+    <div className="flex items-center">
       <button
         type="button"
         onClick={handleMinimize}
         aria-label={t.windowControls.minimize}
-        className="window-control-btn minimize-btn"
+        className="w-[46px] h-10 flex items-center justify-center bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
         title={t.windowControls.minimize}
       >
         <Minus size={14} />
@@ -44,7 +44,7 @@ export const WindowControls: React.FC = () => {
         type="button"
         onClick={handleMaximize}
         aria-label={t.windowControls.maximize}
-        className="window-control-btn maximize-btn"
+        className="w-[46px] h-10 flex items-center justify-center bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
         title={t.windowControls.maximize}
       >
         <Square size={12} />
@@ -53,7 +53,7 @@ export const WindowControls: React.FC = () => {
         type="button"
         onClick={handleClose}
         aria-label={t.windowControls.close}
-        className="window-control-btn close-btn"
+        className="w-[46px] h-10 flex items-center justify-center bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--color-danger)] hover:text-white"
         title={t.windowControls.close}
       >
         <X size={16} />

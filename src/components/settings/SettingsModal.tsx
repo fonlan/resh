@@ -12,7 +12,6 @@ import { AITab } from './AITab';
 import { AboutTab } from './AboutTab';
 import { SFTPTab } from './SFTPTab';
 import { useTranslation } from '../../i18n';
-import './SettingsModal.css';
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -162,14 +161,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   if (loading) {
     return (
-      <div 
-        className="settings-overlay"
+      <div
+        className="fixed inset-0 flex items-center justify-center z-[1000] animate-in fade-in duration-300"
+        style={{
+          background: 'rgba(2, 6, 23, 0.4)',
+          backdropFilter: 'blur(12px) saturate(180%)'
+        }}
         onMouseDown={handleOverlayMouseDown}
         onMouseUp={handleOverlayMouseUp}
       >
-        <div className="settings-modal loading-modal" ref={modalRef}>
-          <Loader2 className="spinner" size={32} />
-          <p>{t.common.loading}</p>
+        <div
+          className="flex flex-col items-center justify-center gap-4 bg-[var(--bg-secondary)] rounded-lg shadow-2xl max-w-[900px] w-[90%] h-[80vh] overflow-hidden relative animate-in slide-in-from-bottom-2 duration-400"
+          style={{
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--glass-border), inset 0 1px 1px rgba(255, 255, 255, 0.05)'
+          }}
+          ref={modalRef}
+        >
+          <Loader2 className="animate-spin" size={32} style={{ color: 'var(--text-secondary)' }} />
+          <p style={{ color: 'var(--text-secondary)' }}>{t.common.loading}</p>
         </div>
       </div>
     );
@@ -260,22 +269,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   ];
 
   return (
-    <div 
-      className="settings-overlay"
+    <div
+      className="fixed inset-0 flex items-center justify-center z-[1000] animate-in fade-in duration-300"
+      style={{
+        background: 'rgba(2, 6, 23, 0.4)',
+        backdropFilter: 'blur(12px) saturate(180%)'
+      }}
       onMouseDown={handleOverlayMouseDown}
       onMouseUp={handleOverlayMouseUp}
     >
-      <div className="settings-modal" ref={modalRef}>
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: 'url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'noiseFilter\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.65\' numOctaves=\'3\' stitchTiles=\'stitch\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23noiseFilter)\'/%3E%3C/svg%3E")'
+        }}
+      />
+
+      <div
+        className="relative bg-[var(--bg-secondary)] rounded-lg max-w-[900px] w-[90%] h-[80vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-2 duration-400"
+        style={{
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--glass-border), inset 0 1px 1px rgba(255, 255, 255, 0.05)'
+        }}
+        ref={modalRef}
+      >
         {/* Header */}
-        <div className="settings-header">
-          <div className="settings-header-left">
-            <h2>{t.settings}</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--glass-border)] bg-[var(--bg-secondary)]">
+          <div className="flex items-center gap-4">
+            <h2 className="text-[18px] font-bold text-[var(--text-primary)] m-0">{t.settings}</h2>
             {/* Save Status Indicator */}
             {saveStatus !== 'idle' && (
-              <div className={`save-status save-status-${saveStatus}`}>
+              <div
+                className="flex items-center gap-[6px] text-[12px] px-[10px] py-1 rounded-[20px] font-medium"
+                style={
+                  saveStatus === 'saving'
+                    ? { color: 'var(--accent-primary)', background: 'rgba(59, 130, 246, 0.1)' }
+                    : saveStatus === 'saved'
+                    ? { color: 'var(--accent-success)', background: 'rgba(34, 197, 94, 0.1)' }
+                    : { color: 'var(--color-danger)', background: 'rgba(239, 68, 68, 0.1)' }
+                }
+              >
                 {saveStatus === 'saving' && (
                   <>
-                    <Loader2 size={14} className="spinner" />
+                    <Loader2 size={14} className="animate-spin" />
                     <span>{t.saveStatus.saving}</span>
                   </>
                 )}
@@ -294,32 +329,72 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               </div>
             )}
           </div>
-          <button type="button" onClick={onClose} className="settings-close-btn">
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-1.5 flex items-center justify-center transition-all rounded hover:text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+          >
             <X size={20} />
           </button>
         </div>
 
         {/* Content */}
-        <div className="settings-content">
+        <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
-          <div className="settings-sidebar">
+          <div className="w-[200px] bg-[var(--bg-primary)] border-r border-[var(--glass-border)] p-3 flex flex-col gap-1">
             {tabs.map((tab) => (
               <button
                 type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`settings-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+                className={`
+                  w-full text-left px-[14px] py-2.5 rounded bg-transparent border-none
+                  text-[var(--text-secondary)] cursor-pointer text-[13px] font-medium
+                  transition-all duration-200 flex items-center gap-2.5 relative
+                  hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text-primary)] hover:translate-x-0.5
+                  ${activeTab === tab.id ? 'active' : ''}
+                `}
+                style={
+                  activeTab === tab.id
+                    ? {
+                        background: 'var(--bg-tertiary)',
+                        color: 'var(--accent-primary)',
+                        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+                      }
+                    : {}
+                }
               >
+                {activeTab === tab.id && (
+                  <span
+                    className="absolute -left-3 top-[20%] bottom-[20%] w-[3px] rounded-r"
+                    style={{
+                      background: 'var(--accent-primary)',
+                      boxShadow: '0 0 10px var(--accent-primary)'
+                    }}
+                  />
+                )}
                 {tab.icon}
-                <span>{tab.label}</span>
+                <span className="relative z-[1]">{tab.label}</span>
               </button>
             ))}
           </div>
 
           {/* Tab Content */}
-          <div className="settings-tab-content">
-            {error && <div className="settings-error">{error}</div>}
-            {saveError && <div className="settings-error">{saveError}</div>}
+          <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-secondary)]">
+            {error && (
+              <div
+                className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[var(--color-danger)] px-4 py-3 rounded mb-5 text-[13px]"
+              >
+                {error}
+              </div>
+            )}
+            {saveError && (
+              <div
+                className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[var(--color-danger)] px-4 py-3 rounded mb-5 text-[13px]"
+              >
+                {saveError}
+              </div>
+            )}
 
             {activeTab === 'servers' && (
               <ServerTab

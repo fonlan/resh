@@ -40,21 +40,22 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
   };
 
   return (
-    <div className="tab-container space-y-6">
+    <div className="w-full max-w-full space-y-6">
       {/* WebDAV Settings Section */}
-      <div className="section">
+      <div>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
-            <h3 className="section-title mb-0">{t.webdav}</h3>
+            <h3 className="text-base font-semibold tracking-tight mb-0">{t.webdav}</h3>
             {general.webdav.enabled && (
               <button
                 type="button"
                 onClick={handleSync}
                 disabled={syncStatus === 'syncing' || !general.webdav.url}
-                className={`sync-btn ${
-                  syncStatus === 'success' ? 'sync-btn-success' : 
-                  syncStatus === 'error' ? 'sync-btn-error' : ''
-                }`}
+                className={`inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded border-none cursor-pointer transition-all whitespace-nowrap font-sans ${
+                  syncStatus === 'success' ? 'bg-green-500 text-white shadow-[0_0_20px_rgba(34,197,94,0.2)]' :
+                  syncStatus === 'error' ? 'bg-red-500 text-white' :
+                  'bg-zinc-800 text-zinc-100 border border-zinc-700/50'
+                } hover:brightness-110 hover:-translate-y-px active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed`}
                 title={t.syncNow}
               >
                 {syncStatus === 'syncing' ? (
@@ -67,8 +68,8 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
                   <RefreshCw size={14} />
                 )}
                 <span>
-                  {syncStatus === 'syncing' ? t.syncing : 
-                   syncStatus === 'success' ? t.syncSuccess : 
+                  {syncStatus === 'syncing' ? t.syncing :
+                   syncStatus === 'success' ? t.syncSuccess :
                    syncStatus === 'error' ? t.syncFailed : t.syncNow}
                 </span>
               </button>
@@ -79,34 +80,34 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
               type="checkbox"
               checked={general.webdav.enabled}
               onChange={(e) => handleWebDAVUpdate('enabled', e.target.checked)}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="text-sm text-gray-400">{t.common.enableSync}</span>
+            <span className="text-sm text-zinc-400">{t.common.enableSync}</span>
           </label>
         </div>
-        
+
         {syncStatus === 'error' && syncError && (
-          <div className="sync-error-message">
+          <div className="flex items-center gap-2 p-3 my-3 bg-red-500/10 border border-red-500/30 rounded-md text-red-400 text-sm">
             <AlertCircle size={14} className="mt-0.5 shrink-0" />
             <span>{syncError}</span>
           </div>
         )}
-        
+
         <div className={`space-y-4 ${!general.webdav.enabled ? 'opacity-50 pointer-events-none' : ''}`}>
-          <div className="form-group">
-            <label htmlFor="webdav-url" className="form-label">{t.webdavUrl}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="webdav-url" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.webdavUrl}</label>
             <input
               id="webdav-url"
               type="text"
               value={general.webdav.url}
               onChange={(e) => handleWebDAVUpdate('url', e.target.value)}
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
               placeholder="https://example.com/webdav"
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="webdav-proxy" className="form-label">{t.webdavProxy}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="webdav-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.webdavProxy}</label>
             <CustomSelect
               id="webdav-proxy"
               value={general.webdav.proxyId || ''}
@@ -121,25 +122,25 @@ export const SyncTab: React.FC<SyncTabProps> = ({ general, onGeneralUpdate }) =>
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="webdav-username" className="form-label">{t.username}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="webdav-username" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.username}</label>
             <input
               id="webdav-username"
               type="text"
               value={general.webdav.username}
               onChange={(e) => handleWebDAVUpdate('username', e.target.value)}
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="webdav-password" className="form-label">{t.password}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="webdav-password" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.password}</label>
             <input
               id="webdav-password"
               type="password"
               value={general.webdav.password}
               onChange={(e) => handleWebDAVUpdate('password', e.target.value)}
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             />
           </div>
         </div>

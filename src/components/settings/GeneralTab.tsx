@@ -35,13 +35,13 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
   };
 
   return (
-    <div className="tab-container space-y-6">
+    <div className="w-full max-w-full space-y-6">
       {/* Appearance Section */}
-      <div className="section">
-        <h3 className="section-title mb-4">{t.appearance}</h3>
+      <div>
+        <h3 className="text-base font-semibold tracking-tight mb-4">{t.appearance}</h3>
         <div className="space-y-4">
-          <div className="form-group">
-            <label htmlFor="theme-select" className="form-label">{t.theme}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="theme-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.theme}</label>
             <CustomSelect
               id="theme-select"
               value={general.theme}
@@ -56,8 +56,8 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="language-select" className="form-label">{t.language}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="language-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.language}</label>
             <CustomSelect
               id="language-select"
               value={general.language}
@@ -69,8 +69,8 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="recording-mode-select" className="form-label">{t.recordingMode}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="recording-mode-select" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.recordingMode}</label>
             <CustomSelect
               id="recording-mode-select"
               value={general.recordingMode || 'raw'}
@@ -82,8 +82,8 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="max-recent-servers" className="form-label">{t.maxRecentServers}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="max-recent-servers" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.maxRecentServers}</label>
             <input
               id="max-recent-servers"
               type="number"
@@ -91,30 +91,30 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleConfirmationChange('maxRecentServers', parseInt(e.target.value) || 0)}
               min="0"
               max="20"
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             />
           </div>
         </div>
       </div>
 
       {/* Terminal Settings Section */}
-      <div className="section">
-        <h3 className="section-title mb-4">{t.terminal}</h3>
+      <div>
+        <h3 className="text-base font-semibold tracking-tight mb-4">{t.terminal}</h3>
         <div className="space-y-4">
-          <div className="form-group">
-            <label htmlFor="font-family" className="form-label">{t.fontFamily}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="font-family" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.fontFamily}</label>
             <input
               id="font-family"
               type="text"
               value={general.terminal.fontFamily}
               onChange={(e) => handleTerminalUpdate('fontFamily', e.target.value)}
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
               placeholder="e.g., 'Courier New', monospace"
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="font-size" className="form-label">{t.fontSize}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="font-size" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.fontSize}</label>
             <input
               id="font-size"
               type="number"
@@ -122,12 +122,12 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleTerminalUpdate('fontSize', parseInt(e.target.value) || 14)}
               min="8"
               max="32"
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="cursor-style" className="form-label">{t.cursorStyle}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="cursor-style" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.cursorStyle}</label>
             <CustomSelect
               id="cursor-style"
               value={general.terminal.cursorStyle}
@@ -140,8 +140,8 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="scrollback-limit" className="form-label">{t.scrollback}</label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="scrollback-limit" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.scrollback}</label>
             <input
               id="scrollback-limit"
               type="number"
@@ -149,24 +149,24 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               onChange={(e) => handleTerminalUpdate('scrollback', parseInt(e.target.value) || 1000)}
               min="100"
               max="50000"
-              className="form-input"
+              className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             />
           </div>
         </div>
       </div>
 
       {/* Confirmations Section */}
-      <div className="section">
-        <h3 className="section-title mb-4">{t.confirmations}</h3>
+      <div>
+        <h3 className="text-base font-semibold tracking-tight mb-4">{t.confirmations}</h3>
         <div className="space-y-3">
           <label className="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               checked={general.confirmCloseTab}
               onChange={(e) => handleConfirmationChange('confirmCloseTab', e.target.checked)}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowe"
             />
-            <span className="form-label mb-0">{t.confirmCloseTab}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmCloseTab}</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -174,9 +174,9 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.confirmExitApp}
               onChange={(e) => handleConfirmationChange('confirmExitApp', e.target.checked)}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="form-label mb-0">{t.confirmExitApp}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.confirmExitApp}</span>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">
@@ -184,9 +184,9 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               type="checkbox"
               checked={general.debugEnabled}
               onChange={(e) => handleConfirmationChange('debugEnabled', e.target.checked)}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <span className="form-label mb-0">{t.debugEnabled}</span>
+            <span className="block text-sm font-medium text-zinc-400 mb-0 tracking-tight">{t.debugEnabled}</span>
           </label>
         </div>
       </div>

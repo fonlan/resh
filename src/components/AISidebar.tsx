@@ -10,7 +10,6 @@ import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
 import { CustomSelect } from './CustomSelect';
-import './AISidebar.css';
 
 interface AISidebarProps {
   isOpen: boolean;
@@ -48,29 +47,29 @@ const CodeBlock = ({ children, className }: { children: React.ReactNode, classNa
   };
 
   return (
-    <div className="ai-code-block">
-      <div className="ai-code-header">
-        <span className="ai-code-lang">{language}</span>
-        <div className="ai-code-actions">
-          <button 
+    <div className="my-2 rounded-md overflow-hidden bg-black/30 border border-[var(--glass-border)]">
+      <div className="flex justify-between items-center px-3 py-1.5 bg-white/5 border-b border-[var(--glass-border)]">
+        <span className="text-[11px] text-[var(--text-muted)] uppercase font-mono">{language}</span>
+        <div className="flex gap-1">
+          <button
             type="button"
-            className="ai-code-btn" 
-            onClick={handleCopy} 
+            className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded flex items-center justify-center transition-all duration-200 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+            onClick={handleCopy}
             title={t.ai.tool.copyCode}
           >
             {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
           </button>
-          <button 
+          <button
             type="button"
-            className="ai-code-btn" 
-            onClick={handleInsert} 
+            className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded flex items-center justify-center transition-all duration-200 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+            onClick={handleInsert}
             title={t.ai.tool.insertToTerminal}
           >
             <Terminal size={14} />
           </button>
         </div>
       </div>
-      <pre className="ai-code-content">
+      <pre className="m-0 p-3 overflow-x-auto font-mono text-[12px]">
         <code className={className}>{children}</code>
       </pre>
     </div>
@@ -163,15 +162,15 @@ const ToolConfirmation = ({
   }, [countdown, onConfirm]); // Added onConfirm dependency
 
   return (
-    <div className={`ai-tool-confirm ${isSensitive ? 'sensitive' : ''}`}>
-      <div className="ai-tool-header">
+    <div className={`flex flex-col gap-3 bg-black/20 border rounded-lg p-3 w-full box-border ${isSensitive ? 'border-red-500 bg-red-500/10' : 'border-[var(--border-color)]'}`}>
+      <div className="flex items-center gap-1.5 font-semibold text-[13px] text-[var(--text-primary)]">
         {isSensitive ? (
           <><AlertTriangle size={16} className="text-red-500" /> {t.ai.tool.confirmExecution}</>
         ) : (
           <><Clock size={16} /> {t.ai.tool.autoExecute.replace('{seconds}', String(countdown))}</>
         )}
       </div>
-      <div className="ai-tool-list">
+      <div className="flex flex-col gap-2">
         {toolCalls.map(call => {
           let displayArgs = call.function.arguments;
           if (call.function.name === 'run_in_terminal') {
@@ -181,7 +180,7 @@ const ToolConfirmation = ({
              } catch {}
           }
           return (
-            <div key={call.id} className="ai-tool-item">
+            <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10 overflow-hidden">
               <span className="font-mono text-xs opacity-70">
                 {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
               </span>
@@ -190,11 +189,11 @@ const ToolConfirmation = ({
           );
         })}
       </div>
-      <div className="ai-tool-actions">
-        <button type="button" className="ai-btn-secondary" onClick={onCancel}>{t.ai.tool.cancel}</button>
-        <button 
+      <div className="flex justify-end gap-2 mt-1">
+        <button type="button" className="px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 bg-white/10 text-[var(--text-primary)] hover:bg-white/20" onClick={onCancel}>{t.ai.tool.cancel}</button>
+        <button
           type="button"
-          className={`ai-btn-primary ${isSensitive ? 'bg-red-600 hover:bg-red-700' : ''}`} 
+          className={`px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 ${isSensitive ? 'bg-red-600 hover:bg-red-700' : 'bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)]'}`}
           onClick={onConfirm}
         >
           {isSensitive ? t.ai.tool.confirmRun : t.ai.tool.runNow.replace('{seconds}', String(countdown))}
@@ -242,14 +241,14 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
   }, [msg.tool_calls, isPending]);
 
   return (
-    <div className={`ai-message ${msg.role}`}>
-      <div className="ai-message-wrapper">
-        <div className="ai-message-content">
+    <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+      <div className={`relative max-w-[90%] flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+        <div className={`p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white rounded-tr-sm' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm'}`}>
           {msg.reasoning_content && (
-            <div className="ai-reasoning-section mb-2">
-              <button 
-                type="button" 
-                className="ai-reasoning-toggle"
+            <div className="w-full mb-2">
+              <button
+                type="button"
+                className="flex items-center bg-transparent border-0 text-[var(--text-muted)] text-[12px] cursor-pointer p-1 transition-colors duration-200 hover:text-[var(--accent-primary)]"
                 onClick={() => setShowReasoning(!showReasoning)}
               >
                 {showReasoning ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -257,20 +256,20 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
                 <span>{t.ai.thinkingProcess}</span>
               </button>
               {showReasoning && (
-                <div className="ai-reasoning-content" ref={reasoningContentRef}>
+                <div className="leading-[1.6] max-h-[400px] overflow-y-auto font-serif italic bg-black/15 border-l-3 border-[var(--accent-primary)] rounded px-3.5 py-2.5 mt-1.5 text-[var(--text-muted)] text-[12.5px] shadow-inset relative whitespace-pre-wrap" ref={reasoningContentRef}>
                   {msg.reasoning_content}
-                  {isLast && isLoading && !msg.content && <span className="ai-streaming-cursor">|</span>}
+                  {isLast && isLoading && !msg.content && <span className="inline-block w-[2px] ml-0.5 text-[var(--accent-primary)] animate-cursor-blink vertical-align-middle font-bold">|</span>}
                 </div>
               )}
             </div>
           )}
           {visibleToolCalls.length > 0 ? (
-            <div className="ai-tool-confirm mb-2">
-              <div className="ai-tool-header">
+            <div className="flex flex-col gap-3 bg-black/20 border rounded-lg p-3 w-full box-border mb-2">
+              <div className="flex items-center gap-1.5 font-semibold text-[13px] text-[var(--text-primary)]">
                 <Check size={16} className="text-green-500" />
                 <span>{t.ai.tool.executeCommand}</span>
               </div>
-              <div className="ai-tool-list">
+              <div className="flex flex-col gap-2">
                 {visibleToolCalls.map((call: ToolCall) => {
                   let displayArgs = call.function.arguments;
                   if (call.function.name === 'run_in_terminal') {
@@ -279,9 +278,9 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
                        displayArgs = args.command || displayArgs;
                      } catch {}
                   }
-                  return (
-                    <div key={call.id} className="ai-tool-item">
-                      <span className="font-mono text-xs opacity-70 block">
+                   return (
+                     <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10 overflow-hidden">
+                       <span className="font-mono text-xs opacity-70 block">
                         {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
                       </span>
                       <code className="block mt-1 text-sm bg-black/20 p-1 rounded break-all">{displayArgs}</code>
@@ -307,7 +306,7 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
                     );
                   }
                   return (
-                    <code className="ai-inline-reference">
+                    <code className="bg-transparent text-[var(--text-primary)] font-inherit text-inherit p-0 px-1 italic opacity-90 rounded border border-[var(--glass-border)]">
                       {children}
                     </code>
                   );
@@ -318,9 +317,9 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
             </ReactMarkdown>
           )}
         </div>
-        <button 
+        <button
           type="button"
-          className={`ai-message-copy-btn ${copied ? 'copied' : ''}`}
+          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : 'opacity-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'} ${msg.role === 'user' ? '-left-8' : '-right-8'}`}
           onClick={handleCopy}
           title={t.ai.copyMessage}
         >
@@ -846,14 +845,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [sessions]);
 
   return (
-    <div 
+    <div
       ref={sidebarRef}
-      className={`ai-sidebar-panel ${isOpen ? 'open' : ''} ${isResizing ? 'resizing' : ''} ${isLocked ? 'locked' : ''}`}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-l flex flex-col z-20 transition-all duration-200 shadow-[-2px_0_8px_rgba(0,0,0,0.2)] !right-0 !left-auto ${isOpen ? 'opacity-100 visible border-l-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none z-10 !right-auto !top-auto !bottom-auto h-full' : ''}`}
       style={{ width: isOpen ? `${width}px` : '0px' }}
       aria-hidden={!isOpen}
     >
-      <div 
-        className="ai-resizer" 
+      <div
+        className="absolute top-0 bottom-0 left-0 w-[5px] cursor-col-resize z-25 bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
         onMouseDown={startResizing}
         role="separator"
         aria-orientation="vertical"
@@ -863,87 +862,87 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         aria-label="Resize Sidebar"
         tabIndex={0}
       />
-      
-      <div className="ai-header">
-        <h3 className="ai-title">
+
+      <div className="flex items-center justify-between p-3 pl-4 border-b border-[var(--glass-border)] flex-shrink-0">
+        <h3 className="text-[13px] font-semibold text-[var(--text-primary)] flex items-center gap-2 m-0 whitespace-nowrap">
           <Bot size={16} /> {t.ai.sidebarTitle}
         </h3>
-        <div className="ai-actions">
-           <button 
-            type="button"
-            className={`ai-action-btn ${showHistory ? 'active' : ''}`}
-            onClick={() => setShowHistory(!showHistory)}
-            title={t.ai.history}
-            disabled={!currentServerId}
-          >
-            <History size={16} />
-          </button>
-          <button 
-            type="button"
-            className="ai-action-btn"
-            onClick={handleCreateSession}
-            title={t.ai.newChat}
-            disabled={!currentServerId}
-          >
-            <Plus size={16} />
-          </button>
-          <button
-            type="button"
-            className={`ai-action-btn ${isLocked ? 'active' : ''}`}
-            onClick={onToggleLock}
-            title={isLocked ? "Unlock Sidebar" : "Lock Sidebar"}
-          >
-            {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
-          </button>
-          <button 
-            type="button"
-            className="ai-action-btn"
-            onClick={onClose}
-            title="Close"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
+        <div className="flex items-center gap-1">
+           <button
+             type="button"
+             className={`bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:text-[var(--text-muted)] ${showHistory ? 'text-[var(--accent-primary)]' : ''}`}
+             onClick={() => setShowHistory(!showHistory)}
+             title={t.ai.history}
+             disabled={!currentServerId}
+           >
+             <History size={16} />
+           </button>
+           <button
+             type="button"
+             className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
+             onClick={handleCreateSession}
+             title={t.ai.newChat}
+             disabled={!currentServerId}
+           >
+             <Plus size={16} />
+           </button>
+           <button
+             type="button"
+             className={`bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:text-[var(--text-muted)] ${isLocked ? 'text-[var(--accent-primary)]' : ''}`}
+             onClick={onToggleLock}
+             title={isLocked ? "Unlock Sidebar" : "Lock Sidebar"}
+           >
+             {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
+           </button>
+           <button
+             type="button"
+             className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] disabled:opacity-50 disabled:cursor-not-allowed disabled:text-[var(--text-muted)]"
+             onClick={onClose}
+             title="Close"
+           >
+             <X size={16} />
+           </button>
+         </div>
+       </div>
 
-      {showHistory ? (
-        <div className="ai-messages">
-          {sortedSessions.length === 0 ? (
-            <div className="ai-empty-history">
-              <History size={48} className="ai-empty-history-icon" />
-              <p>{t.ai.noHistory}</p>
-            </div>
-          ) : (
-              <div className="ai-history-list">
-                <div className="ai-history-header">
-                  <span>{t.ai.history}</span>
-                  <button 
-                    type="button" 
-                    className="ai-clear-btn"
-                    onClick={() => setIsClearingHistory(true)}
-                  >
-                    <Trash2 size={12} /> {t.ai.clearHistory}
-                  </button>
-                </div>
-                {sortedSessions.map(session => (
+       {showHistory ? (
+         <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 scroll-smooth">
+           {sortedSessions.length === 0 ? (
+             <div className="flex-1 flex flex-col items-center justify-center p-5 text-[var(--text-muted)] text-center gap-3">
+               <History size={48} className="opacity-20" />
+               <p>{t.ai.noHistory}</p>
+             </div>
+           ) : (
+               <div className="flex flex-col gap-2 p-2">
+                 <div className="flex justify-between items-center px-3 py-1 mb-1 text-[11px] text-[var(--text-muted)] uppercase font-semibold tracking-wider">
+                   <span>{t.ai.history}</span>
+                   <button
+                     type="button"
+                     className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer px-2 py-1 rounded text-[11px] flex items-center gap-1 transition-all duration-200 font-normal hover:bg-red-500/10 hover:text-red-500"
+                     onClick={() => setIsClearingHistory(true)}
+                   >
+                     <Trash2 size={12} /> {t.ai.clearHistory}
+                   </button>
+                 </div>
+                 {sortedSessions.map(session => (
 
                  <button
                    type="button"
                    key={session.id}
-                   className={`ai-history-item ${activeSessionId === session.id ? 'active' : ''}`}
+                   className={`flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-elevated)] border border-transparent cursor-pointer transition-all duration-200 w-full text-left relative overflow-hidden hover:bg-[var(--bg-tertiary)] hover:border-[var(--glass-border)] ${activeSessionId === session.id ? 'bg-[var(--bg-tertiary)] border-[var(--accent-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.1)]' : ''}`}
                    onClick={() => {
                      selectSession(session.id, currentServerId);
-                     setShowHistory(false);
-                   }}
-                 >
-                   <div className="ai-history-icon">
-                     <MessageSquare size={16} />
-                   </div>
-                   <div className="ai-history-info">
-                     <div className="ai-history-title" title={session.title || t.ai.newChat}>
+                       setShowHistory(false);
+                    }}
+                  >
+                    <div className="flex items-center justify-center w-8 h-8 rounded-md bg-white/5 text-[var(--text-muted)] flex-shrink-0 transition-all duration-200">
+                      <MessageSquare size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col gap-0.5">
+                      <div className="text-[13px] font-medium text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis" title={session.title || t.ai.newChat}>
                        {session.title || t.ai.newChat}
-                     </div>
-                     <div className="ai-history-meta">
+                      </div>
+                      <div className="text-[11px] text-[var(--text-muted)] flex items-center gap-1">
                        <Clock size={10} />
                        {new Date(session.createdAt).toLocaleString(undefined, {
                          month: 'short',
@@ -971,14 +970,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           )}
         </div>
       ) : (
-        <>
-          <div 
-            className={`ai-messages ${isLoading ? 'generating' : ''}`} 
-            ref={messagesContainerRef}
-            onScroll={handleScroll}
-          >
-            {!activeSessionId && (
-              <div className="ai-empty-state">
+         <>
+           <div
+             className={`flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 scroll-smooth ${isLoading ? '!scroll-auto' : ''}`}
+             ref={messagesContainerRef}
+             onScroll={handleScroll}
+           >
+             {!activeSessionId && (
+               <div className="flex-1 flex flex-col items-center justify-center text-[var(--text-muted)] text-center p-8 gap-4 min-h-[200px]">
                 <Bot size={48} className="opacity-20 mb-4" />
                 <p>{currentServerId ? t.ai.typeMessage : t.ai.selectServer}</p>
               </div>
@@ -1023,41 +1022,45 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
             )}
 
-            {isLoading && !pendingToolCalls && (
-              <div className="ai-message assistant">
-                <div className="ai-message-content">
-                  <div className="ai-typing-indicator">
-                    <div className="ai-typing-dot"></div>
-                    <div className="ai-typing-dot"></div>
-                    <div className="ai-typing-dot"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
+             {isLoading && !pendingToolCalls && (
+               <div className="flex flex-col gap-1 max-w-full items-start">
+                 <div className="relative max-w-[90%] flex flex-col items-start">
+                   <div className="p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm">
+                     <div className="flex items-center gap-1 px-2 py-1 h-5">
+                       <div className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce" style={{animationDelay: '-0.32s'}}></div>
+                       <div className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce" style={{animationDelay: '-0.16s'}}></div>
+                       <div className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"></div>
+                     </div>
+                   </div>
+                 </div>
+               </div>
+             )}
+           </div>
 
-          <div className="ai-input-area">
-            <div className="ai-controls">
-              <div className="ai-select-wrapper">
-                <Sliders size={14} className="ai-select-icon" />
+           <div className="p-3 border-t border-[var(--glass-border)] bg-[var(--bg-secondary)] flex flex-col gap-2">
+             <div className="flex gap-2">
+               <div className="relative flex items-center flex-0-auto min-w-[100px] peer">
+                 <Sliders size={14} className="absolute left-2.5 text-[var(--text-muted)] pointer-events-none z-1 transition-colors duration-200 peer-hover:text-[var(--accent-primary)] focus-within:text-[var(--accent-primary)]" />
                 <CustomSelect
                   value={mode}
                   onChange={(val) => handleModeChange(val as 'ask' | 'agent')}
                   disabled={isLoading || !!pendingToolCalls}
                   placement="top"
+                  triggerClassName="pl-8"
                   options={[
                     { value: 'ask', label: 'Ask' },
                     { value: 'agent', label: 'Agent' }
                   ]}
                 />
-              </div>
-              <div className="ai-select-wrapper ai-select-wrapper-model">
-                <Sparkles size={14} className="ai-select-icon" />
+               </div>
+               <div className="relative flex items-center flex-1 min-w-0 peer">
+                 <Sparkles size={14} className="absolute left-2.5 text-[var(--text-muted)] pointer-events-none z-1 transition-colors duration-200 peer-hover:text-[var(--accent-primary)] focus-within:text-[var(--accent-primary)]" />
                 <CustomSelect
                   value={selectedModelId}
                   onChange={(val) => handleModelChange(val)}
                   disabled={isLoading || !!pendingToolCalls}
                   placement="top"
+                  triggerClassName="pl-8"
                   options={(config?.aiModels || [])
                     .filter(model => {
                       const channel = config?.aiChannels?.find(c => c.id === model.channelId);
@@ -1070,11 +1073,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                     })}
                 />
               </div>
-            </div>
-            <div className="ai-input-container">
-              <textarea
-                ref={textareaRef}
-                className="ai-input"
+             </div>
+             <div className="flex gap-2 items-end bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-lg p-2 transition-colors duration-200 focus-within:border-[var(--accent-primary)]">
+               <textarea
+                 ref={textareaRef}
+                 className="flex-1 bg-transparent border-0 text-[var(--text-primary)] font-inherit text-[13px] leading-7 resize-none outline-none max-h-[150px] min-h-7 p-0 block"
                 placeholder={t.ai.typeMessage}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
@@ -1082,19 +1085,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 disabled={!!pendingToolCalls}
                 rows={1}
               />
-              {(isLoading || !!pendingToolCalls) ? (
-                <button 
-                  type="button"
-                  className="ai-send-btn stop"
-                  onClick={handleStopGeneration}
-                  title={t.ai.stopGeneration}
-                >
-                  <Square size={14} fill="currentColor" />
-                </button>
-              ) : (
-                <button 
-                  type="button"
-                  className="ai-send-btn"
+               {(isLoading || !!pendingToolCalls) ? (
+                 <button
+                   type="button"
+                   className="bg-red-500 text-white border-0 rounded w-7 h-7 flex items-center justify-center cursor-pointer transition-colors duration-200 flex-shrink-0 hover:bg-red-600"
+                   onClick={handleStopGeneration}
+                   title={t.ai.stopGeneration}
+                 >
+                   <Square size={14} fill="currentColor" />
+                 </button>
+               ) : (
+                 <button
+                   type="button"
+                   className="bg-[var(--accent-primary)] text-white border-0 rounded w-7 h-7 flex items-center justify-center cursor-pointer transition-colors duration-200 flex-shrink-0 hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] disabled:cursor-not-allowed"
                   onClick={handleSendMessage}
                   disabled={!inputValue.trim() || !selectedModelId}
                 >

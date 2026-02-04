@@ -3,7 +3,6 @@ import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, U
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../hooks/useConfig';
-import './SFTPSidebar.css';
 
 import { TransferStatusPanel } from './TransferStatusPanel';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -40,14 +39,14 @@ const FileTreeItem: React.FC<{
 }> = ({ entry, depth, onToggle, onContextMenu }) => {
   return (
     <div style={{ paddingLeft: `${depth * 12}px` }}>
-      <button 
+      <button
         type="button"
-        className={`sftp-tree-item ${entry.isExpanded ? 'expanded' : ''} w-full text-left bg-transparent border-0 m-0 flex items-center cursor-pointer hover:bg-[var(--bg-tertiary)]`}
+        className="flex items-center gap-2 p-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)]"
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         style={{ color: 'inherit' }}
       >
-        <div className="sftp-tree-indent" style={{ width: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="w-4 flex-shrink-0 flex items-center justify-center">
            {(entry.is_dir || (entry.is_symlink && entry.target_is_dir)) && (
              entry.isLoading ? (
                <RefreshCw size={10} className="animate-spin text-gray-500" />
@@ -61,24 +60,24 @@ const FileTreeItem: React.FC<{
         
         {entry.is_symlink ? (
           entry.target_is_dir ? (
-            <FolderSymlink size={16} className="sftp-icon sftp-folder-icon" />
+            <FolderSymlink size={16} className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400" />
           ) : (
-            <FileSymlink size={16} className="sftp-icon sftp-file-icon" />
+            <FileSymlink size={16} className="text-[var(--text-muted)] flex-shrink-0" />
           )
         ) : entry.is_dir ? (
           entry.isExpanded ? (
-            <FolderOpen size={16} className="sftp-icon sftp-folder-icon" />
+            <FolderOpen size={16} className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400" />
           ) : (
-            <Folder size={16} className="sftp-icon sftp-folder-icon" />
+            <Folder size={16} className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400" />
           )
         ) : (
-          <File size={16} className="sftp-icon sftp-file-icon" />
+          <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
-        
-        <span className="truncate ml-1">
+
+        <span className="truncate ml-0.25">
           {entry.name}
           {entry.link_target && (
-            <span className="sftp-symlink-target">
+            <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
               → {entry.link_target}
             </span>
           )}
@@ -701,77 +700,77 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   return (
     <>
-    <div 
+    <div
       ref={sidebarRef}
-      className={`sftp-sidebar-panel ${isOpen ? 'open' : ''} ${isResizing ? 'resizing' : ''} ${isLocked ? 'locked' : ''}`}
-      style={{ width: isOpen ? `${width}px` : '0px' }}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col z-20 transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? 'opacity-100 visible border-r-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? 'relative shadow-none z-10 left-auto top-auto bottom-auto h-full' : ''}`}
+      style={{ width: isOpen ? `${width}px` : '0px', left: isLocked ? 'auto' : 0, right: 'auto' }}
       aria-hidden={!isOpen}
     >
-      <div 
-        className="sftp-resizer" 
+      <div
+        className="absolute top-0 bottom-0 right-0 w-[5px] cursor-col-resize z-25 bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
         onMouseDown={startResizing}
         role="none"
       />
-      
-      <div className="sftp-header">
-        <h3 className="sftp-title">
+
+      <div className="flex items-center justify-between p-3 pr-4 border-b border-[var(--glass-border)] flex-shrink-0">
+        <h3 className="text-[14px] font-semibold text-[var(--text-primary)] flex items-center gap-2 m-0 whitespace-nowrap">
           <Folder size={16} /> SFTP
         </h3>
-        <div className="sftp-actions">
+        <div className="flex items-center gap-1">
            <div className="relative">
-             <button
-               type="button"
-               className="sftp-action-btn sftp-sort-btn"
-               onClick={() => setShowSortMenu(!showSortMenu)}
-               title={t.sftp.tooltips.sort}
-             >
-               <ArrowDownUp size={16} />
-             </button>
-             {showSortMenu && (
-               <div className="sftp-sort-menu sftp-context-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', minWidth: '150px' }}>
+              <button
+                type="button"
+                className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                onClick={() => setShowSortMenu(!showSortMenu)}
+                title={t.sftp.tooltips.sort}
+              >
+                <ArrowDownUp size={16} />
+              </button>
+              {showSortMenu && (
+                <div className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl" style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', minWidth: '150px' }}>
                  <button type="button" onClick={() => handleSort('name')}>
                    <span>{t.sftp.sort.name}</span>
                    {sortState.type === 'name' && (
                      sortState.order === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />
                    )}
-                 </button>
-                 <button type="button" onClick={() => handleSort('modified')}>
-                   <span>{t.sftp.sort.dateModified}</span>
-                   {sortState.type === 'modified' && (
-                     sortState.order === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />
-                   )}
-                 </button>
-               </div>
-             )}
-           </div>
+                  </button>
+                  <button type="button" onClick={() => handleSort('modified')} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                    <span>{t.sftp.sort.dateModified}</span>
+                    {sortState.type === 'modified' && (
+                      sortState.order === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+              onClick={() => loadDirectory(currentPath)}
+              title={t.sftp.tooltips.refresh}
+            >
+              <RefreshCw size={16} />
+            </button>
            <button
              type="button"
-             className="sftp-action-btn"
-             onClick={() => loadDirectory(currentPath)}
-             title={t.sftp.tooltips.refresh}
-           >
-             <RefreshCw size={16} />
-           </button>
-          <button
-            type="button"
-            className={`sftp-action-btn ${isLocked ? 'active' : ''}`}
+             className={`bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100 ${isLocked ? 'text-[var(--accent-primary)]' : ''}`}
             onClick={onToggleLock}
             title={isLocked ? t.sftp.tooltips.unlock : t.sftp.tooltips.lock}
           >
             {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
-          </button>
-          <button 
-            type="button"
-            className="sftp-action-btn"
-            onClick={onClose}
-            title={t.sftp.tooltips.close}
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
+           </button>
+           <button
+             type="button"
+             className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+             onClick={onClose}
+             title={t.sftp.tooltips.close}
+           >
+             <X size={16} />
+           </button>
+         </div>
+       </div>
 
-      <div className="sftp-content">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden py-0 px-2">
           {rootFiles.map(entry => (
               <FileTreeItem 
                 key={entry.path} 
@@ -796,76 +795,76 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       <TransferStatusPanel />
     </div>
 
-    {contextMenu && (
+     {contextMenu && (
         <div
-            className="sftp-context-menu"
+            className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
             {!isDirectory(contextMenu.entry) && (
                 <div style={{ position: 'relative' }} onMouseEnter={() => setShowEditSubmenu(true)} onMouseLeave={() => setShowEditSubmenu(false)}>
-                    <button type="button" onClick={() => setShowEditSubmenu(!showEditSubmenu)}>
+                    <button type="button" onClick={() => setShowEditSubmenu(!showEditSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                         <Edit size={14} /> {t.sftp.contextMenu.edit}
                         <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                     </button>
                     {showEditSubmenu && (
-                        <div className="sftp-submenu">
-                            <button type="button" onClick={handleEditVim}>
+                        <div className="absolute top-[-4px] left-full ml-2 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
+                            <button type="button" onClick={handleEditVim} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                                 <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
                             </button>
-                            <button type="button" onClick={handleEditLocal}>
+                            <button type="button" onClick={handleEditLocal} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                                 <FileCode size={14} /> {t.sftp.contextMenu.editLocal}
                             </button>
                         </div>
                     )}
                 </div>
             )}
-            <button type="button" onClick={handleDownload}>
+            <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Download size={14} /> {t.sftp.contextMenu.download}
             </button>
-            <button type="button" onClick={handleUpload}>
+            <button type="button" onClick={handleUpload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Upload size={14} /> {t.sftp.contextMenu.upload}
             </button>
             {(isDirectory(contextMenu.entry)) && (
                 <>
-                    <button type="button" onClick={handleNewFile}>
+                    <button type="button" onClick={handleNewFile} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                         <Plus size={14} /> {t.sftp.contextMenu.newFile}
                     </button>
-                    <button type="button" onClick={handleNewFolder}>
+                    <button type="button" onClick={handleNewFolder} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                         <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
                     </button>
                 </>
             )}
             <div style={{ position: 'relative' }} onMouseEnter={() => setShowPathSubmenu(true)} onMouseLeave={() => setShowPathSubmenu(false)}>
-                <button type="button" onClick={() => setShowPathSubmenu(!showPathSubmenu)}>
+                <button type="button" onClick={() => setShowPathSubmenu(!showPathSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                     <Link size={14} /> {t.sftp.contextMenu.path}
                     <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                 </button>
                 {showPathSubmenu && (
-                    <div className="sftp-submenu">
-                        <button type="button" onClick={handleCopyName}>
+                    <div className="absolute top-[-4px] left-full ml-2 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
+                        <button type="button" onClick={handleCopyName} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                             <Copy size={14} /> {isDirectory(contextMenu.entry) ? t.sftp.contextMenu.copyFolderName : t.sftp.contextMenu.copyFileName}
                         </button>
-                        <button type="button" onClick={handleCopyFullPath}>
+                        <button type="button" onClick={handleCopyFullPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                             <Copy size={14} /> {t.sftp.contextMenu.copyFullPath}
                         </button>
-                        <button type="button" onClick={handleSendPath}>
+                        <button type="button" onClick={handleSendPath} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                             <Terminal size={14} /> {t.sftp.contextMenu.sendPathToTerminal}
                         </button>
                         {isDirectory(contextMenu.entry) && (
-                            <button type="button" onClick={handleTerminalJump}>
+                            <button type="button" onClick={handleTerminalJump} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                                 <Terminal size={14} /> {t.sftp.contextMenu.terminalJump}
                             </button>
                         )}
                     </div>
                 )}
             </div>
-            <button type="button" onClick={handleProperties}>
+            <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Settings size={14} /> {t.sftp.contextMenu.properties}
             </button>
-            <button type="button" onClick={handleRename}>
+            <button type="button" onClick={handleRename} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Pencil size={14} /> {t.sftp.contextMenu.rename}
             </button>
-            <button type="button" onClick={handleDelete}>
+            <button type="button" onClick={handleDelete} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Trash size={14} /> {t.sftp.contextMenu.delete}
             </button>
         </div>

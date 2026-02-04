@@ -108,100 +108,100 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
     setSynced: (synced: boolean) => handleChange('synced', synced),
   }), [handleSave, formData.synced, handleChange]);
 
-  return (
-    <div className="space-y-4">
-      <div className="form-group">
-        <label htmlFor="snippet-name" className="form-label">
-          {t.snippetForm.nameLabel}
-        </label>
-        <input
-          id="snippet-name"
-          type="text"
-          value={formData.name}
-          onChange={(e) => handleChange('name', e.target.value)}
-          placeholder={t.snippetForm.namePlaceholder}
-          className={`form-input ${errors.name ? 'border-red-500' : ''}`}
-        />
-        {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
-      </div>
+   return (
+     <div className="space-y-4">
+       <div className="flex flex-col gap-1.5 mb-4">
+         <label htmlFor="snippet-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+           {t.snippetForm.nameLabel}
+         </label>
+         <input
+           id="snippet-name"
+           type="text"
+           value={formData.name}
+           onChange={(e) => handleChange('name', e.target.value)}
+           placeholder={t.snippetForm.namePlaceholder}
+           className={`w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 ${errors.name ? 'border-red-500' : ''}`}
+         />
+         {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+       </div>
 
-      <div className="form-group relative" ref={suggestionsRef}>
-        <label htmlFor="snippet-group" className="form-label">
-          {t.snippetForm.groupLabel}
-        </label>
-        <div className="relative w-full">
-            <input
-            id="snippet-group"
-            type="text"
-            autoComplete="off"
-            value={formData.group || ''}
-            onChange={(e) => handleChange('group', e.target.value)}
-            onFocus={() => setShowSuggestions(true)}
-            onClick={() => setShowSuggestions(true)}
-            placeholder={t.snippetForm.groupPlaceholder}
-            className="form-input pr-10"
-            />
-            <div 
-                className="absolute text-gray-400 pointer-events-none"
-                style={{ 
-                  right: '12px', 
-                  top: '50%', 
-                  transform: 'translateY(-50%)',
-                  display: 'flex',
-                  alignItems: 'center'
-                }}
-            >
-                <ChevronDown size={14} />
-            </div>
-        </div>
-        
-        {showSuggestions && (
-            <div className="snippet-group-suggestions">
-                {allGroups.map((group) => (
-                    <button
-                        key={group}
-                        type="button"
-                        className="snippet-suggestion-item"
-                        onClick={() => {
-                            handleChange('group', group);
-                            setShowSuggestions(false);
-                        }}
-                    >
-                        {group}
-                    </button>
-                ))}
-            </div>
-        )}
-      </div>
+       <div className="flex flex-col gap-1.5 mb-4 relative" ref={suggestionsRef}>
+         <label htmlFor="snippet-group" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+           {t.snippetForm.groupLabel}
+         </label>
+         <div className="relative w-full">
+             <input
+             id="snippet-group"
+             type="text"
+             autoComplete="off"
+             value={formData.group || ''}
+             onChange={(e) => handleChange('group', e.target.value)}
+             onFocus={() => setShowSuggestions(true)}
+             onClick={() => setShowSuggestions(true)}
+             placeholder={t.snippetForm.groupPlaceholder}
+             className="w-full px-3 py-2 pr-10 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+             />
+             <div
+                 className="absolute text-zinc-400 pointer-events-none"
+                 style={{
+                   right: '12px',
+                   top: '50%',
+                   transform: 'translateY(-50%)',
+                   display: 'flex',
+                   alignItems: 'center'
+                 }}
+             >
+                 <ChevronDown size={14} />
+             </div>
+         </div>
 
-      <div className="form-group">
-        <label htmlFor="snippet-content" className="form-label">
-          {t.snippetForm.contentLabel}
-        </label>
-        <textarea
-          id="snippet-content"
-          value={formData.content}
-          onChange={(e) => handleChange('content', e.target.value)}
-          placeholder={t.snippetForm.contentPlaceholder}
-          rows={6}
-          className={`form-input font-mono text-xs ${errors.content ? 'border-red-500' : ''}`}
-        />
-        {errors.content && <p className="text-red-400 text-xs mt-1">{errors.content}</p>}
-      </div>
+         {showSuggestions && (
+             <div className="flex flex-wrap gap-1.5 p-2 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000]">
+                 {allGroups.map((group) => (
+                     <button
+                         key={group}
+                         type="button"
+                         className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+                         onClick={() => {
+                             handleChange('group', group);
+                             setShowSuggestions(false);
+                         }}
+                     >
+                         {group}
+                     </button>
+                 ))}
+             </div>
+         )}
+       </div>
 
-      <div className="form-group">
-        <label htmlFor="snippet-description" className="form-label">
-          {t.snippetForm.descriptionLabel}
-        </label>
-        <input
-          id="snippet-description"
-          type="text"
-          value={formData.description || ''}
-          onChange={(e) => handleChange('description', e.target.value)}
-          placeholder={t.snippetForm.descriptionPlaceholder}
-          className="form-input"
-        />
-      </div>
-    </div>
-  );
+       <div className="flex flex-col gap-1.5 mb-4">
+         <label htmlFor="snippet-content" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+           {t.snippetForm.contentLabel}
+         </label>
+         <textarea
+           id="snippet-content"
+           value={formData.content}
+           onChange={(e) => handleChange('content', e.target.value)}
+           placeholder={t.snippetForm.contentPlaceholder}
+           rows={6}
+           className={`w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 font-mono text-xs ${errors.content ? 'border-red-500' : ''}`}
+         />
+         {errors.content && <p className="text-red-500 text-xs mt-1">{errors.content}</p>}
+       </div>
+
+       <div className="flex flex-col gap-1.5 mb-4">
+         <label htmlFor="snippet-description" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">
+           {t.snippetForm.descriptionLabel}
+         </label>
+         <input
+           id="snippet-description"
+           type="text"
+           value={formData.description || ''}
+           onChange={(e) => handleChange('description', e.target.value)}
+           placeholder={t.snippetForm.descriptionPlaceholder}
+           className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+         />
+       </div>
+     </div>
+   );
 });

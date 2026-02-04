@@ -327,20 +327,20 @@ export const AITab: React.FC<AITabProps> = ({
   };
 
   return (
-    <div className="tab-container">
+    <div className="w-full max-w-full">
       {/* General Settings Section */}
-      <div className="section-header flex justify-between items-center mb-4">
-        <h3 className="section-title">{t.ai.configuration}</h3>
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-base font-semibold tracking-tight">{t.ai.configuration}</h3>
       </div>
-      
+
       <div className="mb-8">
-         <div className="form-row">
-            <div className="form-group flex-1">
-               <label htmlFor="ai-max-history" className="form-label">{t.ai.maxChatContext}</label>
-               <input 
+         <div className="flex gap-4">
+            <div className="flex flex-col gap-1.5 mb-4 flex-1">
+               <label htmlFor="ai-max-history" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.maxChatContext}</label>
+               <input
                    id="ai-max-history"
-                   type="number" 
-                   className="form-input"
+                   type="number"
+                   className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
                    value={general.aiMaxHistory || 10}
                    onChange={(e) => {
                        const val = parseInt(e.target.value);
@@ -352,12 +352,12 @@ export const AITab: React.FC<AITabProps> = ({
                    max={100}
                />
             </div>
-            <div className="form-group flex-1">
-               <label htmlFor="ai-timeout" className="form-label">{t.ai.requestTimeout}</label>
-               <input 
+            <div className="flex flex-col gap-1.5 mb-4 flex-1">
+               <label htmlFor="ai-timeout" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.requestTimeout}</label>
+               <input
                    id="ai-timeout"
-                   type="number" 
-                   className="form-input"
+                   type="number"
+                   className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
                    value={general.aiTimeout || 120}
                    onChange={(e) => {
                        const val = parseInt(e.target.value);
@@ -373,15 +373,14 @@ export const AITab: React.FC<AITabProps> = ({
        </div>
 
        <div className="mb-8">
-          <div className="form-group">
-             <label htmlFor="ai-additional-prompt" className="form-label">{t.ai.globalAdditionalPrompt}</label>
-             <div className="text-xs text-gray-400 mb-2">
+          <div className="flex flex-col gap-1.5 mb-4">
+             <label htmlFor="ai-additional-prompt" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.globalAdditionalPrompt}</label>
+             <div className="text-xs text-zinc-400 mb-2">
                  {t.ai.globalAdditionalPromptDesc}
              </div>
              <textarea
                  id="ai-additional-prompt"
-                 className="form-input w-full h-32 py-2"
-                 style={{ resize: 'vertical', minHeight: '100px' }}
+                 className="w-full h-32 py-2 px-3 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800 font-sans resize-y min-h-[100px]"
                  value={additionalPrompt || ''}
                  onChange={(e) => onAdditionalPromptUpdate(e.target.value)}
                  placeholder="e.g. Always answer in Chinese. Be concise."
@@ -390,34 +389,34 @@ export const AITab: React.FC<AITabProps> = ({
        </div>
 
        {/* AI Channels Section */}
-      <div className="section-header flex justify-between items-center mb-4">
-        <h3 className="section-title">{t.ai.channels}</h3>
-        <button type="button" onClick={handleAddChannel} className="btn btn-primary">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-base font-semibold tracking-tight">{t.ai.channels}</h3>
+        <button type="button" onClick={handleAddChannel} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans">
           <Plus size={16} />
           {t.ai.addChannel}
         </button>
       </div>
 
-      <div className="item-list mb-8">
+      <div className="flex flex-col gap-2 mb-8">
         {sortedChannels.length === 0 ? (
-          <div className="empty-state-mini">
-            <p>{t.ai.noChannels}</p>
+          <div className="flex flex-col items-center justify-center p-12 text-center bg-zinc-900 border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
+            <p className="text-sm text-zinc-500 m-0">{t.ai.noChannels}</p>
           </div>
         ) : (
           sortedChannels.map((channel) => (
-            <div key={channel.id} className={`item-card ${!channel.isActive ? 'inactive opacity-60' : ''}`}>
-              <div className="item-info">
+            <div key={channel.id} className={`flex items-center justify-between p-3 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!channel.isActive ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
+              <div className="flex flex-col gap-1 flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="item-name">{channel.name}</span>
-                  {!channel.isActive && <span className="tag text-xs bg-gray-700 text-gray-300">{t.ai.disabled}</span>}
+                  <span className="text-sm font-semibold text-zinc-100 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{channel.name}</span>
+                  {!channel.isActive && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-800 text-zinc-400 rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
                 </div>
-                <p className="item-detail">Type: {channel.type}</p>
+                <p className="text-xs text-zinc-400 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Type: {channel.type}</p>
               </div>
-              <div className="item-actions">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => handleEditChannel(channel)}
-                  className="btn-icon btn-secondary"
+                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
                   title={t.common.edit}
                 >
                   <Edit2 size={14} />
@@ -425,7 +424,7 @@ export const AITab: React.FC<AITabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleDeleteChannel(channel.id)}
-                  className="btn-icon btn-secondary hover-danger"
+                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500 hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
                   title={t.common.delete}
                 >
                   <Trash2 size={14} />
@@ -437,18 +436,18 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
 
       {/* AI Models Section */}
-      <div className="section-header flex justify-between items-center mb-4" style={{ marginTop: '32px' }}>
-        <h3 className="section-title">{t.ai.models}</h3>
-        <button type="button" onClick={handleAddModel} className="btn btn-primary">
+      <div className="flex justify-between items-center mb-4 mt-8">
+        <h3 className="text-base font-semibold tracking-tight">{t.ai.models}</h3>
+        <button type="button" onClick={handleAddModel} className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans">
           <Plus size={16} />
           {t.ai.addModel}
         </button>
       </div>
 
-      <div className="item-list">
+      <div className="flex flex-col gap-2">
         {sortedModels.length === 0 ? (
-          <div className="empty-state-mini">
-            <p>{t.ai.noModels}</p>
+          <div className="flex flex-col items-center justify-center p-12 text-center bg-zinc-900 border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
+            <p className="text-sm text-zinc-500 m-0">{t.ai.noModels}</p>
           </div>
         ) : (
           sortedModels.map((model) => {
@@ -457,24 +456,24 @@ export const AITab: React.FC<AITabProps> = ({
             const effectivelyEnabled = model.enabled && isChannelActive;
 
             return (
-              <div key={model.id} className={`item-card ${!effectivelyEnabled ? 'inactive opacity-60' : ''}`}>
-                <div className="item-info">
+              <div key={model.id} className={`flex items-center justify-between p-3 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 ${!effectivelyEnabled ? 'opacity-60' : ''} hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px`}>
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="item-name">{model.name}</span>
-                    {!model.enabled && <span className="tag text-xs bg-gray-700 text-gray-300">{t.ai.disabled}</span>}
+                    <span className="text-sm font-semibold text-zinc-100 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">{model.name}</span>
+                    {!model.enabled && <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-800 text-zinc-400 rounded border border-zinc-700/50 whitespace-nowrap">{t.ai.disabled}</span>}
                     {model.enabled && !isChannelActive && (
-                      <span className="tag text-xs bg-yellow-900 text-yellow-200" title="Parent channel is disabled">
+                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-yellow-900 text-yellow-200 rounded border border-zinc-700/50 whitespace-nowrap" title="Parent channel is disabled">
                         {t.ai.channelDisabled}
                       </span>
                     )}
                   </div>
-                  <p className="item-detail">Channel: {channel ? channel.name : 'Unknown Channel'}</p>
+                  <p className="text-xs text-zinc-400 m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis">Channel: {channel ? channel.name : 'Unknown Channel'}</p>
                 </div>
-                <div className="item-actions">
+                <div className="flex items-center gap-1.5 flex-shrink-0">
                   <button
                     type="button"
                     onClick={() => handleEditModel(model)}
-                    className="btn-icon btn-secondary"
+                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
                     title={t.common.edit}
                   >
                     <Edit2 size={14} />
@@ -482,7 +481,7 @@ export const AITab: React.FC<AITabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDeleteModel(model.id)}
-                    className="btn-icon btn-secondary hover-danger"
+                    className="inline-flex items-center justify-center w-8 h-8 p-0 bg-zinc-800 text-zinc-400 border-[1.5px] border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500 hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
                     title={t.common.delete}
                   >
                     <Trash2 size={14} />
@@ -507,27 +506,27 @@ export const AITab: React.FC<AITabProps> = ({
               id="channel-synced"
               checked={channelFormData.synced ?? true}
               onChange={(e) => setChannelFormData({ ...channelFormData, synced: e.target.checked })}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <label htmlFor="channel-synced" className="text-sm font-medium text-gray-300 cursor-pointer">
+            <label htmlFor="channel-synced" className="text-sm font-medium text-zinc-300 cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}
             </label>
           </div>
         }
       >
-        <div className="form-group">
-          <label htmlFor="channel-name" className="form-label">{t.ai.channelForm.name}</label>
+        <div className="flex flex-col gap-1.5 mb-4">
+          <label htmlFor="channel-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.name}</label>
           <input
             id="channel-name"
             type="text"
-            className="form-input"
+            className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
             value={channelFormData.name || ''}
             onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })}
             placeholder="e.g. OpenAI Personal"
           />
         </div>
-        <div className="form-group">
-          <label htmlFor="channel-type" className="form-label">{t.ai.channelForm.type}</label>
+        <div className="flex flex-col gap-1.5 mb-4">
+          <label htmlFor="channel-type" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.type}</label>
           <CustomSelect
             id="channel-type"
             value={channelFormData.type || 'openai'}
@@ -551,17 +550,17 @@ export const AITab: React.FC<AITabProps> = ({
         </div>
 
         {channelFormData.type === 'copilot' ? (
-           <div className="form-group p-4 bg-gray-800 rounded-lg border border-gray-700">
-             <label className="form-label mb-2 block">GitHub Authentication</label>
-             
+           <div className="flex flex-col gap-1.5 mb-4 p-4 bg-zinc-800 rounded-lg border border-zinc-700/50">
+             <label className="block text-sm font-medium text-zinc-400 mb-2 tracking-tight">GitHub Authentication</label>
+
              {channelFormData.apiKey ? (
                <div className="flex items-center gap-2 text-green-400 mb-4">
                  <Check size={18} />
                  <span>Authenticated with GitHub</span>
-                 <button 
-                   type="button" 
+                 <button
+                   type="button"
                    onClick={() => setChannelFormData({...channelFormData, apiKey: ''})}
-                   className="text-xs text-gray-400 hover:text-white underline ml-2 bg-transparent border-none cursor-pointer p-0"
+                   className="text-xs text-zinc-400 hover:text-white underline ml-2 bg-transparent border-none cursor-pointer p-0"
                  >
                    Reset
                  </button>
@@ -569,11 +568,11 @@ export const AITab: React.FC<AITabProps> = ({
              ) : (
                <>
                  {!copilotAuthData && (
-                   <button 
-                     type="button" 
-                     onClick={startCopilotAuth} 
+                   <button
+                     type="button"
+                     onClick={startCopilotAuth}
                      disabled={isAuthLoading}
-                     className="btn btn-secondary w-full flex items-center justify-center gap-2"
+                     className="inline-flex items-center justify-center w-full gap-2 px-4 py-2 text-sm font-medium rounded bg-zinc-800 text-zinc-100 border-[1.5px] border-zinc-700/50 cursor-pointer transition-all whitespace-nowrap hover:bg-zinc-700 hover:border-blue-500 font-sans disabled:opacity-50 disabled:cursor-not-allowed"
                    >
                      {isAuthLoading ? <Loader2 size={16} className="animate-spin" /> : null}
                      Sign in with GitHub
@@ -581,17 +580,17 @@ export const AITab: React.FC<AITabProps> = ({
                  )}
 
                  {authError && (
-                   <div className="text-red-400 text-sm mt-2">{authError}</div>
+                   <div className="text-red-500 text-sm mt-2">{authError}</div>
                  )}
 
                  {copilotAuthData && (
                    <div className="mt-4 space-y-4">
-                     <div className="text-sm text-gray-300">
+                     <div className="text-sm text-zinc-300">
                        1. Copy code: <strong className="text-white select-all">{copilotAuthData.user_code}</strong>
                      </div>
-                      <div className="text-sm text-gray-300">
-                        2. Open link: 
-                        <button 
+                      <div className="text-sm text-zinc-300">
+                        2. Open link:
+                        <button
                           type="button"
                           onClick={() => invoke('open_url', { url: copilotAuthData.verification_uri })}
                           className="text-blue-400 hover:underline ml-1 inline-flex items-center gap-1 bg-transparent border-none p-0 cursor-pointer"
@@ -600,18 +599,18 @@ export const AITab: React.FC<AITabProps> = ({
                         </button>
                       </div>
 
-                     
+
                      <div className="flex gap-2">
-                        <button 
-                          type="button" 
+                        <button
+                          type="button"
                           onClick={copyUserCode}
-                          className="btn btn-secondary flex-1 flex items-center justify-center gap-2"
+                          className="inline-flex items-center justify-center flex-1 gap-2 px-4 py-2 text-sm font-medium rounded bg-zinc-800 text-zinc-100 border-[1.5px] border-zinc-700/50 cursor-pointer transition-all whitespace-nowrap hover:bg-zinc-700 hover:border-blue-500 font-sans"
                         >
                           <Copy size={14} /> Copy Code
                         </button>
                      </div>
 
-                     <div className="text-center text-xs text-gray-400 flex items-center justify-center gap-2">
+                     <div className="text-center text-xs text-zinc-400 flex items-center justify-center gap-2">
                        {isPolling && <Loader2 size={12} className="animate-spin" />}
                        Waiting for authentication...
                      </div>
@@ -622,23 +621,23 @@ export const AITab: React.FC<AITabProps> = ({
            </div>
         ) : (
           <>
-            <div className="form-group">
-              <label htmlFor="channel-endpoint" className="form-label">{t.ai.channelForm.endpoint}</label>
+            <div className="flex flex-col gap-1.5 mb-4">
+              <label htmlFor="channel-endpoint" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.endpoint}</label>
               <input
                 id="channel-endpoint"
                 type="text"
-                className="form-input"
+                className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
                 value={channelFormData.endpoint || ''}
                 onChange={(e) => setChannelFormData({ ...channelFormData, endpoint: e.target.value })}
                 placeholder="https://api.openai.com/v1"
               />
             </div>
-            <div className="form-group">
-              <label htmlFor="channel-apikey" className="form-label">{t.ai.channelForm.apiKey}</label>
+            <div className="flex flex-col gap-1.5 mb-4">
+              <label htmlFor="channel-apikey" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.channelForm.apiKey}</label>
               <input
                 id="channel-apikey"
                 type="password"
-                className="form-input"
+                className="w-full px-3 py-2 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
                 value={channelFormData.apiKey || ''}
                 onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
                 placeholder="sk-..."
@@ -647,11 +646,11 @@ export const AITab: React.FC<AITabProps> = ({
           </>
         )}
 
-        <div className="form-group flex items-center gap-2 mt-4">
+        <div className="flex flex-col gap-1.5 mb-4 flex items-center gap-2 mt-4">
           <input
             type="checkbox"
             id="channel-active"
-            className="checkbox"
+            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             checked={channelFormData.isActive ?? true}
             onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
             disabled={channelFormData.type === 'copilot' && !channelFormData.apiKey}
@@ -659,8 +658,8 @@ export const AITab: React.FC<AITabProps> = ({
           <label htmlFor="channel-active" className="text-sm cursor-pointer">{t.ai.channelForm.active}</label>
         </div>
 
-        <div className="form-group mt-4 pt-4 border-t border-gray-700">
-          <label htmlFor="channel-proxy" className="form-label">{t.common.proxy}</label>
+        <div className="flex flex-col gap-1.5 mb-4 mt-4 pt-4 border-t border-zinc-700/50">
+          <label htmlFor="channel-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.common.proxy}</label>
           <CustomSelect
             id="channel-proxy"
             value={channelFormData.proxyId || ''}
@@ -689,77 +688,77 @@ export const AITab: React.FC<AITabProps> = ({
               id="model-synced"
               checked={modelFormData.synced ?? true}
               onChange={(e) => setModelFormData({ ...modelFormData, synced: e.target.checked })}
-              className="checkbox"
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <label htmlFor="model-synced" className="text-sm font-medium text-gray-300 cursor-pointer">
+            <label htmlFor="model-synced" className="text-sm font-medium text-zinc-300 cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}
             </label>
           </div>
         }
       >
-          <div className="form-group relative">
-            <label htmlFor="model-name" className="form-label">{t.ai.modelForm.name}</label>
-            <div className="relative">
-              <input
-                id="model-name"
-                ref={inputRef}
-                type="text"
-                className="form-input pr-8"
-                value={modelFormData.name || ''}
-                onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
-                placeholder="e.g. gpt-4, gpt-3.5-turbo"
-                onFocus={() => {
-                   handleFetchModels();
-                   setShowModelSuggestions(true);
-                }}
-                onBlur={() => setTimeout(() => setShowModelSuggestions(false), 200)}
-                autoComplete="off"
-              />
-              {isFetchingModels && (
-                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none">
-                  <Loader2 size={16} className="animate-spin text-gray-400" />
-                </div>
-              )}
-              
-              {showModelSuggestions && fetchedModels.length > 0 && dropdownPosition && createPortal(
-                <ul 
-                  className="snippet-group-suggestions fixed"
-                  style={{
-                      top: dropdownPosition.top,
-                      left: dropdownPosition.left,
-                      width: dropdownPosition.width,
-                      marginTop: '4px',
-                      maxHeight: '200px',
-                      zIndex: 9999
-                  }}
-                >
-                  {fetchedModels
-                    .filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase()))
-                    .map(model => (
-                    <li 
-                      key={model} 
-                      className="snippet-suggestion-item"
-                      onMouseDown={(e) => {
-                        e.preventDefault(); 
-                        setModelFormData({ ...modelFormData, name: model });
-                        setShowModelSuggestions(false);
-                      }}
-                    >
-                      {model}
-                    </li>
-                  ))}
-                  {fetchedModels.filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase())).length === 0 && (
-                     <li className="snippet-suggestion-item" style={{ cursor: 'default', opacity: 0.5 }}>
-                        No matches found
+          <div className="flex flex-col gap-1.5 mb-4 relative">
+            <label htmlFor="model-name" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.modelForm.name}</label>
+             <div className="relative">
+               <input
+                 id="model-name"
+                 ref={inputRef}
+                 type="text"
+                 className="w-full px-3 py-2 pr-8 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+                 value={modelFormData.name || ''}
+                 onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
+                 placeholder="e.g. gpt-4, gpt-3.5-turbo"
+                 onFocus={() => {
+                    handleFetchModels();
+                    setShowModelSuggestions(true);
+                 }}
+                 onBlur={() => setTimeout(() => setShowModelSuggestions(false), 200)}
+                 autoComplete="off"
+               />
+               {isFetchingModels && (
+                 <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                   <Loader2 size={16} className="animate-spin text-zinc-400" />
+                 </div>
+               )}
+
+               {showModelSuggestions && fetchedModels.length > 0 && dropdownPosition && createPortal(
+                 <ul
+                   className="flex flex-wrap gap-1.5 p-2 bg-zinc-900 border-[1.5px] border-zinc-700/50 rounded mt-1 max-w-[300px] z-[1000] fixed"
+                   style={{
+                       top: dropdownPosition.top,
+                       left: dropdownPosition.left,
+                       width: dropdownPosition.width,
+                       marginTop: '4px',
+                       maxHeight: '200px',
+                       zIndex: 9999
+                   }}
+                 >
+                   {fetchedModels
+                     .filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase()))
+                     .map(model => (
+                     <li
+                       key={model}
+                       className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500"
+                       onMouseDown={(e) => {
+                         e.preventDefault();
+                         setModelFormData({ ...modelFormData, name: model });
+                         setShowModelSuggestions(false);
+                       }}
+                     >
+                       {model}
                      </li>
-                  )}
-                </ul>,
-                document.body
-              )}
-            </div>
-          </div>
-        <div className="form-group">
-          <label htmlFor="model-channel" className="form-label">{t.ai.modelForm.channel}</label>
+                   ))}
+                   {fetchedModels.filter(m => !modelFormData.name || m.toLowerCase().includes(modelFormData.name.toLowerCase())).length === 0 && (
+                      <li className="p-1 px-2.5 text-xs bg-zinc-800 text-zinc-400 border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-zinc-700 hover:text-zinc-100 hover:border-blue-500" style={{ cursor: 'default', opacity: 0.5 }}>
+                         No matches found
+                      </li>
+                   )}
+                 </ul>,
+                 document.body
+               )}
+             </div>
+           </div>
+         <div className="flex flex-col gap-1.5 mb-4">
+           <label htmlFor="model-channel" className="block text-sm font-medium text-zinc-400 mb-1.5 tracking-tight">{t.ai.modelForm.channel}</label>
           <CustomSelect
             id="model-channel"
             value={modelFormData.channelId || ''}
@@ -771,16 +770,16 @@ export const AITab: React.FC<AITabProps> = ({
           />
         </div>
 
-        <div className="form-group flex items-center gap-2 mt-4">
-          <input
-            type="checkbox"
-            id="model-active"
-            className="checkbox"
-            checked={modelFormData.enabled ?? true}
-            onChange={(e) => setModelFormData({ ...modelFormData, enabled: e.target.checked })}
-          />
-          <label htmlFor="model-active" className="text-sm cursor-pointer">{t.ai.modelForm.active}</label>
-        </div>
+         <div className="flex flex-col gap-1.5 mb-4 flex items-center gap-2 mt-4">
+           <input
+             type="checkbox"
+             id="model-active"
+             className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+             checked={modelFormData.enabled ?? true}
+             onChange={(e) => setModelFormData({ ...modelFormData, enabled: e.target.checked })}
+           />
+           <label htmlFor="model-active" className="text-sm cursor-pointer">{t.ai.modelForm.active}</label>
+         </div>
       </FormModal>
 
       <ConfirmationModal

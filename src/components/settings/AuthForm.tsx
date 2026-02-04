@@ -124,10 +124,10 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4">
       {/* Name */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">
+        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
           {t.authForm.nameLabel}
         </label>
         <input
@@ -135,16 +135,16 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
           placeholder={t.authForm.namePlaceholder}
-          className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-            errors.name ? 'border-red-500' : 'border-gray-600'
-          } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+          className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
+            errors.name ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
+          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]`}
         />
-        {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
+        {errors.name && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.name}</p>}
       </div>
 
       {/* Type Toggle */}
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
           {t.authForm.typeLabel}
         </label>
         <div className="flex gap-4">
@@ -156,8 +156,9 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
                 value={type}
                 checked={formData.type === type}
                 onChange={() => handleTypeChange(type)}
+                className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border border-[1.5px] border-[var(--glass-border)] rounded-full bg-[var(--bg-primary)] cursor-pointer relative transition-all duration-[150ms] flex-shrink-0 inline-flex items-center justify-center vertical-align-middle checked:border-[var(--accent-primary)] checked:shadow-[var(--glow-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] after:content-[''] after:checked:w-2 after:checked:h-2 after:checked:bg-[var(--accent-primary)] after:checked:rounded-full"
               />
-              <span className="text-gray-300 capitalize">
+              <span className="text-[var(--text-secondary)] capitalize">
                 {type === 'key' ? t.authTab.keyType : t.authTab.passwordType}
               </span>
             </label>
@@ -169,7 +170,7 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       {formData.type === 'password' && (
         <>
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               {t.authForm.passwordLabel}
             </label>
             <input
@@ -177,11 +178,11 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
               value={formData.password || ''}
               onChange={(e) => handleChange('password', e.target.value)}
               placeholder={t.authForm.passwordPlaceholder}
-              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                errors.password ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500`}
+              className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
+                errors.password ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
+              } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]`}
             />
-            {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+            {errors.password && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.password}</p>}
           </div>
         </>
       )}
@@ -191,13 +192,13 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
         <>
           <div>
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-sm font-medium text-gray-300">
+              <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {t.authForm.keyContentLabel}
               </label>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="btn btn-secondary py-1 px-2 text-xs flex items-center gap-1.5"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[1.5px] border-[var(--glass-border)] rounded-[var(--radius-sm)] cursor-pointer transition-all duration-[150ms] whitespace-nowrap font-[var(--font-ui)] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent-primary)] py-1 px-2 text-xs flex gap-1.5"
                 title={t.authForm.uploadKey}
               >
                 <Upload size={14} />
@@ -215,15 +216,15 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
               onChange={(e) => handleChange('keyContent', e.target.value)}
               placeholder={t.authForm.keyContentPlaceholder}
               rows={6}
-              className={`w-full px-3 py-2 rounded-md bg-gray-800 border ${
-                errors.keyContent ? 'border-red-500' : 'border-gray-600'
-              } text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs`}
+              className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
+                errors.keyContent ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
+              } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms] font-[var(--font-mono)] text-xs`}
             />
-            {errors.keyContent && <p className="text-red-400 text-xs mt-1">{errors.keyContent}</p>}
+            {errors.keyContent && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.keyContent}</p>}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
+            <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
               {t.authForm.passphraseLabel}
             </label>
             <input
@@ -231,7 +232,7 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
               value={formData.passphrase || ''}
               onChange={(e) => handleChange('passphrase', e.target.value)}
               placeholder={t.authForm.passphrasePlaceholder}
-              className="w-full px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border border-[var(--glass-border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]"
             />
           </div>
         </>

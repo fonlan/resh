@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
-import './CustomSelect.css';
 
 export interface Option {
     value: string | number;
@@ -17,6 +16,7 @@ interface CustomSelectProps {
     className?: string;
     id?: string;
     placement?: 'bottom' | 'top';
+    triggerClassName?: string;
 }
 
 export const CustomSelect: React.FC<CustomSelectProps> = ({
@@ -26,6 +26,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     placeholder = "Select...",
     disabled = false,
     className = "",
+    triggerClassName = "",
     id,
     placement = 'bottom'
 }) => {
@@ -65,10 +66,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
             if (!isOpen) return;
-            
+
             const target = event.target as Node;
             const isInsideContainer = containerRef.current && containerRef.current.contains(target);
-            
+
             if (!isInsideContainer) {
                 setIsOpen(false);
             }
@@ -90,8 +91,8 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     const selectedOption = options.find(opt => String(opt.value) === String(value));
 
     const dropdownContent = (
-        <div 
-            className="custom-select-dropdown"
+        <div
+            className="fixed z-[9999] bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-md)] shadow-[0_10px_25px_rgba(0,0,0,0.5)] max-h-[200px] overflow-y-auto"
             style={dropdownPosition ? {
                 top: dropdownPosition.top,
                 left: dropdownPosition.left,
@@ -103,14 +104,14 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
             onMouseUp={(e) => e.stopPropagation()}
         >
             {options.length === 0 ? (
-                <div className="custom-select-item" style={{ cursor: 'default', opacity: 0.5 }}>
+                <div className="w-full text-left px-3.5 py-2.5 bg-transparent border-0 text-[var(--text-primary)] text-[13px] cursor-default opacity-50 whitespace-nowrap overflow-hidden text-ellipsis">
                     No options
                 </div>
             ) : (
                 options.map((option) => (
                     <div
                         key={option.value}
-                        className={`custom-select-item ${String(option.value) === String(value) ? 'selected' : ''}`}
+                        className={`w-full text-left px-3.5 py-2.5 bg-transparent border-0 text-[var(--text-primary)] text-[13px] cursor-pointer transition-colors duration-200 block whitespace-nowrap overflow-hidden text-ellipsis hover:bg-[var(--bg-tertiary)] ${String(option.value) === String(value) ? '!text-[var(--accent-primary)] font-medium' : ''}`}
                         onClick={(e) => handleSelect(option.value, e)}
                         onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
@@ -132,13 +133,13 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     );
 
     return (
-        <div 
-            ref={containerRef} 
-            className={`custom-select-container ${className}`}
+        <div
+            ref={containerRef}
+            className={`relative w-full ${className}`}
             id={id}
         >
-            <div 
-                className={`custom-select-trigger ${disabled ? 'disabled' : ''}`}
+            <div
+                className={`w-full px-3 py-2.5 bg-[var(--bg-primary)] border border-[var(--glass-border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] -tracking-[0.01em] leading-6 transition-all text-left flex justify-between items-center cursor-pointer outline-none focus:border-[var(--accent-primary)] focus:shadow-[0_0_0_2px_rgba(59,130,246,0.1)] ${disabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : ''} ${triggerClassName}`}
                 onClick={() => !disabled && setIsOpen(!isOpen)}
                 onKeyDown={(e) => {
                     if (disabled) return;
@@ -153,10 +154,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 tabIndex={disabled ? -1 : 0}
                 title={selectedOption ? selectedOption.label : placeholder}
             >
-                <span className={!selectedOption ? "text-gray-400" : ""}>
+                <span className={`whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 mr-2 ${!selectedOption ? 'text-zinc-400' : ''}`}>
                     {selectedOption ? selectedOption.label : placeholder}
                 </span>
-                <ChevronDown size={16} className={`text-gray-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown size={16} className="text-zinc-400 transition-transform duration-200" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
             </div>
 
             {isOpen && dropdownPosition && createPortal(

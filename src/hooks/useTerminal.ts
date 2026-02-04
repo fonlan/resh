@@ -137,10 +137,14 @@ export const useTerminal = (
             // Fit failed
         }
       }
-    }, 100);
+    }, 50); // Reduced debounce to 50ms to be more responsive
     
     const resizeObserver = new ResizeObserver(handleResize);
     resizeObserver.observe(container);
+    // Also observe the parent to catch layout shifts faster
+    if (container.parentElement) {
+        resizeObserver.observe(container.parentElement);
+    }
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;

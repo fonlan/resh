@@ -322,11 +322,17 @@ export const MainWindow: React.FC = () => {
   }, [config?.snippets, config?.servers, tabs, activeTabId]);
 
   return (
-    <div className="main-window">
+    <div className="flex flex-col h-screen w-screen overflow-hidden animate-[fadeIn_0.4s_ease-out]">
+      <style>{`
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
       {/* Title Bar with drag region */}
-      <div className="title-bar">
+      <div className="flex bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
         {/* Tab Bar */}
-        <div className="tab-bar" role="tablist">
+        <div className="flex flex-none min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar" role="tablist">
           {tabs.map((tab, index) => (
             <div
               key={tab.id}
@@ -340,19 +346,19 @@ export const MainWindow: React.FC = () => {
               tabIndex={activeTabId === tab.id ? 0 : -1}
               aria-selected={activeTabId === tab.id}
               aria-label={t.mainWindow.tabAriaLabel.replace('{index}', (index + 1).toString()).replace('{total}', tabs.length.toString())}
-              className={`tab ${activeTabId === tab.id ? 'active' : ''} ${
-                draggedTabIndex === index ? 'dragging' : ''
-              } ${dropTargetIndex === index ? 'drop-target' : ''}`}
+              className={`flex items-center gap-2 px-4 h-10 w-[200px] bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium tracking-tight leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
+                draggedTabIndex === index ? 'opacity-40 cursor-grabbing' : ''
+              } ${dropTargetIndex === index ? 'border-l-2 border-l-[var(--accent-primary)]' : ''}`}
               onClick={() => setActiveTabId(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
               {recordingTabs.has(tab.id) && (
                 <Circle size={8} fill="#ef4444" stroke="#ef4444" className="mr-2 animate-pulse" />
               )}
-              <span className="tab-label">{tab.label}</span>
+              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{tab.label}</span>
               <button
                 type="button"
-                className="tab-close"
+                className="flex items-center justify-center w-[18px] h-[18px] bg-transparent border-none text-[var(--text-muted)] text-[14px] cursor-pointer rounded-[4px] transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleCloseTab(tab.id);
@@ -371,13 +377,13 @@ export const MainWindow: React.FC = () => {
         />
 
         {/* Drag region spacer - empty area for dragging */}
-        <div className="drag-spacer" data-tauri-drag-region></div>
+        <div className="flex-1 min-w-[40px]" data-tauri-drag-region></div>
 
         {/* Right side: Settings button + Window controls */}
-        <div className="title-bar-right">
+        <div className="flex items-center">
           <button
             type="button"
-            className={`settings-btn ${isAIOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isAIOpen ? 'bg-gray-700 text-white' : ''}`}
             onClick={() => setIsAIOpen(!isAIOpen)}
             aria-label={t.mainWindow.aiAssistant}
             title={t.mainWindow.aiAssistant}
@@ -386,7 +392,7 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
-            className={`settings-btn ${isSFTPOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isSFTPOpen ? 'bg-gray-700 text-white' : ''}`}
             onClick={() => setIsSFTPOpen(!isSFTPOpen)}
             aria-label="SFTP"
             title="SFTP"
@@ -395,7 +401,7 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
-            className={`settings-btn ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
+            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${isSnippetsOpen ? 'bg-gray-700 text-white' : ''}`}
             onMouseDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
@@ -410,7 +416,7 @@ export const MainWindow: React.FC = () => {
           </button>
           <button
             type="button"
-            className="settings-btn"
+            className="flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
             onClick={() => handleOpenSettings('servers')}
             onMouseEnter={prefetchSettings}
             onFocus={prefetchSettings}
@@ -424,7 +430,7 @@ export const MainWindow: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="content-area" style={{ position: 'relative', display: 'flex', flexDirection: 'row' }}>
+      <div className="flex-1 flex flex-col bg-[var(--bg-primary)] overflow-hidden relative min-h-0" style={{ position: 'relative', display: 'flex', flexDirection: 'row' }}>
         <SFTPSidebar
           isOpen={isSFTPOpen}
           onClose={() => setIsSFTPOpen(false)}

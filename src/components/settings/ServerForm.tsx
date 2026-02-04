@@ -5,7 +5,6 @@ import { validateRequired, validateUniqueName, validatePort } from '../../utils/
 import { useTranslation } from '../../i18n';
 import { CustomSelect } from '../CustomSelect';
 import { SnippetsTab } from './SnippetsTab';
-import './SettingsModal.css';
 
 interface ServerFormProps {
   server?: Server;
@@ -248,9 +247,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   ];
 
   return (
-    <div className="flex h-full min-h-[400px] items-stretch server-form-container">
+    <div className="flex h-full min-h-[400px] items-stretch">
       {/* Sidebar */}
-      <div className="settings-sidebar">
+      <div className="w-[200px] bg-[var(--bg-primary)] border-r border-[var(--glass-border)] p-3 flex flex-col gap-1">
         {tabs.map((tab) => {
           const hasError = hasTabError(tab.id);
           const isActive = activeTab === tab.id;
@@ -260,7 +259,22 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`settings-tab-btn ${isActive ? 'active' : ''}`}
+              className={`
+                w-full text-left px-3 py-2.5 rounded bg-transparent border-none
+                text-[var(--text-secondary)] cursor-pointer text-[13px] font-medium
+                transition-all duration-200 flex items-center gap-2.5 relative
+                hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text-primary)]
+                ${isActive ? 'active' : ''}
+              `}
+              style={
+                isActive
+                  ? {
+                      background: 'var(--bg-tertiary)',
+                      color: 'var(--accent-primary)',
+                      boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.05)'
+                    }
+                  : {}
+              }
             >
               {tab.icon}
               <span>{tab.label}</span>
@@ -271,7 +285,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       </div>
 
       {/* Content */}
-      <div className="settings-tab-content">
+      <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-secondary)]">
         <div className="space-y-6">
           {activeTab === 'general' && (
             <>
@@ -576,27 +590,27 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                               onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newValue: e.target.value })}
                               className="flex-1 px-3 py-2 rounded-md bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const { key: oldKey, newKey, newValue } = editingEnvVar;
-                                const newEnvVars = { ...formData.envVars };
-                                delete newEnvVars[oldKey];
-                                newEnvVars[newKey] = newValue;
-                                setFormData((prev) => ({ ...prev, envVars: newEnvVars }));
-                                setEditingEnvVar(null);
-                              }}
-                              className="icon-btn icon-btn-connect"
-                            >
-                              <Check size={16} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingEnvVar(null)}
-                              className="icon-btn icon-btn-delete"
-                            >
-                              <X size={16} />
-                            </button>
+                             <button
+                               type="button"
+                               onClick={() => {
+                                 const { key: oldKey, newKey, newValue } = editingEnvVar;
+                                 const newEnvVars = { ...formData.envVars };
+                                 delete newEnvVars[oldKey];
+                                 newEnvVars[newKey] = newValue;
+                                 setFormData((prev) => ({ ...prev, envVars: newEnvVars }));
+                                 setEditingEnvVar(null);
+                               }}
+                               className="p-1.5 rounded bg-transparent border-none text-[var(--accent-success)] cursor-pointer hover:bg-[rgba(34,197,94,0.1)] transition-all"
+                             >
+                               <Check size={16} />
+                             </button>
+                             <button
+                               type="button"
+                               onClick={() => setEditingEnvVar(null)}
+                               className="p-1.5 rounded bg-transparent border-none text-[var(--color-danger)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] transition-all"
+                             >
+                               <X size={16} />
+                             </button>
                           </div>
                         );
                       }
@@ -619,7 +633,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           <button
                             type="button"
                             onClick={() => setEditingEnvVar({ key, newKey: key, newValue: value })}
-                            className="icon-btn icon-btn-edit"
+                            className="p-1.5 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--accent-primary)] transition-all"
                             title={t.common.edit}
                           >
                             <Edit2 size={16} />
@@ -627,7 +641,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           <button
                             type="button"
                             onClick={() => removeEnvVar(key)}
-                            className="icon-btn icon-btn-delete"
+                            className="p-1.5 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--color-danger)] transition-all"
                             title={t.common.remove}
                           >
                             <Trash2 size={16} />
@@ -683,7 +697,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
           {activeTab === 'ai' && (
              <div>
-               <div className="form-group">
+               <div className="mb-4">
                  <label htmlFor="server-additional-prompt" className="block text-sm font-medium text-gray-300 mb-1">
                     {t.ai.serverAdditionalPrompt}
                  </label>

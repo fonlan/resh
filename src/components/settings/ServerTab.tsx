@@ -111,13 +111,13 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
-    <div className="tab-container">
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="section-title">{t.serverTab.title}</h3>
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h3 className="text-[15px] font-semibold text-[var(--text-primary)] m-0">{t.serverTab.title}</h3>
         <button
           type="button"
           onClick={handleAddServer}
-          className="btn btn-primary"
+          className="px-4 py-2 rounded bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)] border-none cursor-pointer text-[13px] font-medium flex items-center gap-2 transition-all"
         >
           <Plus size={16} />
           {t.serverTab.addServer}
@@ -125,11 +125,11 @@ export const ServerTab: React.FC<ServerTabProps> = ({
       </div>
 
       {sortedServers.length === 0 ? (
-        <div className="empty-state-mini">
-          <p>{t.serverTab.emptyState}</p>
+        <div className="bg-[var(--bg-tertiary)] border border-[var(--glass-border)] rounded-lg p-8 text-center">
+          <p className="text-[var(--text-muted)] text-[13px] m-0">{t.serverTab.emptyState}</p>
         </div>
       ) : (
-        <div className="item-list">
+        <div className="space-y-2">
           {sortedServers.map((server) => {
             const auth = authentications.find((a) => a.id === server.authId);
             const proxy = proxies.find((p) => p.id === server.proxyId);
@@ -138,27 +138,27 @@ export const ServerTab: React.FC<ServerTabProps> = ({
             return (
               <div
                 key={server.id}
-                className="item-card"
+                className="bg-[var(--bg-tertiary)] border border-[var(--glass-border)] rounded-lg p-4 flex items-center justify-between hover:border-[var(--accent-primary)]/30 transition-all"
               >
-                <div className="item-info">
-                  <p className="item-name">{server.name}</p>
-                  <p className="item-detail">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-medium text-[var(--text-primary)] m-0 mb-1">{server.name}</p>
+                  <p className="text-[12px] text-[var(--text-muted)] m-0 mb-2">
                     {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
                   </p>
                   {(auth || proxy || jumphost) && (
-                    <div className="item-tags">
-                      {auth && <span className="tag">{t.auth}: {auth.name}</span>}
-                      {proxy && <span className="tag">{t.common.proxy}: {proxy.name}</span>}
-                      {jumphost && <span className="tag">{t.serverTab.jumphost}: {jumphost.name}</span>}
+                    <div className="flex flex-wrap gap-1.5">
+                      {auth && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.auth}: {auth.name}</span>}
+                      {proxy && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.common.proxy}: {proxy.name}</span>}
+                      {jumphost && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.serverTab.jumphost}: {jumphost.name}</span>}
                     </div>
                   )}
                 </div>
-                <div className="item-actions">
+                <div className="flex items-center gap-1.5 ml-4">
                   {onConnectServer && (
                     <button
                       type="button"
                       onClick={() => onConnectServer(server.id)}
-                      className="btn-icon btn-secondary"
+                      className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--accent-primary)] transition-all"
                       title={t.serverTab.connectTooltip}
                     >
                       <Power size={14} />
@@ -167,7 +167,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleEditServer(server)}
-                    className="btn-icon btn-secondary"
+                    className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)] transition-all"
                     title={t.serverTab.editTooltip}
                   >
                     <Edit2 size={14} />
@@ -175,7 +175,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDeleteServer(server.id)}
-                    className="btn-icon btn-secondary hover-danger"
+                    className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--color-danger)] transition-all"
                     title={t.serverTab.deleteTooltip}
                   >
                     <Trash2 size={14} />
@@ -209,9 +209,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   formRef.current.setSynced(e.target.checked);
                 }
               }}
-              className="checkbox"
+              className="w-4 h-4 rounded border-[var(--glass-border)] bg-[var(--bg-tertiary)] text-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)] focus:ring-offset-0 cursor-pointer"
             />
-            <label htmlFor="synced-footer" className="text-sm font-medium text-gray-300 cursor-pointer">
+            <label htmlFor="synced-footer" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
               {t.common.syncThisItem || 'Sync this item'}
             </label>
           </div>

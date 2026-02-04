@@ -1,5 +1,4 @@
 import React from 'react';
-import './StatusBar.css';
 import { useConfig } from '../hooks/useConfig';
 
 interface StatusBarProps {
@@ -22,10 +21,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
   };
 
   return (
-    <div className="status-bar" style={style}>
+    <div className="flex flex-row h-6 leading-6 w-full text-xs font-mono overflow-hidden border-b border-[rgba(128,128,128,0.2)] select-none px-2 box-border" style={style}>
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
       <div 
-        className="status-bar-left" 
+        className="flex-1 whitespace-nowrap overflow-hidden text-ellipsis text-left pr-2.5 cursor-pointer" 
         title={leftText}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -35,12 +34,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
             });
           }
         }}
-        style={{ cursor: 'pointer' }}
       >
         {leftText}
       </div>
-      <div className="status-bar-right" title={rightText}>
-        <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
+      <div className="flex-none max-w-[200px] text-right whitespace-nowrap overflow-hidden text-ellipsis flex items-center justify-end" title={rightText}>
+        <span className={`w-2 h-2 rounded-full mr-2 inline-block shrink-0 transition-all duration-300 ${connected ? 'bg-[#4cd964] shadow-[0_0_6px_rgba(76,217,100,0.6)]' : 'bg-[#ff3b30] shadow-[0_0_6px_rgba(255,59,48,0.6)]'}`} />
         {rightText}
       </div>
     </div>

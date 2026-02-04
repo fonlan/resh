@@ -1,4 +1,3 @@
-import './App.css';
 import { MainWindow } from './components/MainWindow';
 import { useConfig } from './hooks/useConfig';
 import { useTheme } from './hooks/useTheme';
@@ -10,7 +9,7 @@ function App() {
   useTheme(theme);
 
   return (
-    <div className="app-container">
+    <div className="w-full h-screen flex flex-col">
       <MainWindow />
     </div>
   );
