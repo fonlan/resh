@@ -2,9 +2,11 @@ import React, { useEffect } from 'react';
 import { useTransferStore } from '../stores/transferStore';
 import { invoke } from '@tauri-apps/api/core';
 import { X, ArrowDown, ArrowUp } from 'lucide-react';
+import { useTranslation } from '../i18n';
 import './TransferStatusPanel.css';
 
 export const TransferStatusPanel: React.FC = () => {
+    const { t } = useTranslation();
     const { tasks, initListener } = useTransferStore();
 
     useEffect(() => {
@@ -41,7 +43,7 @@ export const TransferStatusPanel: React.FC = () => {
     return (
         <div className="transfer-panel">
             <div className="transfer-header">
-                <span>Transfers ({tasks.length})</span>
+                <span>{t.sftp.transfers} ({tasks.length})</span>
             </div>
             <div className="transfer-list">
                 {tasks.map(task => (

@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { useTranslation } from '../i18n';
 import './SFTPSidebar.css';
 
 import { TransferStatusPanel } from './TransferStatusPanel';
+import { ConfirmationModal } from './ConfirmationModal';
+import { FormModal } from './FormModal';
 
 interface SFTPSidebarProps {
   isOpen: boolean;
@@ -22,6 +25,7 @@ interface FileEntry {
   link_target?: string;
   size: number;
   modified: number;
+  permissions?: number;
   children?: FileEntry[];
   isExpanded?: boolean;
   isLoading?: boolean;
@@ -112,6 +116,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   onToggleLock,
   sessionId
 }) => {
+  const { t } = useTranslation();
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -120,8 +125,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [sortState, setSortState] = useState<SortState>({ type: 'name', order: 'asc' });
   const [showSortMenu, setShowSortMenu] = useState(false);
-  
+
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry: FileEntry } | null>(null);
+
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
+  const [newFileModal, setNewFileModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
+  const [newFolderModal, setNewFolderModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
+  const [propertiesModal, setPropertiesModal] = useState<{ isOpen: boolean, entry: FileEntry | null, permissions: string }>({ isOpen: false, entry: null, permissions: '' });
+
+  const [newItemName, setNewItemName] = useState('');
+  const [permissionInput, setPermissionInput] = useState('');
 
   // Close sort menu on click outside
   useEffect(() => {
@@ -341,7 +354,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
       try {
           const selected = await invoke<string[] | null>('pick_files');
-          
+
           if (selected) {
               const files = selected;
               for (const file of files) {
@@ -354,6 +367,110 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           console.error('Upload failed', e);
       }
       handleCloseContextMenu();
+  };
+
+  const getParentPath = (path: string): string => {
+    const normalized = path.replace(/\\/g, '/');
+    const lastSlash = normalized.lastIndexOf('/');
+    return lastSlash <= 0 ? '/' : normalized.substring(0, lastSlash);
+  };
+
+  const isDirectory = (entry: FileEntry): boolean => {
+    return entry.is_dir || Boolean(entry.is_symlink && entry.target_is_dir === true);
+  };
+
+  const reloadParentDirectory = async (entry: FileEntry) => {
+    if (!sessionId) return;
+    const parentPath = getParentPath(entry.path);
+    if (parentPath === '/' || parentPath === '.') {
+      await loadDirectory('/');
+    } else {
+      await loadDirectory(parentPath);
+    }
+  };
+
+  const permissionsToOctal = (perm: number | undefined): string => {
+    if (perm === undefined) return '755';
+    return (perm & 0o777).toString(8).padStart(3, '0');
+  };
+
+  const handleDelete = () => {
+    if (!contextMenu) return;
+    setDeleteModal({ isOpen: true, entry: contextMenu.entry });
+    handleCloseContextMenu();
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteModal.entry || !sessionId) return;
+    try {
+      await invoke('sftp_delete', { sessionId, path: deleteModal.entry.path });
+      await reloadParentDirectory(deleteModal.entry);
+    } catch (e) {
+      console.error('Delete failed', e);
+    }
+    setDeleteModal({ isOpen: false, entry: null });
+  };
+
+  const handleNewFile = () => {
+    if (!contextMenu) return;
+    const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
+    setNewFileModal({ isOpen: true, parentPath });
+    setNewItemName('');
+    handleCloseContextMenu();
+  };
+
+  const confirmNewFile = async () => {
+    if (!sessionId || !newItemName.trim()) return;
+    try {
+      const fullPath = `${newFileModal.parentPath}/${newItemName.trim()}`;
+      await invoke('sftp_create_file', { sessionId, path: fullPath });
+      await loadDirectory(newFileModal.parentPath);
+    } catch (e) {
+      console.error('Create file failed', e);
+    }
+    setNewFileModal({ isOpen: false, parentPath: '' });
+    setNewItemName('');
+  };
+
+  const handleNewFolder = () => {
+    if (!contextMenu) return;
+    const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
+    setNewFolderModal({ isOpen: true, parentPath });
+    setNewItemName('');
+    handleCloseContextMenu();
+  };
+
+  const confirmNewFolder = async () => {
+    if (!sessionId || !newItemName.trim()) return;
+    try {
+      const fullPath = `${newFolderModal.parentPath}/${newItemName.trim()}`;
+      await invoke('sftp_create_folder', { sessionId, path: fullPath });
+      await loadDirectory(newFolderModal.parentPath);
+    } catch (e) {
+      console.error('Create folder failed', e);
+    }
+    setNewFolderModal({ isOpen: false, parentPath: '' });
+    setNewItemName('');
+  };
+
+  const handleProperties = () => {
+    if (!contextMenu) return;
+    const octalPerms = permissionsToOctal(contextMenu.entry.permissions);
+    setPropertiesModal({ isOpen: true, entry: contextMenu.entry, permissions: octalPerms });
+    setPermissionInput(octalPerms);
+    handleCloseContextMenu();
+  };
+
+  const confirmProperties = async () => {
+    if (!propertiesModal.entry || !sessionId) return;
+    try {
+      const permNum = parseInt(permissionInput, 8);
+      await invoke('sftp_chmod', { sessionId, path: propertiesModal.entry.path, permissions: permNum });
+      await reloadParentDirectory(propertiesModal.entry);
+    } catch (e) {
+      console.error('Chmod failed', e);
+    }
+    setPropertiesModal({ isOpen: false, entry: null, permissions: '' });
   };
 
   return (
@@ -380,20 +497,20 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                type="button"
                className="sftp-action-btn sftp-sort-btn"
                onClick={() => setShowSortMenu(!showSortMenu)}
-               title="Sort"
+               title={t.sftp.tooltips.sort}
              >
                <ArrowDownUp size={16} />
              </button>
              {showSortMenu && (
                <div className="sftp-sort-menu sftp-context-menu" style={{ position: 'absolute', top: '100%', right: 0, marginTop: '4px', minWidth: '150px' }}>
                  <button type="button" onClick={() => handleSort('name')}>
-                   <span>Name</span>
+                   <span>{t.sftp.sort.name}</span>
                    {sortState.type === 'name' && (
                      sortState.order === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />
                    )}
                  </button>
                  <button type="button" onClick={() => handleSort('modified')}>
-                   <span>Date Modified</span>
+                   <span>{t.sftp.sort.dateModified}</span>
                    {sortState.type === 'modified' && (
                      sortState.order === 'asc' ? <ArrowDown size={14} /> : <ArrowUp size={14} />
                    )}
@@ -405,7 +522,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
              type="button"
              className="sftp-action-btn"
              onClick={() => loadDirectory(currentPath)}
-             title="Refresh"
+             title={t.sftp.tooltips.refresh}
            >
              <RefreshCw size={16} />
            </button>
@@ -413,7 +530,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             type="button"
             className={`sftp-action-btn ${isLocked ? 'active' : ''}`}
             onClick={onToggleLock}
-            title={isLocked ? "Unlock Sidebar" : "Lock Sidebar"}
+            title={isLocked ? t.sftp.tooltips.unlock : t.sftp.tooltips.lock}
           >
             {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
           </button>
@@ -421,7 +538,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             type="button"
             className="sftp-action-btn"
             onClick={onClose}
-            title="Close"
+            title={t.sftp.tooltips.close}
           >
             <X size={16} />
           </button>
@@ -440,12 +557,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           ))}
           {rootFiles.length === 0 && !isLoading && (
               <div className="p-4 text-center text-gray-500 text-sm">
-                  {sessionId ? "No files" : "Not connected"}
+                  {sessionId ? t.sftp.noFiles : t.sftp.notConnected}
               </div>
           )}
           {isLoading && rootFiles.length === 0 && (
               <div className="p-4 text-center text-gray-500 text-sm">
-                  Loading...
+                  {t.sftp.loading}
               </div>
           )}
       </div>
@@ -454,18 +571,126 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     </div>
 
     {contextMenu && (
-        <div 
+        <div
             className="sftp-context-menu"
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
             <button type="button" onClick={handleDownload}>
-                <Download size={14} /> Download
+                <Download size={14} /> {t.sftp.contextMenu.download}
             </button>
-             <button type="button" onClick={handleUpload}>
-                <Upload size={14} /> Upload
+            <button type="button" onClick={handleUpload}>
+                <Upload size={14} /> {t.sftp.contextMenu.upload}
+            </button>
+            {(isDirectory(contextMenu.entry)) && (
+                <>
+                    <button type="button" onClick={handleNewFile}>
+                        <Plus size={14} /> {t.sftp.contextMenu.newFile}
+                    </button>
+                    <button type="button" onClick={handleNewFolder}>
+                        <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
+                    </button>
+                </>
+            )}
+            <button type="button" onClick={handleProperties}>
+                <Settings size={14} /> {t.sftp.contextMenu.properties}
+            </button>
+            <button type="button" onClick={handleDelete}>
+                <Trash size={14} /> {t.sftp.contextMenu.delete}
             </button>
         </div>
     )}
+
+    <ConfirmationModal
+      isOpen={deleteModal.isOpen}
+      title={t.sftp.modals.deleteConfirmTitle}
+      message={t.sftp.modals.deleteConfirmMessage.replace('this item', `"${deleteModal.entry?.name}"`).replace('此项', `"${deleteModal.entry?.name}"`)}
+      confirmText={t.common.delete}
+      onConfirm={confirmDelete}
+      onCancel={() => setDeleteModal({ isOpen: false, entry: null })}
+      type="danger"
+    />
+
+    <FormModal
+      isOpen={newFileModal.isOpen}
+      title={t.sftp.modals.newFileTitle}
+      onSubmit={confirmNewFile}
+      onClose={() => setNewFileModal({ isOpen: false, parentPath: '' })}
+      submitText={t.common.create}
+    >
+      <input
+        type="text"
+        value={newItemName}
+        onChange={(e) => setNewItemName(e.target.value)}
+        placeholder={t.sftp.modals.itemNameLabel}
+        className="sftp-input"
+        style={{
+          width: '100%',
+          padding: '8px',
+          background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border-color)',
+          color: 'var(--text-primary)'
+        }}
+      />
+    </FormModal>
+
+    <FormModal
+      isOpen={newFolderModal.isOpen}
+      title={t.sftp.modals.newFolderTitle}
+      onSubmit={confirmNewFolder}
+      onClose={() => setNewFolderModal({ isOpen: false, parentPath: '' })}
+      submitText={t.common.create}
+    >
+      <input
+        type="text"
+        value={newItemName}
+        onChange={(e) => setNewItemName(e.target.value)}
+        placeholder={t.sftp.modals.itemNameLabel}
+        className="sftp-input"
+        style={{
+          width: '100%',
+          padding: '8px',
+          background: 'var(--bg-tertiary)',
+          border: '1px solid var(--border-color)',
+          color: 'var(--text-primary)'
+        }}
+      />
+    </FormModal>
+
+    <FormModal
+      isOpen={propertiesModal.isOpen}
+      title={t.sftp.modals.propertiesTitle}
+      onSubmit={confirmProperties}
+      onClose={() => setPropertiesModal({ isOpen: false, entry: null, permissions: '' })}
+      submitText={t.common.apply}
+    >
+      <div style={{ marginBottom: '16px' }}>
+        <div style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+          {t.common.name}: {propertiesModal.entry?.name}
+        </div>
+        <div style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+          {t.common.path}: {propertiesModal.entry?.path}
+        </div>
+        <label htmlFor="permissions-input" style={{ display: 'block', marginBottom: '8px', fontSize: '14px', color: 'var(--text-secondary)' }}>
+          {t.sftp.modals.permissionsLabel}
+        </label>
+        <input
+          id="permissions-input"
+          type="text"
+          value={permissionInput}
+          onChange={(e) => setPermissionInput(e.target.value)}
+          placeholder={t.sftp.modals.permissionsPlaceholder}
+          maxLength={3}
+          className="sftp-input"
+          style={{
+            width: '100%',
+            padding: '8px',
+            background: 'var(--bg-tertiary)',
+            border: '1px solid var(--border-color)',
+            color: 'var(--text-primary)'
+          }}
+        />
+      </div>
+    </FormModal>
     </>
   );
 };

@@ -220,6 +220,10 @@ async fn main() {
             commands::sftp::sftp_upload,
             commands::sftp::sftp_cancel_transfer,
             commands::sftp::pick_files,
+            commands::sftp::sftp_delete,
+            commands::sftp::sftp_create_folder,
+            commands::sftp::sftp_create_file,
+            commands::sftp::sftp_chmod,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -8,7 +8,7 @@ use crate::ssh_manager::ssh::SSHClient;
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 use std::time::Instant;
 
@@ -27,6 +27,7 @@ pub struct FileEntry {
     pub modified: u64,
     pub link_target: Option<String>,
     pub target_is_dir: Option<bool>,
+    pub permissions: Option<u32>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -84,12 +85,13 @@ impl SftpManager {
              let file_name = entry.file_name();
              if file_name == "." || file_name == ".." { continue; }
 
-             let metadata = entry.metadata();
-             let is_dir = metadata.is_dir();
-             let is_symlink = metadata.is_symlink();
-             let size = metadata.len();
-             let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+              let metadata = entry.metadata();
+              let is_dir = metadata.is_dir();
+              let is_symlink = metadata.is_symlink();
+              let size = metadata.len();
+              let permissions = metadata.permissions;
+              let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+                 .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
              
              // Normalize path
              let full_path = if path == "." || path == "/" {
@@ -111,16 +113,17 @@ impl SftpManager {
                  }
              }
 
-             files.push(FileEntry {
-                 name: file_name,
-                 path: full_path,
-                 is_dir,
-                 is_symlink,
-                 size,
-                 modified,
-                 link_target,
-                 target_is_dir,
-             });
+              files.push(FileEntry {
+                  name: file_name,
+                  path: full_path,
+                  is_dir,
+                  is_symlink,
+                  size,
+                  modified,
+                  link_target,
+                  target_is_dir,
+                  permissions,
+              });
         }
         
         // Sort: Directories first, then files
@@ -389,5 +392,66 @@ impl SftpManager {
         });
 
         Ok(task_id)
+    }
+
+    pub async fn create_directory(session_id: &str, path: &str) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+        sftp.create_dir(path).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn create_file(session_id: &str, path: &str) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+        let mut file = sftp.create(path).await.map_err(|e| e.to_string())?;
+        file.shutdown().await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn delete_item(session_id: &str, path: &str, is_dir: bool) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+
+        if !is_dir {
+            sftp.remove_file(path).await.map_err(|e| e.to_string())?;
+        } else {
+            Self::remove_dir_recursive(&sftp, path).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn remove_dir_recursive(sftp: &Arc<SftpSession>, path: &str) -> Result<(), String> {
+        let entries = sftp.read_dir(path).await.map_err(|e| e.to_string())?;
+
+        for entry in entries {
+            let file_name = entry.file_name();
+            if file_name == "." || file_name == ".." {
+                continue;
+            }
+
+            let entry_path = format!("{}/{}", path.trim_end_matches('/'), file_name);
+
+            let metadata = entry.metadata();
+            let is_dir = metadata.is_dir();
+
+            if is_dir {
+                Box::pin(Self::remove_dir_recursive(sftp, &entry_path)).await?;
+            } else {
+                sftp.remove_file(&entry_path).await.map_err(|e| e.to_string())?;
+            }
+        }
+
+        sftp.remove_dir(path).await.map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub async fn chmod(session_id: &str, path: &str, mode: u32) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+
+        let current = sftp.metadata(path).await.map_err(|e| e.to_string())?;
+        let mut attrs = current.clone();
+        attrs.permissions = Some(mode);
+
+        sftp.set_metadata(path, attrs).await.map_err(|e| e.to_string())?;
+        Ok(())
     }
 }

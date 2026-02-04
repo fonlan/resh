@@ -58,6 +58,7 @@ export const locales = {
       save: 'Save',
       cancel: 'Cancel',
       name: 'Name',
+      path: 'Path',
       host: 'Host',
       port: 'Port',
       type: 'Type',
@@ -65,6 +66,8 @@ export const locales = {
       proxy: 'Proxy',
       noProxy: 'No Proxy (Direct Connection)',
       remove: 'Remove',
+      create: 'Create',
+      apply: 'Apply',
       loading: 'Loading configuration...',
       connect: 'Connect',
       actions: 'Actions',
@@ -278,6 +281,42 @@ export const locales = {
         executeCommand: 'Execute Command'
       }
     },
+    sftp: {
+      title: 'SFTP',
+      transfers: 'Transfers',
+      noFiles: 'No files',
+      notConnected: 'Not connected',
+      loading: 'Loading...',
+      sort: {
+        name: 'Name',
+        dateModified: 'Date Modified',
+      },
+      contextMenu: {
+        download: 'Download',
+        upload: 'Upload',
+        newFile: 'New File',
+        newFolder: 'New Folder',
+        properties: 'Properties',
+        delete: 'Delete',
+      },
+      tooltips: {
+        sort: 'Sort',
+        refresh: 'Refresh',
+        lock: 'Lock Sidebar',
+        unlock: 'Unlock Sidebar',
+        close: 'Close',
+      },
+      modals: {
+        deleteConfirmTitle: 'Delete Confirmation',
+        deleteConfirmMessage: 'Are you sure you want to delete this item? This action cannot be undone.',
+        newFileTitle: 'New File',
+        newFolderTitle: 'New Folder',
+        propertiesTitle: 'Properties',
+        permissionsLabel: 'Permissions (Octal)',
+        permissionsPlaceholder: 'e.g., 755',
+        itemNameLabel: 'Name',
+      }
+    },
     about: {
       tabTitle: 'About',
       description: 'A modern, secure multi-tab SSH client built with Tauri 2 + React.',
@@ -348,6 +387,7 @@ export const locales = {
       save: '保存',
       cancel: '取消',
       name: '名称',
+      path: '路径',
       host: '主机',
       port: '端口',
       type: '类型',
@@ -355,6 +395,8 @@ export const locales = {
       proxy: '代理',
       noProxy: '无代理 (直连)',
       remove: '移除',
+      create: '创建',
+      apply: '应用',
       loading: '正在加载配置...',
       connect: '连接',
       actions: '操作',
@@ -568,7 +610,43 @@ export const locales = {
           executeCommand: '执行命令'
         }
       },
-      about: {
+    sftp: {
+      title: 'SFTP',
+      transfers: '传输任务',
+      noFiles: '暂无文件',
+      notConnected: '未连接',
+      loading: '加载中...',
+      sort: {
+        name: '名称',
+        dateModified: '修改日期',
+      },
+      contextMenu: {
+        download: '下载',
+        upload: '上传',
+        newFile: '新建文件',
+        newFolder: '新建文件夹',
+        properties: '属性',
+        delete: '删除',
+      },
+      tooltips: {
+        sort: '排序',
+        refresh: '刷新',
+        lock: '锁定侧边栏',
+        unlock: '解锁侧边栏',
+        close: '关闭',
+      },
+      modals: {
+        deleteConfirmTitle: '删除确认',
+        deleteConfirmMessage: '确定要删除此项吗？此操作无法撤销。',
+        newFileTitle: '新建文件',
+        newFolderTitle: '新建文件夹',
+        propertiesTitle: '属性',
+        permissionsLabel: '权限 (八进制)',
+        permissionsPlaceholder: '例如：755',
+        itemNameLabel: '名称',
+      }
+    },
+    about: {
         tabTitle: '关于',
         description: '一款基于 Tauri 2 + React 构建的现代、安全的多标签 SSH 客户端。',
         version: '版本',

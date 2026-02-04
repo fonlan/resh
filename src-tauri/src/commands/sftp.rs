@@ -35,3 +35,23 @@ pub async fn pick_files() -> Result<Option<Vec<String>>, String> {
         Ok(None)
     }
 }
+
+#[tauri::command]
+pub async fn sftp_delete(session_id: String, path: String, is_dir: bool) -> Result<(), String> {
+    SftpManager::delete_item(&session_id, &path, is_dir).await
+}
+
+#[tauri::command]
+pub async fn sftp_create_folder(session_id: String, path: String) -> Result<(), String> {
+    SftpManager::create_directory(&session_id, &path).await
+}
+
+#[tauri::command]
+pub async fn sftp_create_file(session_id: String, path: String) -> Result<(), String> {
+    SftpManager::create_file(&session_id, &path).await
+}
+
+#[tauri::command]
+pub async fn sftp_chmod(session_id: String, path: String, mode: u32) -> Result<(), String> {
+    SftpManager::chmod(&session_id, &path, mode).await
+}
