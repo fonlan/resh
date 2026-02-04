@@ -1074,7 +1074,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 />
               </div>
              </div>
-             <div className="flex gap-2 items-end bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-lg p-2 transition-colors duration-200 focus-within:border-[var(--accent-primary)]">
+             <div className="flex gap-2 items-end bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-[var(--radius-sm)] p-2 transition-colors duration-200 focus-within:border-[var(--accent-primary)]">
                <textarea
                  ref={textareaRef}
                  className="flex-1 bg-transparent border-0 text-[var(--text-primary)] font-inherit text-[13px] leading-7 resize-none outline-none max-h-[150px] min-h-7 p-0 block"
