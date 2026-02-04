@@ -704,14 +704,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                  <div className="text-xs text-gray-400 mb-2">
                     {t.ai.serverAdditionalPromptDesc}
                  </div>
-                 <textarea
-                   id="server-additional-prompt"
-                   value={formData.additionalPrompt || ''}
-onChange={(e) => handleChange('additionalPrompt', e.target.value)}
-                    className="w-full h-48 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                   placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
-                   style={{ resize: 'vertical' }}
-                 />
+                  <textarea
+                    id="server-additional-prompt"
+                    value={formData.additionalPrompt || ''}
+                    onChange={(e) => handleChange('additionalPrompt', e.target.value)}
+                    className="w-full h-48 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] placeholder:text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
+                    style={{ resize: 'vertical' }}
+                  />
                </div>
              </div>
           )}

@@ -6,6 +6,7 @@ import { ConfirmationModal } from '../ConfirmationModal';
 import { AuthForm, AuthFormHandle } from './AuthForm';
 import { generateId } from '../../utils/idGenerator';
 import { useTranslation } from '../../i18n';
+import { EmojiText } from '../EmojiText';
 
 interface AuthTabProps {
   authentications: Authentication[];
@@ -118,7 +119,9 @@ export const AuthTab: React.FC<AuthTabProps> = ({
               className="flex items-center justify-between p-3 px-4 bg-[var(--bg-primary)] border border-[1.5px] border-[var(--glass-border)] rounded-[var(--radius-md)] transition-all duration-[150ms] gap-3 hover:border-[var(--accent-primary)] hover:shadow-[var(--glow-primary)] hover:-translate-y-px"
             >
               <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-ellipsis">{auth.name}</p>
+                <p className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-ellipsis">
+                  <EmojiText text={auth.name} />
+                </p>
                 <p className="text-xs text-[var(--text-secondary)] m-0 whitespace-nowrap overflow-hidden text-ellipsis">
                   {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType}
                 </p>

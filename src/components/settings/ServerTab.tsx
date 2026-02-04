@@ -150,9 +150,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   </p>
                   {(auth || proxy || jumphost) && (
                     <div className="flex flex-wrap gap-1.5">
-                      {auth && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.auth}: {auth.name}</span>}
-                      {proxy && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.common.proxy}: {proxy.name}</span>}
-                      {jumphost && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)]">{t.serverTab.jumphost}: {jumphost.name}</span>}
+                      {auth && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.auth}: <EmojiText text={auth.name} /></span>}
+                      {proxy && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.common.proxy}: <EmojiText text={proxy.name} /></span>}
+                      {jumphost && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.serverTab.jumphost}: <EmojiText text={jumphost.name} /></span>}
                     </div>
                   )}
                 </div>

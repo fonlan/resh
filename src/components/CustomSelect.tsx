@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronDown } from 'lucide-react';
+import { EmojiText } from './EmojiText';
 
 export interface Option {
     value: string | number;
@@ -125,7 +126,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                         tabIndex={0}
                         title={option.label}
                     >
-                        {option.label}
+                        <EmojiText text={option.label} />
                     </div>
                 ))
             )}
@@ -155,7 +156,7 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
                 title={selectedOption ? selectedOption.label : placeholder}
             >
                 <span className={`whitespace-nowrap overflow-hidden text-ellipsis flex-1 min-w-0 mr-2 ${!selectedOption ? 'text-zinc-400' : ''}`}>
-                    {selectedOption ? selectedOption.label : placeholder}
+                    {selectedOption ? <EmojiText text={selectedOption.label} /> : placeholder}
                 </span>
                 <ChevronDown size={16} className="text-zinc-400 transition-transform duration-200" style={{ transform: isOpen ? 'rotate(180deg)' : 'none' }} />
             </div>
