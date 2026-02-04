@@ -814,7 +814,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                         <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                     </button>
                     {showEditSubmenu && (
-                        <div className="absolute top-[-4px] left-full ml-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
+                        <div className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
                             <button type="button" onClick={handleEditVim} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                                 <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
                             </button>
@@ -847,7 +847,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                     <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                 </button>
                         {showPathSubmenu && (
-                            <div className="absolute top-[-4px] left-full ml-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
+                            <div className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
                         <button type="button" onClick={handleCopyName} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                             <Copy size={14} /> {isDirectory(contextMenu.entry) ? t.sftp.contextMenu.copyFolderName : t.sftp.contextMenu.copyFileName}
                         </button>
