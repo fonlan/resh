@@ -10,6 +10,7 @@ interface SnippetsSidebarProps {
   onOpenSettings?: () => void;
   isLocked: boolean;
   onToggleLock: () => void;
+  zIndex?: number;
 }
 
 export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
@@ -19,6 +20,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   onOpenSettings,
   isLocked,
   onToggleLock,
+  zIndex,
 }) => {
   const { t } = useTranslation();
   const [width, setWidth] = useState(250);
@@ -150,12 +152,12 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   return (
     <div
       ref={sidebarRef}
-      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-l flex flex-col z-20 transition-all duration-200 shadow-[-2px_0_8px_rgba(0,0,0,0.2)] !right-0 !left-auto ${isOpen ? 'opacity-100 visible border-l-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none z-10 !right-auto !top-auto !bottom-auto h-full' : ''}`}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-l flex flex-col transition-all duration-200 shadow-[-2px_0_8px_rgba(0,0,0,0.2)] !right-0 !left-auto ${isOpen ? 'opacity-100 visible border-l-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none !right-auto !top-auto !bottom-auto h-full' : ''}`}
       aria-hidden={!isOpen}
-      style={{ width: isOpen ? `${width}px` : '0px' }}
+      style={{ width: isOpen ? `${width}px` : '0px', zIndex }}
     >
       <div
-        className="absolute top-0 bottom-0 left-0 w-[5px] cursor-col-resize z-25 bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
+        className="absolute top-0 bottom-0 left-0 w-[5px] cursor-col-resize bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
         onMouseDown={startResizing}
         role="separator"
         aria-orientation="vertical"
@@ -164,6 +166,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
         aria-valuemax={600}
         aria-label="Resize Sidebar"
         tabIndex={0}
+        style={{ zIndex: zIndex ? zIndex + 1 : undefined }}
       />
 
       <div className="flex items-center justify-between p-3 pl-4 border-b border-[var(--glass-border)] flex-shrink-0">

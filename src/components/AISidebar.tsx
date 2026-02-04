@@ -18,6 +18,7 @@ interface AISidebarProps {
   onToggleLock: () => void;
   currentServerId?: string;
   currentTabId?: string;
+  zIndex?: number;
 }
 
 const CodeBlock = ({ children, className }: { children: React.ReactNode, className?: string }) => {
@@ -336,7 +337,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   isLocked,
   onToggleLock,
   currentServerId,
-  currentTabId
+  currentTabId,
+  zIndex
 }) => {
   const { t } = useTranslation();
   const { config, saveConfig } = useConfig();
@@ -847,12 +849,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   return (
     <div
       ref={sidebarRef}
-      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-l flex flex-col z-20 transition-all duration-200 shadow-[-2px_0_8px_rgba(0,0,0,0.2)] !right-0 !left-auto ${isOpen ? 'opacity-100 visible border-l-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none z-10 !right-auto !top-auto !bottom-auto h-full' : ''}`}
-      style={{ width: isOpen ? `${width}px` : '0px' }}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-l flex flex-col transition-all duration-200 shadow-[-2px_0_8px_rgba(0,0,0,0.2)] !right-0 !left-auto ${isOpen ? 'opacity-100 visible border-l-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none !right-auto !top-auto !bottom-auto h-full' : ''}`}
+      style={{ width: isOpen ? `${width}px` : '0px', zIndex }}
       aria-hidden={!isOpen}
     >
       <div
-        className="absolute top-0 bottom-0 left-0 w-[5px] cursor-col-resize z-25 bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
+        className="absolute top-0 bottom-0 left-0 w-[5px] cursor-col-resize bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
         onMouseDown={startResizing}
         role="separator"
         aria-orientation="vertical"
@@ -861,6 +863,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         aria-valuemax={800}
         aria-label="Resize Sidebar"
         tabIndex={0}
+        style={{ zIndex: zIndex ? zIndex + 1 : undefined }}
       />
 
       <div className="flex items-center justify-between p-3 pl-4 border-b border-[var(--glass-border)] flex-shrink-0">

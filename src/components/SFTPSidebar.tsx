@@ -13,7 +13,8 @@ interface SFTPSidebarProps {
   onClose: () => void;
   isLocked: boolean;
   onToggleLock: () => void;
-  sessionId?: string; 
+  sessionId?: string;
+  zIndex?: number;
 }
 
 interface FileEntry {
@@ -121,7 +122,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   onClose,
   isLocked,
   onToggleLock,
-  sessionId
+  sessionId,
+  zIndex,
 }) => {
   const { t } = useTranslation();
   const { config } = useConfig();
@@ -711,14 +713,15 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     <>
     <div
       ref={sidebarRef}
-      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col z-20 transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? 'opacity-100 visible border-r-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none z-10 !left-auto !top-auto !bottom-auto h-full' : ''}`}
-      style={{ width: isOpen ? `${width}px` : '0px' }}
+      className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? 'opacity-100 visible border-r-[var(--glass-border)]' : 'opacity-0 invisible border-transparent'} ${isResizing ? 'transition-none' : ''} ${isLocked ? '!relative shadow-none !left-auto !top-auto !bottom-auto h-full' : ''}`}
+      style={{ width: isOpen ? `${width}px` : '0px', zIndex }}
       aria-hidden={!isOpen}
     >
       <div
-        className="absolute top-0 bottom-0 right-0 w-[5px] cursor-col-resize z-25 bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
+        className="absolute top-0 bottom-0 right-0 w-[5px] cursor-col-resize bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
         onMouseDown={startResizing}
         role="none"
+        style={{ zIndex: zIndex ? zIndex + 1 : undefined }}
       />
 
       <div className="flex items-center justify-between p-3 pr-4 border-b border-[var(--glass-border)] flex-shrink-0">

@@ -62,22 +62,7 @@ export const MainWindow: React.FC = () => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  // Sync locked sidebar state from config on initial load
-  React.useEffect(() => {
-    if (config?.general) {
-      if (config.general.aiSidebarLocked) {
-        setIsAIOpen(true);
-      }
-      if (config.general.snippetsSidebarLocked) {
-        setIsSnippetsOpen(true);
-      }
-      if (config.general.sftpSidebarLocked) {
-        setIsSFTPOpen(true);
-      }
-    }
-  }, [config?.general]);
 
-  // Trigger terminal resize when SFTP sidebar locked state changes
   useEffect(() => {
     if (config?.general.sftpSidebarLocked !== undefined) {
       setTimeout(() => {
@@ -330,6 +315,13 @@ export const MainWindow: React.FC = () => {
     return [...globalSnippets, ...serverSnippets];
   }, [config?.snippets, config?.servers, tabs, activeTabId]);
 
+  // Calculate z-index for sidebars based on lock state and open order
+  // Rule: unlocked sidebars always appear above locked ones
+  // If both unlocked, later-opened appears on top (rendering order determines this naturally)
+  const aiZIndex = config?.general.aiSidebarLocked ? 10 : 50;
+  const snippetsZIndex = config?.general.snippetsSidebarLocked ? 10 : 50;
+  const sftpZIndex = config?.general.sftpSidebarLocked ? 10 : 50;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden animate-[fadeIn_0.4s_ease-out]">
       <style>{`
@@ -393,7 +385,14 @@ export const MainWindow: React.FC = () => {
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isAIOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
-            onClick={() => setIsAIOpen(!isAIOpen)}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              if (config?.general.aiSidebarLocked) {
+                handleToggleAILock();
+              } else {
+                setIsAIOpen(prev => !prev);
+              }
+            }}
             aria-label={t.mainWindow.aiAssistant}
             title={t.mainWindow.aiAssistant}
           >
@@ -402,12 +401,13 @@ export const MainWindow: React.FC = () => {
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
-            onClick={() => {
-              setIsSFTPOpen(!isSFTPOpen);
-              // Force terminal resize after sidebar animation completes
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('resh-force-terminal-resize'));
-              }, 250);
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              if (config?.general.sftpSidebarLocked) {
+                handleToggleSFTPLock();
+              } else {
+                setIsSFTPOpen(prev => !prev);
+              }
             }}
             aria-label="SFTP"
             title="SFTP"
@@ -418,9 +418,10 @@ export const MainWindow: React.FC = () => {
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSnippetsOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
             onMouseDown={(e) => {
-              e.preventDefault();
               e.stopPropagation();
-              if (e.button === 0) {
+              if (config?.general.snippetsSidebarLocked) {
+                handleToggleSnippetsLock();
+              } else {
                 setIsSnippetsOpen(prev => !prev);
               }
             }}
@@ -452,6 +453,7 @@ export const MainWindow: React.FC = () => {
           isLocked={config?.general.sftpSidebarLocked || false}
           onToggleLock={handleToggleSFTPLock}
           sessionId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
+          zIndex={sftpZIndex}
         />
         <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {tabs.length === 0 ? (
@@ -505,14 +507,16 @@ export const MainWindow: React.FC = () => {
           onToggleLock={handleToggleAILock}
           currentServerId={tabs.find(t => t.id === activeTabId)?.serverId}
           currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
+          zIndex={aiZIndex}
         />
-        <SnippetsSidebar  
-          isOpen={isSnippetsOpen} 
-          onClose={() => setIsSnippetsOpen(false)} 
+        <SnippetsSidebar
+          isOpen={isSnippetsOpen}
+          onClose={() => setIsSnippetsOpen(false)}
           snippets={displayedSnippets}
           onOpenSettings={() => handleOpenSettings('snippets')}
           isLocked={config?.general.snippetsSidebarLocked || false}
           onToggleLock={handleToggleSnippetsLock}
+          zIndex={snippetsZIndex}
         />
       </div>
 
