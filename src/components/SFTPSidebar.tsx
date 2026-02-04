@@ -38,13 +38,13 @@ const FileTreeItem: React.FC<{
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
 }> = ({ entry, depth, onToggle, onContextMenu }) => {
   return (
-    <div style={{ paddingLeft: `${depth * 12}px` }}>
+    <div>
       <button
         type="button"
         className="flex items-center gap-2 p-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)]"
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
-        style={{ color: 'inherit' }}
+        style={{ color: 'inherit', paddingLeft: `${depth * 12 + 4}px` }}
       >
         <div className="w-4 flex-shrink-0 flex items-center justify-center">
            {(entry.is_dir || (entry.is_symlink && entry.target_is_dir)) && (
@@ -87,10 +87,10 @@ const FileTreeItem: React.FC<{
       {entry.isExpanded && entry.children && (
         <div className="sftp-tree-children">
           {entry.children.map((child) => (
-            <FileTreeItem 
-              key={child.path} 
-              entry={child} 
-              depth={depth + 1} 
+            <FileTreeItem
+              key={child.path}
+              entry={child}
+              depth={depth + 1}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
             />
