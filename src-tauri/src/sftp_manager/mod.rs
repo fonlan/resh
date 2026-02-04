@@ -1,4 +1,10 @@
-use russh_sftp::client::SftpSession;
+use russh_sftp::client::RawSftpSession;
+use russh_sftp::protocol::{OpenFlags, FileAttributes, StatusCode};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use std::io::SeekFrom;
+use tokio::io::AsyncSeekExt;
+use futures::FutureExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,11 +20,6 @@ use std::time::Instant;
 use crate::db::DatabaseManager;
 
 pub mod edit;
-
-lazy_static! {
-    static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<SftpSession>>> = Mutex::new(HashMap::new());
-    static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
-}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct FileEntry {
@@ -36,23 +37,34 @@ pub struct FileEntry {
 #[derive(Serialize, Clone, Debug)]
 pub struct TransferProgress {
     pub task_id: String,
-    pub type_: String, // "download" or "upload"
+    pub type_: String,
     pub session_id: String,
     pub file_name: String,
     pub source: String,
     pub destination: String,
     pub total_bytes: u64,
     pub transferred_bytes: u64,
-    pub speed: f64, // bytes per second
-    pub eta: Option<u64>, // estimated seconds remaining
-    pub status: String, // "pending", "transferring", "completed", "failed", "cancelled"
+    pub speed: f64,
+    pub eta: Option<u64>,
+    pub status: String,
     pub error: Option<String>,
 }
+
+lazy_static! {
+    static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> = Mutex::new(HashMap::new());
+    static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
+}
+
 
 pub struct SftpManager;
 
 impl SftpManager {
-    pub async fn get_session(session_id: &str) -> Result<Arc<SftpSession>, String> {
+    pub async fn metadata(session_id: &str, path: &str) -> Result<russh_sftp::protocol::Attrs, String> {
+        let sftp = Self::get_session(session_id).await?;
+        sftp.stat(path).await.map_err(|e| e.to_string())
+    }
+
+    pub async fn get_session(session_id: &str) -> Result<Arc<RawSftpSession>, String> {
         let mut sessions = SFTP_SESSIONS.lock().await;
         if let Some(s) = sessions.get(session_id) {
             return Ok(s.clone());
@@ -67,8 +79,8 @@ impl SftpManager {
         channel.request_subsystem(true, "sftp").await
             .map_err(|e| format!("Failed to request SFTP subsystem: {}", e))?;
 
-        let sftp = SftpSession::new(channel.into_stream()).await
-             .map_err(|e| format!("Failed to init SFTP session: {}", e))?;
+        let sftp = RawSftpSession::new(channel.into_stream());
+        sftp.init().await.map_err(|e| format!("Failed to init SFTP session: {}", e))?;
 
         let sftp = Arc::new(sftp);
         sessions.insert(session_id.to_string(), sftp.clone());
@@ -80,51 +92,64 @@ impl SftpManager {
         let sftp = Self::get_session(session_id).await?;
         let path = if path.is_empty() { "." } else { path };
         
-        let entries = sftp.read_dir(path).await.map_err(|e| e.to_string())?;
+        let handle = sftp.opendir(path).await.map_err(|e| e.to_string())?.handle;
 
         let mut files = Vec::new();
-        for entry in entries {
-             let file_name = entry.file_name();
-             if file_name == "." || file_name == ".." { continue; }
+        loop {
+            match sftp.readdir(&handle).await {
+                Ok(name) => {
+                    for entry in name.files {
+                        let file_name = entry.filename;
+                        if file_name == "." || file_name == ".." { continue; }
 
-              let metadata = entry.metadata();
-              let is_dir = metadata.is_dir();
-              let is_symlink = metadata.is_symlink();
-              let size = metadata.len();
-              let permissions = metadata.permissions;
-              let modified = metadata.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH)
-                 .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-             
-             let full_path = if path == "." || path == "/" {
-                 format!("/{}", file_name)
-             } else {
-                 format!("{}/{}", path.trim_end_matches('/'), file_name)
-             };
+                        let is_dir = entry.attrs.is_dir();
+                        let is_symlink = entry.attrs.is_symlink();
+                        let size = entry.attrs.size.unwrap_or(0);
+                        let permissions = entry.attrs.permissions;
+                        let modified = entry.attrs.mtime.unwrap_or(0) as u64;
+                        
+                        let full_path = if path == "." || path == "/" {
+                            format!("/{}", file_name)
+                        } else {
+                            format!("{}/{}", path.trim_end_matches('/'), file_name)
+                        };
 
-             let mut link_target = None;
-             let mut target_is_dir = None;
-             if is_symlink {
-                 if let Ok(target) = sftp.read_link(&full_path).await {
-                     link_target = Some(target.to_string());
-                 }
-                 if let Ok(metadata) = sftp.metadata(&full_path).await {
-                     target_is_dir = Some(metadata.is_dir());
-                 }
-             }
+                        let mut link_target = None;
+                        let mut target_is_dir = None;
+                        if is_symlink {
+                            if let Ok(target_name) = sftp.readlink(&full_path).await {
+                                if let Some(first) = target_name.files.first() {
+                                    link_target = Some(first.filename.clone());
+                                }
+                            }
+                            if let Ok(attrs) = sftp.stat(&full_path).await {
+                                target_is_dir = Some(attrs.attrs.is_dir());
+                            }
+                        }
 
-              files.push(FileEntry {
-                  name: file_name,
-                  path: full_path,
-                  is_dir,
-                  is_symlink,
-                  size,
-                  modified,
-                  link_target,
-                  target_is_dir,
-                  permissions,
-              });
+                        files.push(FileEntry {
+                            name: file_name,
+                            path: full_path,
+                            is_dir,
+                            is_symlink,
+                            size,
+                            modified,
+                            link_target,
+                            target_is_dir,
+                            permissions,
+                        });
+                    }
+                }
+                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
+                Err(e) => {
+                    let _ = sftp.close(handle).await;
+                    return Err(e.to_string());
+                }
+            }
         }
         
+        let _ = sftp.close(handle).await;
+
         files.sort_by(|a, b| {
             if a.is_dir == b.is_dir {
                 a.name.cmp(&b.name)
@@ -171,7 +196,7 @@ impl SftpManager {
 
         tokio::spawn(async move {
             let result = async {
-                let metadata = sftp.metadata(&remote_path_clone).await.map_err(|e| e.to_string())?;
+                let metadata = sftp.stat(&remote_path_clone).await.map_err(|e| e.to_string())?.attrs;
                 
                 let file_name = std::path::Path::new(&remote_path_clone)
                     .file_name()
@@ -182,12 +207,19 @@ impl SftpManager {
                 if metadata.is_dir() {
                     Self::download_dir_recursive(&app, &sftp, &remote_path_clone, &local_path_clone, &task_id_clone, &session_id_clone, &cancel_token).await
                 } else {
-                    let total_bytes = metadata.len();
-                    let mut remote_file = sftp.open(&remote_path_clone).await.map_err(|e| e.to_string())?;
-                    let mut local_file = tokio::fs::File::create(&local_path_clone).await.map_err(|e| e.to_string())?;
+                    let total_bytes = metadata.size.unwrap_or(0);
+                    let handle = sftp.open(&remote_path_clone, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                    let mut local_file = tokio::fs::OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .truncate(true)
+                        .open(&local_path_clone)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     
                     let mut transferred = 0u64;
-                    let mut buffer = [0u8; 32 * 1024];
+                    let chunk_size = 128 * 1024;
+                    let max_concurrent_requests = 16;
                     let start_time = Instant::now();
                     let mut last_emit = Instant::now();
 
@@ -206,16 +238,34 @@ impl SftpManager {
                         error: None,
                     });
 
-                    loop {
+                    let mut futures = FuturesUnordered::new();
+                    let mut next_offset = 0u64;
+
+                    for _ in 0..max_concurrent_requests {
+                        if next_offset >= total_bytes { break; }
+                        let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                        let offset = next_offset;
+                        let sftp_clone = sftp.clone();
+                        let handle_clone = handle.clone();
+                        
+                        futures.push(async move {
+                            let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
+                            (offset, data)
+                        }.boxed());
+                        next_offset += current_chunk_size;
+                    }
+
+                    while let Some((offset, result)) = futures.next().await {
                         if cancel_token.load(Ordering::SeqCst) {
                             return Err("Cancelled".to_string());
                         }
 
-                        let n = remote_file.read(&mut buffer).await.map_err(|e| e.to_string())?;
-                        if n == 0 { break; }
+                        let data = result.map_err(|e| e.to_string())?.data;
                         
-                        local_file.write_all(&buffer[..n]).await.map_err(|e| e.to_string())?;
-                        transferred += n as u64;
+                        local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
+                        local_file.write_all(&data).await.map_err(|e| e.to_string())?;
+                        
+                        transferred += data.len() as u64;
 
                         if last_emit.elapsed().as_millis() > 500 {
                             let duration = start_time.elapsed().as_secs_f64();
@@ -242,8 +292,22 @@ impl SftpManager {
                             });
                             last_emit = Instant::now();
                         }
+
+                        if next_offset < total_bytes {
+                            let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                            let offset = next_offset;
+                            let sftp_clone = sftp.clone();
+                            let handle_clone = handle.clone();
+                            
+                            futures.push(Box::pin(async move {
+                                let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
+                                (offset, data)
+                            }));
+                            next_offset += current_chunk_size;
+                        }
                     }
                     local_file.flush().await.map_err(|e| e.to_string())?;
+                    let _ = sftp.close(handle).await;
                     Ok(())
                 }
             }.await;
@@ -304,7 +368,7 @@ impl SftpManager {
 
     async fn download_dir_recursive(
         app: &AppHandle,
-        sftp: &Arc<SftpSession>,
+        sftp: &Arc<RawSftpSession>,
         remote_dir: &str,
         local_dir: &str,
         task_id: &str,
@@ -313,37 +377,59 @@ impl SftpManager {
     ) -> Result<(), String> {
         tokio::fs::create_dir_all(local_dir).await.map_err(|e| e.to_string())?;
         
-        let entries = sftp.read_dir(remote_dir).await.map_err(|e| e.to_string())?;
-        for entry in entries {
+        let dir_handle = sftp.opendir(remote_dir).await.map_err(|e| e.to_string())?.handle;
+        loop {
             if cancel_token.load(Ordering::SeqCst) {
+                let _ = sftp.close(dir_handle).await;
                 return Err("Cancelled".to_string());
             }
 
-            let file_name = entry.file_name();
-            if file_name == "." || file_name == ".." { continue; }
+            match sftp.readdir(&dir_handle).await {
+                Ok(name) => {
+                    for entry in name.files {
+                        let file_name = entry.filename;
+                        if file_name == "." || file_name == ".." { continue; }
 
-            let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
-            let local_path = std::path::Path::new(local_dir).join(&file_name).to_string_lossy().to_string();
-            let metadata = entry.metadata();
+                        let remote_path = format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
+                        let local_path = std::path::Path::new(local_dir).join(&file_name).to_string_lossy().to_string();
+                        let is_dir = entry.attrs.is_dir();
 
-            if metadata.is_dir() {
-                Box::pin(Self::download_dir_recursive(app, sftp, &remote_path, &local_path, task_id, session_id, cancel_token)).await?;
-            } else {
-                let mut remote_file = sftp.open(&remote_path).await.map_err(|e| e.to_string())?;
-                let mut local_file = tokio::fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
-                let mut buffer = [0u8; 32 * 1024];
-                
-                loop {
-                    if cancel_token.load(Ordering::SeqCst) {
-                        return Err("Cancelled".to_string());
+                        if is_dir {
+                            Box::pin(Self::download_dir_recursive(app, sftp, &remote_path, &local_path, task_id, session_id, cancel_token)).await?;
+                        } else {
+                            let handle = sftp.open(&remote_path, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                            let mut local_file = tokio::fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
+                            let mut offset = 0u64;
+                            
+                            loop {
+                                if cancel_token.load(Ordering::SeqCst) {
+                                    let _ = sftp.close(handle).await;
+                                    let _ = sftp.close(dir_handle).await;
+                                    return Err("Cancelled".to_string());
+                                }
+                                match sftp.read(&handle, offset, (128 * 1024) as u32).await {
+                                    Ok(data) => {
+                                        if data.data.is_empty() { break; }
+                                        local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
+                                        offset += data.data.len() as u64;
+                                    }
+                                    Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
+                                    Err(e) => return Err(e.to_string()),
+                                }
+                            }
+                            local_file.flush().await.map_err(|e| e.to_string())?;
+                            let _ = sftp.close(handle).await;
+                        }
                     }
-                    let n = remote_file.read(&mut buffer).await.map_err(|e| e.to_string())?;
-                    if n == 0 { break; }
-                    local_file.write_all(&buffer[..n]).await.map_err(|e| e.to_string())?;
                 }
-                local_file.flush().await.map_err(|e| e.to_string())?;
+                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
+                Err(e) => {
+                    let _ = sftp.close(dir_handle).await;
+                    return Err(e.to_string());
+                }
             }
         }
+        let _ = sftp.close(dir_handle).await;
         Ok(())
     }
 
@@ -385,10 +471,11 @@ impl SftpManager {
                 } else {
                     let total_bytes = local_metadata.len();
                     let mut local_file = tokio::fs::File::open(&local_path_clone).await.map_err(|e| e.to_string())?;
-                    let mut remote_file = sftp.create(&remote_path_clone).await.map_err(|e| e.to_string())?;
+                    let handle = sftp.open(&remote_path_clone, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                     
                     let mut transferred = 0u64;
-                    let mut buffer = [0u8; 32 * 1024];
+                    let chunk_size = 128 * 1024;
+                    let max_concurrent_requests = 16;
                     let start_time = Instant::now();
                     let mut last_emit = Instant::now();
 
@@ -407,16 +494,37 @@ impl SftpManager {
                         error: None,
                     });
 
-                    loop {
+                    let mut futures = FuturesUnordered::new();
+                    let mut next_offset = 0u64;
+
+                    for _ in 0..max_concurrent_requests {
+                        if next_offset >= total_bytes { break; }
+                        let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                        let offset = next_offset;
+                        
+                        let mut buffer = vec![0u8; current_chunk_size as usize];
+                        local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
+                        local_file.read_exact(&mut buffer).await.map_err(|e| e.to_string())?;
+                        
+                        let sftp_clone = sftp.clone();
+                        let handle_clone = handle.clone();
+                        
+                        futures.push(async move {
+                            let res = sftp_clone.write(handle_clone, offset, buffer).await;
+                            res
+                        }.boxed());
+                        next_offset += current_chunk_size;
+                    }
+
+                    while let Some(result) = futures.next().await {
                         if cancel_token.load(Ordering::SeqCst) {
                             return Err("Cancelled".to_string());
                         }
 
-                        let n = local_file.read(&mut buffer).await.map_err(|e| e.to_string())?;
-                        if n == 0 { break; }
+                        result.map_err(|e| e.to_string())?;
                         
-                        remote_file.write_all(&buffer[..n]).await.map_err(|e| e.to_string())?;
-                        transferred += n as u64;
+                        transferred += chunk_size; 
+                        if transferred > total_bytes { transferred = total_bytes; }
 
                         if last_emit.elapsed().as_millis() > 500 {
                             let duration = start_time.elapsed().as_secs_f64();
@@ -443,7 +551,26 @@ impl SftpManager {
                             });
                             last_emit = Instant::now();
                         }
+
+                        if next_offset < total_bytes {
+                            let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                            let offset = next_offset;
+                            
+                            let mut buffer = vec![0u8; current_chunk_size as usize];
+                            local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
+                            local_file.read_exact(&mut buffer).await.map_err(|e| e.to_string())?;
+
+                            let sftp_clone = sftp.clone();
+                            let handle_clone = handle.clone();
+                            
+                            futures.push(Box::pin(async move {
+                                let res = sftp_clone.write(handle_clone, offset, buffer).await;
+                                res
+                            }));
+                            next_offset += current_chunk_size;
+                        }
                     }
+                    let _ = sftp.close(handle).await;
                     Ok(())
                 }
             }.await;
@@ -503,14 +630,14 @@ impl SftpManager {
 
     async fn upload_dir_recursive(
         _app: &AppHandle,
-        sftp: &Arc<SftpSession>,
+        sftp: &Arc<RawSftpSession>,
         local_dir: &str,
         remote_dir: &str,
         _task_id: &str,
         _session_id: &str,
         cancel_token: &Arc<AtomicBool>,
     ) -> Result<(), String> {
-        sftp.create_dir(remote_dir).await.ok();
+        sftp.mkdir(remote_dir, FileAttributes::default()).await.ok();
         
         let mut entries = tokio::fs::read_dir(local_dir).await.map_err(|e| e.to_string())?;
         while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
@@ -527,17 +654,21 @@ impl SftpManager {
                 Box::pin(Self::upload_dir_recursive(_app, sftp, &local_path, &remote_path, _task_id, _session_id, cancel_token)).await?;
             } else {
                 let mut local_file = tokio::fs::File::open(&local_path).await.map_err(|e| e.to_string())?;
-                let mut remote_file = sftp.create(&remote_path).await.map_err(|e| e.to_string())?;
-                let mut buffer = [0u8; 32 * 1024];
+                let handle = sftp.open(&remote_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                let mut buffer = [0u8; 128 * 1024];
+                let mut offset = 0u64;
                 
                 loop {
                     if cancel_token.load(Ordering::SeqCst) {
+                        let _ = sftp.close(handle).await;
                         return Err("Cancelled".to_string());
                     }
                     let n = local_file.read(&mut buffer).await.map_err(|e| e.to_string())?;
                     if n == 0 { break; }
-                    remote_file.write_all(&buffer[..n]).await.map_err(|e| e.to_string())?;
+                    sftp.write(&handle, offset, buffer[..n].to_vec()).await.map_err(|e| e.to_string())?;
+                    offset += n as u64;
                 }
+                let _ = sftp.close(handle).await;
             }
         }
         Ok(())
@@ -545,14 +676,14 @@ impl SftpManager {
 
     pub async fn create_directory(session_id: &str, path: &str) -> Result<(), String> {
         let sftp = Self::get_session(session_id).await?;
-        sftp.create_dir(path).await.map_err(|e| e.to_string())?;
+        sftp.mkdir(path, FileAttributes::default()).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub async fn create_file(session_id: &str, path: &str) -> Result<(), String> {
         let sftp = Self::get_session(session_id).await?;
-        let mut file = sftp.create(path).await.map_err(|e| e.to_string())?;
-        file.shutdown().await.map_err(|e| e.to_string())?;
+        let handle = sftp.open(path, OpenFlags::CREATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+        let _ = sftp.close(handle).await;
         Ok(())
     }
 
@@ -560,7 +691,7 @@ impl SftpManager {
         let sftp = Self::get_session(session_id).await?;
 
         if !is_dir {
-            sftp.remove_file(path).await.map_err(|e| e.to_string())?;
+            sftp.remove(path).await.map_err(|e| e.to_string())?;
         } else {
             Self::remove_dir_recursive(&sftp, path).await?;
         }
@@ -568,39 +699,48 @@ impl SftpManager {
         Ok(())
     }
 
-    async fn remove_dir_recursive(sftp: &Arc<SftpSession>, path: &str) -> Result<(), String> {
-        let entries = sftp.read_dir(path).await.map_err(|e| e.to_string())?;
+    async fn remove_dir_recursive(sftp: &Arc<RawSftpSession>, path: &str) -> Result<(), String> {
+        let handle = sftp.opendir(path).await.map_err(|e| e.to_string())?.handle;
 
-        for entry in entries {
-            let file_name = entry.file_name();
-            if file_name == "." || file_name == ".." {
-                continue;
-            }
+        loop {
+            match sftp.readdir(&handle).await {
+                Ok(name) => {
+                    for entry in name.files {
+                        let file_name = entry.filename;
+                        if file_name == "." || file_name == ".." {
+                            continue;
+                        }
 
-            let entry_path = format!("{}/{}", path.trim_end_matches('/'), file_name);
+                        let entry_path = format!("{}/{}", path.trim_end_matches('/'), file_name);
+                        let is_dir = entry.attrs.is_dir();
 
-            let metadata = entry.metadata();
-            let is_dir = metadata.is_dir();
-
-            if is_dir {
-                Box::pin(Self::remove_dir_recursive(sftp, &entry_path)).await?;
-            } else {
-                sftp.remove_file(&entry_path).await.map_err(|e| e.to_string())?;
+                        if is_dir {
+                            Box::pin(Self::remove_dir_recursive(sftp, &entry_path)).await?;
+                        } else {
+                            sftp.remove(&entry_path).await.map_err(|e| e.to_string())?;
+                        }
+                    }
+                }
+                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
+                Err(e) => {
+                    let _ = sftp.close(handle).await;
+                    return Err(e.to_string());
+                }
             }
         }
 
-        sftp.remove_dir(path).await.map_err(|e| e.to_string())?;
+        let _ = sftp.close(handle).await;
+        sftp.rmdir(path).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 
     pub async fn chmod(session_id: &str, path: &str, mode: u32) -> Result<(), String> {
         let sftp = Self::get_session(session_id).await?;
 
-        let current = sftp.metadata(path).await.map_err(|e| e.to_string())?;
-        let mut attrs = current.clone();
+        let mut attrs = sftp.stat(path).await.map_err(|e| e.to_string())?.attrs;
         attrs.permissions = Some(mode);
 
-        sftp.set_metadata(path, attrs).await.map_err(|e| e.to_string())?;
+        sftp.setstat(path, attrs).await.map_err(|e| e.to_string())?;
         Ok(())
     }
 

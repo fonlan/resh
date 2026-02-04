@@ -510,79 +510,74 @@ async fn execute_tools_and_save(
                         if remote_path.is_empty() {
                             "Error: Missing 'remote_path' argument".to_string()
                         } else {
-                            match crate::sftp_manager::SftpManager::get_session(ssh_id).await {
-                                Ok(sftp) => {
-                                    let metadata_res = tokio::time::timeout(
-                                        std::time::Duration::from_secs(5),
-                                        sftp.metadata(&remote_path)
-                                    ).await;
+                            let metadata_res = tokio::time::timeout(
+                                std::time::Duration::from_secs(5),
+                                crate::sftp_manager::SftpManager::metadata(ssh_id, &remote_path)
+                            ).await;
 
-                                    match metadata_res {
-                                        Ok(Ok(_)) => {
-                                            let final_local_path = if let Some(lp) = local_path {
-                                                lp
-                                            } else {
-                                                let config = state.config.lock().await;
-                                                let default_path = config.general.sftp.default_download_path.clone();
-                                                if default_path.is_empty() {
-                                                    app_handle.path().download_dir()
-                                                        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
-                                                        .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
-                                                        .to_string_lossy()
-                                                        .to_string()
-                                                } else {
-                                                    std::path::Path::new(&default_path)
-                                                        .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
-                                                        .to_string_lossy()
-                                                        .to_string()
-                                                }
-                                            };
-
-                                            let local_p = std::path::Path::new(&final_local_path);
-                                            let mut parent_ok = true;
-                                            let mut prep_error = String::new();
-                                            if let Some(parent) = local_p.parent() {
-                                                if !parent.exists() {
-                                                    if let Err(e) = std::fs::create_dir_all(parent) {
-                                                        parent_ok = false;
-                                                        prep_error = format!("Error creating local directory: {}", e);
-                                                    }
-                                                }
-                                            }
-
-                                            if parent_ok {
-                                                match crate::sftp_manager::SftpManager::download_file(
-                                                    app_handle.clone(),
-                                                    state.db_manager.clone(),
-                                                    ssh_id.to_string(),
-                                                    remote_path,
-                                                    final_local_path.clone(),
-                                                    Some(session_id.to_string()),
-                                                ).await {
-                                                    Ok(task_id) => format!("Download started in background. Task ID: {}. Local path: {}. I will notify you once it's finished.", task_id, final_local_path),
-                                                    Err(e) => format!("Error starting download: {}", e),
-                                                }
-                                            } else {
-                                                prep_error
-                                            }
+                            match metadata_res {
+                                Ok(Ok(_)) => {
+                                    let final_local_path = if let Some(lp) = local_path {
+                                        lp
+                                    } else {
+                                        let config = state.config.lock().await;
+                                        let default_path = config.general.sftp.default_download_path.clone();
+                                        if default_path.is_empty() {
+                                            app_handle.path().download_dir()
+                                                .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default())
+                                                .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
+                                                .to_string_lossy()
+                                                .to_string()
+                                        } else {
+                                            std::path::Path::new(&default_path)
+                                                .join(std::path::Path::new(&remote_path).file_name().unwrap_or_default())
+                                                .to_string_lossy()
+                                                .to_string()
                                         }
-                                        Ok(Err(_)) => format!("Error: Remote path '{}' does not exist or is inaccessible. Please confirm the path with the user.", remote_path),
-                                        Err(_) => {
-                                            match crate::sftp_manager::SftpManager::download_file(
-                                                app_handle.clone(),
-                                                state.db_manager.clone(),
-                                                ssh_id.to_string(),
-                                                remote_path,
-                                                "queued_download".to_string(),
-                                                Some(session_id.to_string()),
-                                            ).await {
-                                                Ok(task_id) => format!("SFTP session is busy. Download task {} has been queued and will start as soon as possible.", task_id),
-                                                Err(e) => format!("Error queuing download: {}", e),
+                                    };
+
+                                    let local_p = std::path::Path::new(&final_local_path);
+                                    let mut parent_ok = true;
+                                    let mut prep_error = String::new();
+                                    if let Some(parent) = local_p.parent() {
+                                        if !parent.exists() {
+                                            if let Err(e) = std::fs::create_dir_all(parent) {
+                                                parent_ok = false;
+                                                prep_error = format!("Error creating local directory: {}", e);
                                             }
                                         }
                                     }
+
+                                    if parent_ok {
+                                        match crate::sftp_manager::SftpManager::download_file(
+                                            app_handle.clone(),
+                                            state.db_manager.clone(),
+                                            ssh_id.to_string(),
+                                            remote_path,
+                                            final_local_path.clone(),
+                                            Some(session_id.to_string()),
+                                        ).await {
+                                            Ok(task_id) => format!("Download started in background. Task ID: {}. Local path: {}. I will notify you once it's finished.", task_id, final_local_path),
+                                            Err(e) => format!("Error starting download: {}", e),
+                                        }
+                                    } else {
+                                        prep_error
+                                    }
                                 }
-                                Err(e) => format!("Error connecting to SFTP: {}", e),
+                                Ok(Err(_)) => format!("Error: Remote path '{}' does not exist or is inaccessible. Please confirm the path with the user.", remote_path),
+                                Err(_) => {
+                                    match crate::sftp_manager::SftpManager::download_file(
+                                        app_handle.clone(),
+                                        state.db_manager.clone(),
+                                        ssh_id.to_string(),
+                                        remote_path,
+                                        "queued_download".to_string(),
+                                        Some(session_id.to_string()),
+                                    ).await {
+                                        Ok(task_id) => format!("SFTP session is busy. Download task {} has been queued and will start as soon as possible.", task_id),
+                                        Err(e) => format!("Error queuing download: {}", e),
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -605,47 +600,42 @@ async fn execute_tools_and_save(
                             if !local_p.exists() {
                                 format!("Error: Local source path '{}' does not exist.", local_path)
                             } else {
-                                match crate::sftp_manager::SftpManager::get_session(ssh_id).await {
-                                    Ok(sftp) => {
-                                        let remote_p = std::path::Path::new(&remote_path);
-                                        let remote_parent = remote_p.parent().and_then(|p| p.to_str()).unwrap_or("/");
+                                let remote_p = std::path::Path::new(&remote_path);
+                                let remote_parent = remote_p.parent().and_then(|p| p.to_str()).unwrap_or("/");
 
-                                        let metadata_res = tokio::time::timeout(
-                                            std::time::Duration::from_secs(5),
-                                            sftp.metadata(remote_parent)
-                                        ).await;
+                                let metadata_res = tokio::time::timeout(
+                                    std::time::Duration::from_secs(5),
+                                    crate::sftp_manager::SftpManager::metadata(ssh_id, remote_parent)
+                                ).await;
 
-                                        match metadata_res {
-                                            Ok(Ok(_)) => {
-                                                match crate::sftp_manager::SftpManager::upload_file(
-                                                    app_handle.clone(),
-                                                    state.db_manager.clone(),
-                                                    ssh_id.to_string(),
-                                                    local_path,
-                                                    remote_path.clone(),
-                                                    Some(session_id.to_string()),
-                                                ).await {
-                                                    Ok(task_id) => format!("Upload started in background. Task ID: {}. Target: {}. I will notify you once it's finished.", task_id, remote_path),
-                                                    Err(e) => format!("Error starting upload: {}", e),
-                                                }
-                                            }
-                                            Ok(Err(_)) => format!("Error: Remote target directory '{}' does not exist. Please confirm with the user whether to create it.", remote_parent),
-                                            Err(_) => {
-                                                match crate::sftp_manager::SftpManager::upload_file(
-                                                    app_handle.clone(),
-                                                    state.db_manager.clone(),
-                                                    ssh_id.to_string(),
-                                                    local_path,
-                                                    remote_path.clone(),
-                                                    Some(session_id.to_string()),
-                                                ).await {
-                                                    Ok(task_id) => format!("SFTP session is busy. Upload task {} has been queued and will start as soon as possible.", task_id),
-                                                    Err(e) => format!("Error queuing upload: {}", e),
-                                                }
-                                            }
+                                match metadata_res {
+                                    Ok(Ok(_)) => {
+                                        match crate::sftp_manager::SftpManager::upload_file(
+                                            app_handle.clone(),
+                                            state.db_manager.clone(),
+                                            ssh_id.to_string(),
+                                            local_path,
+                                            remote_path.clone(),
+                                            Some(session_id.to_string()),
+                                        ).await {
+                                            Ok(task_id) => format!("Upload started in background. Task ID: {}. Target: {}. I will notify you once it's finished.", task_id, remote_path),
+                                            Err(e) => format!("Error starting upload: {}", e),
                                         }
                                     }
-                                    Err(e) => format!("Error connecting to SFTP: {}", e),
+                                    Ok(Err(_)) => format!("Error: Remote target directory '{}' does not exist. Please confirm with the user whether to create it.", remote_parent),
+                                    Err(_) => {
+                                        match crate::sftp_manager::SftpManager::upload_file(
+                                            app_handle.clone(),
+                                            state.db_manager.clone(),
+                                            ssh_id.to_string(),
+                                            local_path,
+                                            remote_path.clone(),
+                                            Some(session_id.to_string()),
+                                        ).await {
+                                            Ok(task_id) => format!("SFTP session is busy. Upload task {} has been queued and will start as soon as possible.", task_id),
+                                            Err(e) => format!("Error queuing upload: {}", e),
+                                        }
+                                    }
                                 }
                             }
                         }

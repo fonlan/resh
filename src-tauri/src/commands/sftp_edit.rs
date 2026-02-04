@@ -28,14 +28,11 @@ pub async fn sftp_edit_file(
     let task_id = Uuid::new_v4().to_string();
 
     // 3. Download file
-    let sftp = SftpManager::get_session(&session_id).await?;
-    
-    // Check if file exists and is a file
-    let metadata = sftp.metadata(&remote_path).await.map_err(|e| e.to_string())?;
-    if metadata.is_dir() {
+    let metadata = SftpManager::metadata(&session_id, &remote_path).await?;
+    if metadata.attrs.is_dir() {
         return Err("Not a file (is a directory)".to_string());
     }
-    let total_bytes = metadata.len();
+    let total_bytes = metadata.attrs.size.unwrap_or(0);
 
     // Emit Initial Progress
     let _ = app.emit("transfer-progress", TransferProgress {
@@ -54,12 +51,19 @@ pub async fn sftp_edit_file(
     });
 
     let result = async {
-        let mut remote_file = sftp.open(&remote_path).await.map_err(|e| e.to_string())?;
+        let sftp = SftpManager::get_session(&session_id).await?;
+        let handle = sftp.open(&remote_path, russh_sftp::protocol::OpenFlags::READ, russh_sftp::protocol::FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
         let mut local_file = fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
         
-        // Copy content
-        tokio::io::copy(&mut remote_file, &mut local_file).await.map_err(|e| e.to_string())?;
+        let mut offset = 0u64;
+        loop {
+            let data = sftp.read(&handle, offset, 255 * 1024).await.map_err(|e| e.to_string())?;
+            if data.data.is_empty() { break; }
+            local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
+            offset += data.data.len() as u64;
+        }
         local_file.flush().await.map_err(|e| e.to_string())?;
+        let _ = sftp.close(handle).await;
         Ok(())
     }.await;
 

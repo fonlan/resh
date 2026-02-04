@@ -6,7 +6,6 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use crate::sftp_manager::{SftpManager, TransferProgress};
-use tokio::io::AsyncWriteExt;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
@@ -95,8 +94,9 @@ impl SftpEditManager {
                                         let total_bytes = content.len() as u64;
                                         
                                         let sftp = SftpManager::get_session(&session_id).await?;
-                                        let mut remote_file = sftp.create(&remote_path).await.map_err(|e| e.to_string())?;
-                                        remote_file.write_all(&content).await.map_err(|e| e.to_string())?;
+                                        let handle = sftp.open(&remote_path, russh_sftp::protocol::OpenFlags::CREATE | russh_sftp::protocol::OpenFlags::TRUNCATE | russh_sftp::protocol::OpenFlags::WRITE, russh_sftp::protocol::FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                                        sftp.write(&handle, 0, content).await.map_err(|e| e.to_string())?;
+                                        let _ = sftp.close(handle).await;
                                         
                                         Ok(total_bytes)
                                     }.await;
