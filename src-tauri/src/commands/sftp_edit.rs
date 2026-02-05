@@ -6,6 +6,7 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use std::path::Path;
 use uuid::Uuid;
+use russh_sftp::protocol::StatusCode;
 
 #[tauri::command]
 pub async fn sftp_edit_file(
@@ -57,10 +58,20 @@ pub async fn sftp_edit_file(
         
         let mut offset = 0u64;
         loop {
-            let data = sftp.read(&handle, offset, 255 * 1024).await.map_err(|e| e.to_string())?;
-            if data.data.is_empty() { break; }
-            local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
-            offset += data.data.len() as u64;
+            match sftp.read(&handle, offset, 255 * 1024).await {
+                Ok(data) => {
+                    if data.data.is_empty() { break; }
+                    local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
+                    offset += data.data.len() as u64;
+                }
+                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => {
+                    break;
+                }
+                Err(e) => {
+                    let _ = sftp.close(handle).await;
+                    return Err(e.to_string());
+                }
+            }
         }
         local_file.flush().await.map_err(|e| e.to_string())?;
         let _ = sftp.close(handle).await;
@@ -101,25 +112,22 @@ pub async fn open_local_editor(
     path: String,
     editor: Option<String>,
 ) -> Result<(), String> {
+    tracing::info!("Opening local editor for path: {}", path);
+    
     if let Some(editor_cmd) = editor {
         if !editor_cmd.is_empty() {
-             // Open with specific editor
-             // We allow arguments in the editor string?
-             // Simple implementation: split by space (naive)
-             // Better: Use shlex or just assume first part is cmd, rest args?
-             // Requirement says: "C:\Windows\system32\notepad.exe"
-             // Usually just the path.
+             tracing::info!("Using custom editor command: {}", editor_cmd);
              
-             std::process::Command::new(editor_cmd)
-                .arg(path)
+             std::process::Command::new(&editor_cmd)
+                .arg(&path)
                 .spawn()
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("Failed to launch editor: {}", e))?;
              return Ok(());
         }
     }
     
-    // Default open
-    open::that(path).map_err(|e| e.to_string())?;
+    tracing::info!("Using system default editor");
+    open::that(&path).map_err(|e| format!("Failed to open file with default application: {}", e))?;
     
     Ok(())
 }
