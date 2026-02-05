@@ -1064,7 +1064,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       {contextMenu && (
         <div
             className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
-            style={{ top: contextMenu.y, left: contextMenu.x }}
+            style={{ 
+              top: contextMenu.y > window.innerHeight - 350 ? 'auto' : contextMenu.y, 
+              bottom: contextMenu.y > window.innerHeight - 350 ? window.innerHeight - contextMenu.y : 'auto',
+              left: contextMenu.x 
+            }}
         >
             <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Download size={14} /> {t.sftp.contextMenu.download}
