@@ -11,7 +11,7 @@ import { ConfirmationModal } from './ConfirmationModal';
 import { FormModal } from './FormModal';
 import FileConflictDialog from './FileConflictDialog';
 import { useTransferStore } from '../stores/transferStore';
-import type { ConflictResolution, FileConflict, TransferTask } from '../types/sftp';
+import type { ConflictResolution, FileConflict, TransferTask, SftpCustomCommand } from '../types';
 
 interface SFTPSidebarProps {
   isOpen: boolean;
@@ -189,8 +189,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const [showPathSubmenu, setShowPathSubmenu] = useState(false);
   const [showEditSubmenu, setShowEditSubmenu] = useState(false);
+  const [showCustomCommandsSubmenu, setShowCustomCommandsSubmenu] = useState(false);
   const [editSubmenuTimeout, setEditSubmenuTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [pathSubmenuTimeout, setPathSubmenuTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [customCommandsSubmenuTimeout, setCustomCommandsSubmenuTimeout] = useState<ReturnType<typeof setTimeout> | null>(null);
 
   // Trigger terminal resize when locked state changes
   useEffect(() => {
@@ -529,6 +531,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     setContextMenu(null);
     setShowPathSubmenu(false);
     setShowEditSubmenu(false);
+    setShowCustomCommandsSubmenu(false);
   }, []);
 
   const handleEditVim = () => {
@@ -542,6 +545,28 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const matchPattern = (filename: string, pattern: string) => {
       const regex = new RegExp('^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$');
       return regex.test(filename);
+  };
+
+  const matchCustomCommand = (entry: FileEntry, cmd: SftpCustomCommand) => {
+      if (cmd.pattern === '*/') return entry.is_dir;
+      if (cmd.pattern.endsWith('/')) {
+           return entry.is_dir && matchPattern(entry.name, cmd.pattern.slice(0, -1)); 
+      }
+      return matchPattern(entry.name, cmd.pattern);
+  };
+
+  const handleExecuteCustomCommand = (cmd: SftpCustomCommand) => {
+      if (!contextMenu || !contextMenu.entry) return;
+      const entry = contextMenu.entry;
+      let command = cmd.command;
+      
+      command = command.replace(/{fpath}/g, entry.path);
+      
+      const parentPath = getParentPath(entry.path);
+      command = command.replace(/{dpath}/g, parentPath);
+
+      window.dispatchEvent(new CustomEvent('paste-snippet', { detail: command + '\r' }));
+      handleCloseContextMenu();
   };
 
   const handleEditLocal = async () => {
@@ -1218,6 +1243,51 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                         <Settings size={14} /> {t.sftp.contextMenu.properties}
                     </button>
                 </>
+            )}
+            
+            {contextMenu.entry && config?.sftpCustomCommands && config.sftpCustomCommands.some(cmd => matchCustomCommand(contextMenu.entry!, cmd)) && (
+                 <div className="relative border-t border-[var(--glass-border)] mt-1 pt-1">
+                    <div
+                        role="menuitem"
+                        onMouseEnter={() => {
+                            if (customCommandsSubmenuTimeout) {
+                                clearTimeout(customCommandsSubmenuTimeout);
+                                setCustomCommandsSubmenuTimeout(null);
+                            }
+                            setShowCustomCommandsSubmenu(true);
+                        }}
+                        onMouseLeave={() => {
+                            const timeout = setTimeout(() => {
+                                setShowCustomCommandsSubmenu(false);
+                            }, 200);
+                            setCustomCommandsSubmenuTimeout(timeout);
+                        }}
+                    >
+                        <button type="button" onClick={() => setShowCustomCommandsSubmenu(!showCustomCommandsSubmenu)} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                            <Terminal size={14} /> {t.sftp.contextMenu.commands}
+                            <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
+                        </button>
+                        {showCustomCommandsSubmenu && (
+                            <div
+                                className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
+                            >
+                                {config.sftpCustomCommands
+                                    .filter(cmd => matchCustomCommand(contextMenu.entry!, cmd))
+                                    .sort((a, b) => a.name.localeCompare(b.name))
+                                    .map(cmd => (
+                                    <button 
+                                        key={cmd.id}
+                                        type="button" 
+                                        onClick={() => handleExecuteCustomCommand(cmd)} 
+                                        className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
+                                    >
+                                        <Terminal size={14} /> {cmd.name}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
             )}
         </div>
       )}

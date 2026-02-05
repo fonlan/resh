@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { FolderOpen, Plus, Trash2, Check, X, GripVertical } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { Config, EditorRule } from '../../types';
+import { Config, EditorRule, SftpCustomCommand } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../../i18n';
+import { Cloud, CloudOff } from 'lucide-react';
 
 interface SFTPTabProps {
   config: Config;
@@ -15,7 +16,11 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   const [editingRule, setEditingRule] = useState<Partial<EditorRule>>({});
   const [isAdding, setIsAdding] = useState(false);
 
+  const [editingCommand, setEditingCommand] = useState<Partial<SftpCustomCommand>>({});
+  const [isAddingCommand, setIsAddingCommand] = useState(false);
+
   const editors = config.general.sftp.editors;
+  const customCommands = config.sftpCustomCommands || [];
 
   const handleReorderEditors = useCallback((newEditors: EditorRule[]) => {
     onChange({
@@ -99,6 +104,49 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
     } catch (error) {
       console.error('Failed to pick file', error);
     }
+  };
+
+  const handleAddCommand = () => {
+    if (!editingCommand.name || !editingCommand.pattern || !editingCommand.command) return;
+
+    const newCommand: SftpCustomCommand = {
+      id: uuidv4(),
+      name: editingCommand.name,
+      pattern: editingCommand.pattern,
+      command: editingCommand.command,
+      synced: editingCommand.synced ?? true,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const newCommands = [...customCommands, newCommand].sort((a, b) => a.name.localeCompare(b.name));
+
+    onChange({
+      ...config,
+      sftpCustomCommands: newCommands,
+    });
+    setEditingCommand({});
+    setIsAddingCommand(false);
+  };
+
+  const handleDeleteCommand = (id: string) => {
+    onChange({
+      ...config,
+      sftpCustomCommands: customCommands.filter((c) => c.id !== id),
+    });
+  };
+
+  const handleUpdateCommand = (id: string, updates: Partial<SftpCustomCommand>) => {
+    const newCommands = customCommands.map(c => {
+        if (c.id === id) {
+            return { ...c, ...updates, updatedAt: new Date().toISOString() };
+        }
+        return c;
+    }).sort((a, b) => a.name.localeCompare(b.name));
+
+    onChange({
+        ...config,
+        sftpCustomCommands: newCommands
+    });
   };
 
   return (
@@ -317,6 +365,153 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
             {t.sftp.settings.priorityHint}
           </p>
         )}
+      </div>
+
+      <div className="form-group">
+        <div className="flex justify-between items-center mb-3">
+            <h3 className="section-title">
+                {t.sftp.settings.customCommands}
+            </h3>
+            <button
+                type="button"
+                onClick={() => setIsAddingCommand(true)}
+                className="btn btn-secondary btn-sm px-2.5 py-1 h-auto"
+            >
+                <Plus size={14} className="mr-1" />
+                {t.sftp.settings.addCommand}
+            </button>
+        </div>
+
+        <div className="border border-[var(--glass-border)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--bg-primary)]">
+          <table className="w-full border-collapse text-[13px] text-[var(--text-primary)]">
+            <thead>
+              <tr>
+                <th className="w-10 bg-[var(--bg-tertiary)] px-2 py-2.5 text-center font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                    {t.sftp.settings.commandSync}
+                </th>
+                <th className="bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                    {t.sftp.settings.commandName}
+                </th>
+                <th className="bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                    {t.sftp.settings.commandPattern}
+                </th>
+                <th className="bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                    {t.sftp.settings.commandExec}
+                </th>
+                <th className="w-[15%] text-right bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                  {t.common.actions}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {isAddingCommand && (
+                <tr className="bg-[var(--bg-tertiary)]">
+                  <td className="px-2 py-3 border-b border-[var(--glass-border)] text-center">
+                    <input
+                        type="checkbox"
+                        checked={editingCommand.synced ?? true}
+                        onChange={(e) => setEditingCommand(prev => ({ ...prev, synced: e.target.checked }))}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="text"
+                      value={editingCommand.name || ''}
+                      onChange={(e) => setEditingCommand(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder={t.sftp.settings.commandPlaceholderName}
+                      className="form-input px-2.5 py-1.5 w-full"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="text"
+                      value={editingCommand.pattern || ''}
+                      onChange={(e) => setEditingCommand(prev => ({ ...prev, pattern: e.target.value }))}
+                      placeholder={t.sftp.settings.commandPlaceholderPattern}
+                      className="form-input px-2.5 py-1.5 w-full"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <input
+                      type="text"
+                      value={editingCommand.command || ''}
+                      onChange={(e) => setEditingCommand(prev => ({ ...prev, command: e.target.value }))}
+                      placeholder={t.sftp.settings.commandPlaceholderExec}
+                      className="form-input px-2.5 py-1.5 w-full"
+                    />
+                  </td>
+                  <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={handleAddCommand}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(0,210,106,0.1)] hover:text-[var(--color-success)]"
+                      >
+                        <Check size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAddingCommand(false);
+                          setEditingCommand({});
+                        }}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              {customCommands.map((cmd) => (
+                <tr
+                  key={cmd.id}
+                  className="hover:bg-white/[0.02]"
+                >
+                  <td className="px-2 py-2 border-b border-[var(--glass-border)] last:border-b-0 text-center">
+                    <button
+                        type="button"
+                        onClick={() => handleUpdateCommand(cmd.id, { synced: !cmd.synced })}
+                        className={`border-0 bg-transparent cursor-pointer ${cmd.synced ? 'text-[var(--accent-primary)]' : 'text-zinc-600'}`}
+                        title={cmd.synced ? t.sftp.settings.synced : t.sftp.settings.localOnly}
+                    >
+                        {cmd.synced ? <Cloud size={14} /> : <CloudOff size={14} />}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0 font-medium">
+                    {cmd.name}
+                  </td>
+                  <td className="font-mono text-[var(--accent-cyan)] px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
+                    {cmd.pattern}
+                  </td>
+                  <td className="font-mono text-[var(--text-secondary)] px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0 overflow-hidden text-overflow-ellipsis whitespace-nowrap max-w-[200px]" title={cmd.command}>
+                    {cmd.command}
+                  </td>
+                  <td className="w-[15%] text-right px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteCommand(cmd.id)}
+                      className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(255,71,87,0.1)] hover:text-[var(--color-danger)]"
+                      title={t.common.delete}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {customCommands.length === 0 && !isAddingCommand && (
+                <tr>
+                  <td colSpan={5} className="px-8 py-8 text-center text-zinc-500 italic">
+                    {t.sftp.settings.noCommands}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.commandHelp}
+        </p>
       </div>
     </div>
   );

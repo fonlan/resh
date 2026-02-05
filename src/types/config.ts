@@ -1,4 +1,4 @@
-import type { Server, Authentication, ProxyConfig, Snippet, AIChannel, AIModel, GeneralSettings } from './index';
+import type { Server, Authentication, ProxyConfig, Snippet, AIChannel, AIModel, GeneralSettings, SftpCustomCommand } from './index';
 
 export interface Config {
   version: string;
@@ -8,6 +8,7 @@ export interface Config {
   snippets: Snippet[];
   aiChannels: AIChannel[];
   aiModels: AIModel[];
+  sftpCustomCommands: SftpCustomCommand[];
   additionalPrompt?: string | null;
   additionalPromptUpdatedAt?: string | null;
   general: GeneralSettings;

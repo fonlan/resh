@@ -32,8 +32,11 @@ pub struct Server {
     #[serde(default)]
     pub env_vars: HashMap<String, String>,
     #[serde(default)]
-    #[serde(alias = "codeSnippets", alias = "code_snippets")]
-    pub snippets: Vec<Snippet>,
+    #[serde(alias = "aiModels", alias = "ai_models")]
+    pub ai_models: Vec<AiModel>,
+    #[serde(default)]
+    #[serde(alias = "sftpCustomCommands", alias = "sftp_custom_commands")]
+    pub sftp_custom_commands: Vec<SftpCustomCommand>,
     #[serde(default)]
     #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,6 +135,20 @@ pub struct AiModel {
     pub channel_id: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub synced: bool,
+    #[serde(default = "default_updated_at")]
+    #[serde(alias = "updated_at")]
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpCustomCommand {
+    pub id: String,
+    pub name: String,
+    pub pattern: String,
+    pub command: String,
     #[serde(default = "default_true")]
     pub synced: bool,
     #[serde(default = "default_updated_at")]
@@ -284,6 +301,9 @@ pub struct Config {
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,
     #[serde(default)]
+    #[serde(alias = "sftpCustomCommands", alias = "sftp_custom_commands")]
+    pub sftp_custom_commands: Vec<SftpCustomCommand>,
+    #[serde(default)]
     #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub additional_prompt: Option<String>,
@@ -317,6 +337,9 @@ pub struct SyncConfig {
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,
     #[serde(default)]
+    #[serde(alias = "sftpCustomCommands", alias = "sftp_custom_commands")]
+    pub sftp_custom_commands: Vec<SftpCustomCommand>,
+    #[serde(default)]
     #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub additional_prompt: Option<String>,
@@ -340,6 +363,7 @@ impl Config {
             snippets: vec![],
             ai_channels: vec![],
             ai_models: vec![],
+            sftp_custom_commands: vec![],
             additional_prompt: None,
             additional_prompt_updated_at: None,
             general: GeneralSettings {

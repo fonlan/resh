@@ -1,4 +1,4 @@
-use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig, AiChannel, AiModel};
+use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig, AiChannel, AiModel, SftpCustomCommand};
 use crate::webdav::client::WebDAVClient;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -33,6 +33,7 @@ impl SyncManager {
                     snippets: vec![],
                     ai_channels: vec![],
                     ai_models: vec![],
+                    sftp_custom_commands: vec![],
                     additional_prompt: local_config.additional_prompt.clone(),
                     additional_prompt_updated_at: local_config.additional_prompt_updated_at.clone(),
                     removed_ids: vec![],
@@ -109,6 +110,11 @@ impl SyncManager {
         for model in &mut local.ai_models {
             if remote.removed_ids.contains(&model.id) {
                 model.synced = false;
+            }
+        }
+        for cmd in &mut local.sftp_custom_commands {
+            if remote.removed_ids.contains(&cmd.id) {
+                cmd.synced = false;
             }
         }
 
@@ -228,6 +234,25 @@ impl SyncManager {
         }
         local.ai_models = local_models.into_values().collect();
 
+        // Merge SFTP Custom Commands
+        let mut local_commands: HashMap<String, SftpCustomCommand> = local.sftp_custom_commands.drain(..).map(|c| (c.id.clone(), c)).collect();
+        for remote_command in &remote.sftp_custom_commands {
+            if recently_removed_ids.contains(&remote_command.id) {
+                continue;
+            }
+            if let Some(local_command) = local_commands.get_mut(&remote_command.id) {
+                if is_newer(&remote_command.updated_at, &local_command.updated_at) {
+                    *local_command = remote_command.clone();
+                    local_command.synced = true;
+                }
+            } else {
+                let mut c = remote_command.clone();
+                c.synced = true;
+                local_commands.insert(c.id.clone(), c);
+            }
+        }
+        local.sftp_custom_commands = local_commands.into_values().collect();
+
         let remote_ts = remote.additional_prompt_updated_at.as_deref();
         let local_ts = local.additional_prompt_updated_at.as_deref();
 
@@ -259,6 +284,7 @@ impl SyncManager {
         let local_snippets: HashMap<String, &Snippet> = local.snippets.iter().map(|s| (s.id.clone(), s)).collect();
         let local_channels: HashMap<String, &AiChannel> = local.ai_channels.iter().map(|c| (c.id.clone(), c)).collect();
         let local_models: HashMap<String, &AiModel> = local.ai_models.iter().map(|m| (m.id.clone(), m)).collect();
+        let local_commands: HashMap<String, &SftpCustomCommand> = local.sftp_custom_commands.iter().map(|c| (c.id.clone(), c)).collect();
 
         let mut remote_servers: HashMap<String, Server> = remote.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         let mut to_remove_servers = Vec::new();
@@ -356,6 +382,22 @@ impl SyncManager {
             }
         }
 
+        let mut remote_commands: HashMap<String, SftpCustomCommand> = remote.sftp_custom_commands.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut to_remove_commands = Vec::new();
+        for id in remote_commands.keys() {
+            match local_commands.get(id) {
+                None => to_remove_commands.push(id.clone()),
+                Some(c) if !c.synced => to_remove_commands.push(id.clone()),
+                _ => {}
+            }
+        }
+        for id in to_remove_commands {
+            remote_commands.remove(&id);
+            if !remote.removed_ids.contains(&id) {
+                remote.removed_ids.push(id);
+            }
+        }
+
         // 2. Add/Update from local
         for local_server in &local.servers {
             if !local_server.synced { continue; }
@@ -441,6 +483,20 @@ impl SyncManager {
             }
         }
         remote.ai_models = remote_models.into_values().collect();
+
+        for local_command in &local.sftp_custom_commands {
+            if !local_command.synced { continue; }
+            remote.removed_ids.retain(|id| id != &local_command.id);
+
+            if let Some(remote_command) = remote_commands.get_mut(&local_command.id) {
+                if is_newer(&local_command.updated_at, &remote_command.updated_at) {
+                    *remote_command = local_command.clone();
+                }
+            } else {
+                remote_commands.insert(local_command.id.clone(), local_command.clone());
+            }
+        }
+        remote.sftp_custom_commands = remote_commands.into_values().collect();
 
         remote.additional_prompt = local.additional_prompt.clone();
         remote.additional_prompt_updated_at = local.additional_prompt_updated_at.clone();

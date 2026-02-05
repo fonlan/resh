@@ -19,6 +19,15 @@ export interface EditorRule {
   editor: string;
 }
 
+export interface SftpCustomCommand {
+  id: string;
+  name: string;
+  pattern: string;
+  command: string;
+  synced: boolean;
+  updatedAt: string;
+}
+
 export interface SftpSettings {
   defaultDownloadPath: string;
   editors: EditorRule[];
