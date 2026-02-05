@@ -206,7 +206,23 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       });
   }, []);
 
-  const loadDirectory = useCallback(async (path: string, targetSessionId?: string) => {
+  const getAllExpandedPaths = (nodes: FileEntry[]): Set<string> => {
+    const paths = new Set<string>();
+    const traverse = (list: FileEntry[]) => {
+      list.forEach(node => {
+        if (node.isExpanded) {
+          paths.add(node.path);
+          if (node.children) {
+            traverse(node.children);
+          }
+        }
+      });
+    };
+    traverse(nodes);
+    return paths;
+  };
+
+  const loadDirectory = useCallback(async (path: string, targetSessionId?: string, keepExpandedPaths?: Set<string>) => {
     const sid = targetSessionId || sessionId;
     if (!sid) return;
 
@@ -219,6 +235,17 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           const session = prev[sid];
           const currentSort = session?.sortState || { type: 'name', order: 'asc' };
           const sortedFiles = sortFiles(files, currentSort);
+
+          // Apply expanded state if provided
+          if (keepExpandedPaths) {
+              sortedFiles.forEach(f => {
+                  if (keepExpandedPaths.has(f.path)) {
+                      f.isExpanded = true;
+                      // We mark it as loading because we will trigger a reload for it shortly
+                      f.isLoading = true; 
+                  }
+              });
+          }
           
           let newRootFiles: FileEntry[];
           
@@ -229,7 +256,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             const updateNode = (nodes: FileEntry[]): FileEntry[] => {
               return nodes.map(node => {
                 if (node.path.replace(/\\/g, '/') === targetPath) {
-                  return { ...node, children: sortedFiles };
+                  return { ...node, children: sortedFiles, isLoading: false };
                 }
                 if (node.children) {
                   return { ...node, children: updateNode(node.children) };
@@ -254,10 +281,60 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       return files;
     } catch (error) {
       console.error('Failed to load directory:', error);
+      
+      if (path !== '/' && path !== '.') {
+          setSessions(prev => {
+              const session = prev[sid];
+              if (!session) return prev;
+              
+              const targetPath = path.replace(/\\/g, '/');
+              const resetLoading = (nodes: FileEntry[]): FileEntry[] => {
+                  return nodes.map(node => {
+                      if (node.path.replace(/\\/g, '/') === targetPath) {
+                          return { ...node, isLoading: false };
+                      }
+                      if (node.children) {
+                          return { ...node, children: resetLoading(node.children) };
+                      }
+                      return node;
+                  });
+              };
+              
+              return {
+                  ...prev,
+                  [sid]: { ...session, rootFiles: resetLoading(session.rootFiles) }
+              };
+          });
+      }
+
       updateSession(sid, { isLoading: false });
       return [];
     }
   }, [sessionId, sortFiles, updateSession]);
+
+  const handleRefresh = async () => {
+    if (!sessionId) return;
+    const currentSession = sessions[sessionId];
+    
+    const expandedPaths = currentSession ? getAllExpandedPaths(currentSession.rootFiles) : new Set<string>();
+    
+    // Load root first
+    await loadDirectory(currentPath, sessionId, expandedPaths);
+
+    if (expandedPaths.size > 0) {
+        // Sort by path depth to ensure parents are loaded before children
+        const sortedPaths = Array.from(expandedPaths).sort((a, b) => {
+            return a.split(/[\\/]/).length - b.split(/[\\/]/).length;
+        });
+
+        for (const path of sortedPaths) {
+            // Skip root since we just loaded it
+            if (path !== '/' && path !== '.' && path !== currentPath) {
+                 await loadDirectory(path, sessionId, expandedPaths);
+            }
+        }
+    }
+  };
 
   useEffect(() => {
     if (isOpen && sessionId) {
@@ -758,7 +835,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             <button
               type="button"
               className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
-              onClick={() => loadDirectory(currentPath)}
+              onClick={handleRefresh}
               title={t.sftp.tooltips.refresh}
             >
               <RefreshCw size={16} />
