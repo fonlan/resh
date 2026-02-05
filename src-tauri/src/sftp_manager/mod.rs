@@ -194,31 +194,55 @@ impl SftpManager {
         }
 
         let task_id_clone = task_id.clone();
-        let session_id_clone = session_id.clone();
-        let remote_path_clone = remote_path.clone();
-        let local_path_clone = local_path.clone();
+        let _session_id_clone = session_id.clone();
+        let _remote_path_clone = remote_path.clone();
+        let _local_path_clone = local_path.clone();
         let ai_session_id_clone = ai_session_id.clone();
 
-        tokio::spawn(async move {
-            let result = async {
-                let metadata = sftp.stat(&remote_path_clone).await.map_err(|e| e.to_string())?.attrs;
-                
-                let file_name = std::path::Path::new(&remote_path_clone)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
+        let task_id_inner = task_id.clone();
+        let session_id_inner = session_id.clone();
+        let remote_path_inner = remote_path.clone();
+        let local_path_inner = local_path.clone();
 
+        tokio::spawn(async move {
+            let metadata = match sftp.stat(&remote_path_inner).await {
+                Ok(m) => m.attrs,
+                Err(e) => {
+                    let _ = app.emit("transfer-progress", TransferProgress {
+                        task_id: task_id_inner,
+                        type_: "download".to_string(),
+                        session_id: session_id_inner,
+                        file_name: std::path::Path::new(&remote_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
+                        source: remote_path_inner.clone(),
+                        destination: local_path_inner.clone(),
+                        total_bytes: 0,
+                        transferred_bytes: 0,
+                        speed: 0.0,
+                        eta: None,
+                        status: "failed".to_string(),
+                        error: Some(e.to_string()),
+                    });
+                    return;
+                }
+            };
+            
+            let file_name = std::path::Path::new(&remote_path_inner)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            
+            let result = async {
                 if metadata.is_dir() {
-                    Self::download_dir_recursive(&app, &sftp, &remote_path_clone, &local_path_clone, &task_id_clone, &session_id_clone, &cancel_token).await
+                    Self::download_dir_recursive(&app, &sftp, &remote_path_inner, &local_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
                 } else {
                     let total_bytes = metadata.size.unwrap_or(0);
-                    let handle = sftp.open(&remote_path_clone, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                    let handle = sftp.open(&remote_path_inner, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                     let mut local_file = tokio::fs::OpenOptions::new()
                         .write(true)
                         .create(true)
                         .truncate(true)
-                        .open(&local_path_clone)
+                        .open(&local_path_inner)
                         .await
                         .map_err(|e| e.to_string())?;
                     
@@ -229,12 +253,12 @@ impl SftpManager {
                     let mut last_emit = Instant::now();
 
                     let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_clone.clone(),
+                        task_id: task_id_inner.clone(),
                         type_: "download".to_string(),
-                        session_id: session_id_clone.clone(),
+                        session_id: session_id_inner.clone(),
                         file_name: file_name.clone(),
-                        source: remote_path_clone.clone(),
-                        destination: local_path_clone.clone(),
+                        source: remote_path_inner.clone(),
+                        destination: local_path_inner.clone(),
                         total_bytes,
                         transferred_bytes: 0,
                         speed: 0.0,
@@ -282,12 +306,12 @@ impl SftpManager {
                             };
                             
                             let _ = app.emit("transfer-progress", TransferProgress {
-                                task_id: task_id_clone.clone(),
+                                task_id: task_id_inner.clone(),
                                 type_: "download".to_string(),
-                                session_id: session_id_clone.clone(),
+                                session_id: session_id_inner.clone(),
                                 file_name: file_name.clone(),
-                                source: remote_path_clone.clone(),
-                                destination: local_path_clone.clone(),
+                                source: remote_path_inner.clone(),
+                                destination: local_path_inner.clone(),
                                 total_bytes,
                                 transferred_bytes: transferred,
                                 speed,
@@ -317,6 +341,9 @@ impl SftpManager {
                 }
             }.await;
 
+            let is_dir = metadata.is_dir();
+            let final_total_bytes = if is_dir { 0 } else { metadata.size.unwrap_or(0) };
+
             let final_status = match &result {
                 Ok(_) => "completed",
                 Err(e) if e == "Cancelled" => "cancelled",
@@ -326,14 +353,14 @@ impl SftpManager {
             let final_error = result.as_ref().err().cloned();
 
             let _ = app.emit("transfer-progress", TransferProgress {
-                task_id: task_id_clone.clone(),
+                task_id: task_id_inner,
                 type_: "download".to_string(),
-                session_id: session_id_clone,
-                file_name: std::path::Path::new(&remote_path_clone).file_name().unwrap_or_default().to_string_lossy().to_string(),
-                source: remote_path_clone.clone(),
-                destination: local_path_clone.clone(),
-                total_bytes: 0, 
-                transferred_bytes: 0,
+                session_id: session_id_inner,
+                file_name: file_name.clone(),
+                source: remote_path_inner.clone(),
+                destination: local_path_inner.clone(),
+                total_bytes: final_total_bytes,
+                transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
                 speed: 0.0,
                 eta: None,
                 status: final_status.to_string(),
@@ -343,8 +370,8 @@ impl SftpManager {
             if let Some(ai_sid) = ai_session_id_clone {
                 let msg_id = Uuid::new_v4().to_string();
                 let content = match &result {
-                    Ok(_) => format!("SFTP Download completed successfully: {} -> {}", remote_path_clone, local_path_clone),
-                    Err(e) => format!("SFTP Download failed: {}. Path: {}", e, remote_path_clone),
+                    Ok(_) => format!("SFTP Download completed successfully: {} -> {}", remote_path_inner, local_path_inner),
+                    Err(e) => format!("SFTP Download failed: {}. Path: {}", e, remote_path_inner),
                 };
 
 
@@ -402,26 +429,106 @@ impl SftpManager {
                         if is_dir {
                             Box::pin(Self::download_dir_recursive(app, sftp, &remote_path, &local_path, task_id, session_id, cancel_token)).await?;
                         } else {
+                            let metadata = sftp.stat(&remote_path).await.map_err(|e| e.to_string())?.attrs;
+                            let total_bytes = metadata.size.unwrap_or(0);
                             let handle = sftp.open(&remote_path, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                             let mut local_file = tokio::fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
-                            let mut offset = 0u64;
+                            let mut transferred = 0u64;
+                            let mut last_emit = Instant::now();
                             
+                            let _ = app.emit("transfer-progress", TransferProgress {
+                                task_id: task_id.to_string(),
+                                type_: "download".to_string(),
+                                session_id: session_id.to_string(),
+                                file_name: file_name.clone(),
+                                source: remote_path.clone(),
+                                destination: local_path.clone(),
+                                total_bytes,
+                                transferred_bytes: 0,
+                                speed: 0.0,
+                                eta: None,
+                                status: "transferring".to_string(),
+                                error: None,
+                            });
+
                             loop {
                                 if cancel_token.load(Ordering::SeqCst) {
                                     let _ = sftp.close(handle).await;
                                     let _ = sftp.close(dir_handle).await;
+                                    let _ = app.emit("transfer-progress", TransferProgress {
+                                        task_id: task_id.to_string(),
+                                        type_: "download".to_string(),
+                                        session_id: session_id.to_string(),
+                                        file_name: file_name.clone(),
+                                        source: remote_path.clone(),
+                                        destination: local_path.clone(),
+                                        total_bytes,
+                                        transferred_bytes: transferred,
+                                        speed: 0.0,
+                                        eta: None,
+                                        status: "cancelled".to_string(),
+                                        error: None,
+                                    });
                                     return Err("Cancelled".to_string());
                                 }
-                                match sftp.read(&handle, offset, (256 * 1024) as u32).await {
+                                match sftp.read(&handle, transferred, (256 * 1024) as u32).await {
                                     Ok(data) => {
                                         if data.data.is_empty() { break; }
                                         local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
-                                        offset += data.data.len() as u64;
+                                        transferred += data.data.len() as u64;
+                                        
+                                        if last_emit.elapsed().as_millis() > 500 {
+                                            let _ = app.emit("transfer-progress", TransferProgress {
+                                                task_id: task_id.to_string(),
+                                                type_: "download".to_string(),
+                                                session_id: session_id.to_string(),
+                                                file_name: file_name.clone(),
+                                                source: remote_path.clone(),
+                                                destination: local_path.clone(),
+                                                total_bytes,
+                                                transferred_bytes: transferred,
+                                                speed: 0.0,
+                                                eta: None,
+                                                status: "transferring".to_string(),
+                                                error: None,
+                                            });
+                                            last_emit = Instant::now();
+                                        }
                                     }
                                     Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
-                                    Err(e) => return Err(e.to_string()),
+                                    Err(e) => {
+                                        let _ = app.emit("transfer-progress", TransferProgress {
+                                            task_id: task_id.to_string(),
+                                            type_: "download".to_string(),
+                                            session_id: session_id.to_string(),
+                                            file_name: file_name.clone(),
+                                            source: remote_path.clone(),
+                                            destination: local_path.clone(),
+                                            total_bytes,
+                                            transferred_bytes: transferred,
+                                            speed: 0.0,
+                                            eta: None,
+                                            status: "failed".to_string(),
+                                            error: Some(e.to_string()),
+                                        });
+                                        return Err(e.to_string());
+                                    }
                                 }
                             }
+                            let _ = app.emit("transfer-progress", TransferProgress {
+                                task_id: task_id.to_string(),
+                                type_: "download".to_string(),
+                                session_id: session_id.to_string(),
+                                file_name: file_name.clone(),
+                                source: remote_path.clone(),
+                                destination: local_path.clone(),
+                                total_bytes,
+                                transferred_bytes: total_bytes,
+                                speed: 0.0,
+                                eta: None,
+                                status: "completed".to_string(),
+                                error: None,
+                            });
                             local_file.flush().await.map_err(|e| e.to_string())?;
                             let _ = sftp.close(handle).await;
                         }
@@ -456,27 +563,50 @@ impl SftpManager {
         }
 
         let task_id_clone = task_id.clone();
-        let session_id_clone = session_id.clone();
-        let remote_path_clone = remote_path.clone();
-        let local_path_clone = local_path.clone();
+        let _session_id_clone = session_id.clone();
+        let _remote_path_clone = remote_path.clone();
+        let _local_path_clone = local_path.clone();
         let ai_session_id_clone = ai_session_id.clone();
 
-        tokio::spawn(async move {
-            let result = async {
-                let local_metadata = tokio::fs::metadata(&local_path_clone).await.map_err(|e| e.to_string())?;
-                
-                let file_name = std::path::Path::new(&local_path_clone)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
+        let task_id_inner = task_id.clone();
+        let session_id_inner = session_id.clone();
+        let remote_path_inner = remote_path.clone();
+        let local_path_inner = local_path.clone();
 
+        tokio::spawn(async move {
+            let local_metadata = match tokio::fs::metadata(&local_path_inner).await {
+                Ok(m) => m,
+                Err(e) => {
+                    let _ = app.emit("transfer-progress", TransferProgress {
+                        task_id: task_id_inner,
+                        type_: "upload".to_string(),
+                        session_id: session_id_inner,
+                        file_name: std::path::Path::new(&local_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
+                        source: local_path_inner.clone(),
+                        destination: remote_path_inner.clone(),
+                        total_bytes: 0,
+                        transferred_bytes: 0,
+                        speed: 0.0,
+                        eta: None,
+                        status: "failed".to_string(),
+                        error: Some(e.to_string()),
+                    });
+                    return;
+                }
+            };
+            let file_name = std::path::Path::new(&local_path_inner)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            
+            let result = async {
                 if local_metadata.is_dir() {
-                    Self::upload_dir_recursive(&app, &sftp, &local_path_clone, &remote_path_clone, &task_id_clone, &session_id_clone, &cancel_token).await
+                    Self::upload_dir_recursive(&app, &sftp, &local_path_inner, &remote_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
                 } else {
                     let total_bytes = local_metadata.len();
-                    let mut local_file = tokio::fs::File::open(&local_path_clone).await.map_err(|e| e.to_string())?;
-                    let handle = sftp.open(&remote_path_clone, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                    let mut local_file = tokio::fs::File::open(&local_path_inner).await.map_err(|e| e.to_string())?;
+                    let handle = sftp.open(&remote_path_inner, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                     
                     let mut transferred = 0u64;
                     let chunk_size = 256 * 1024;
@@ -485,12 +615,12 @@ impl SftpManager {
                     let mut last_emit = Instant::now();
 
                     let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_clone.clone(),
+                        task_id: task_id_inner.clone(),
                         type_: "upload".to_string(),
-                        session_id: session_id_clone.clone(),
+                        session_id: session_id_inner.clone(),
                         file_name: file_name.clone(),
-                        source: local_path_clone.clone(),
-                        destination: remote_path_clone.clone(),
+                        source: local_path_inner.clone(),
+                        destination: remote_path_inner.clone(),
                         total_bytes,
                         transferred_bytes: 0,
                         speed: 0.0,
@@ -541,12 +671,12 @@ impl SftpManager {
                             };
                             
                             let _ = app.emit("transfer-progress", TransferProgress {
-                                task_id: task_id_clone.clone(),
+                                task_id: task_id_inner.clone(),
                                 type_: "upload".to_string(),
-                                session_id: session_id_clone.clone(),
+                                session_id: session_id_inner.clone(),
                                 file_name: file_name.clone(),
-                                source: local_path_clone.clone(),
-                                destination: remote_path_clone.clone(),
+                                source: local_path_inner.clone(),
+                                destination: remote_path_inner.clone(),
                                 total_bytes,
                                 transferred_bytes: transferred,
                                 speed,
@@ -580,6 +710,9 @@ impl SftpManager {
                 }
             }.await;
 
+            let is_dir = local_metadata.is_dir();
+            let final_total_bytes = if is_dir { 0 } else { local_metadata.len() };
+
             let final_status = match &result {
                 Ok(_) => "completed",
                 Err(e) if e == "Cancelled" => "cancelled",
@@ -589,14 +722,14 @@ impl SftpManager {
             let final_error = result.as_ref().err().cloned();
 
             let _ = app.emit("transfer-progress", TransferProgress {
-                task_id: task_id_clone.clone(),
+                task_id: task_id_inner,
                 type_: "upload".to_string(),
-                session_id: session_id_clone,
-                file_name: std::path::Path::new(&local_path_clone).file_name().unwrap_or_default().to_string_lossy().to_string(),
-                source: local_path_clone.clone(),
-                destination: remote_path_clone.clone(),
-                total_bytes: 0, 
-                transferred_bytes: 0,
+                session_id: session_id_inner,
+                file_name: file_name.clone(),
+                source: local_path_inner.clone(),
+                destination: remote_path_inner.clone(),
+                total_bytes: final_total_bytes,
+                transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
                 speed: 0.0,
                 eta: None,
                 status: final_status.to_string(),
@@ -606,8 +739,8 @@ impl SftpManager {
             if let Some(ai_sid) = ai_session_id_clone {
                 let msg_id = Uuid::new_v4().to_string();
                 let content = match &result {
-                    Ok(_) => format!("SFTP Upload completed successfully: {} -> {}", local_path_clone, remote_path_clone),
-                    Err(e) => format!("SFTP Upload failed: {}. Path: {}", e, local_path_clone),
+                    Ok(_) => format!("SFTP Upload completed successfully: {} -> {}", local_path_inner, remote_path_inner),
+                    Err(e) => format!("SFTP Upload failed: {}. Path: {}", e, local_path_inner),
                 };
 
                 let conn = db_manager.get_connection();
@@ -634,12 +767,12 @@ impl SftpManager {
     }
 
     async fn upload_dir_recursive(
-        _app: &AppHandle,
+        app: &AppHandle,
         sftp: &Arc<RawSftpSession>,
         local_dir: &str,
         remote_dir: &str,
-        _task_id: &str,
-        _session_id: &str,
+        task_id: &str,
+        session_id: &str,
         cancel_token: &Arc<AtomicBool>,
     ) -> Result<(), String> {
         sftp.mkdir(remote_dir, FileAttributes::default()).await.ok();
@@ -656,23 +789,109 @@ impl SftpManager {
             let metadata = entry.metadata().await.map_err(|e| e.to_string())?;
 
             if metadata.is_dir() {
-                Box::pin(Self::upload_dir_recursive(_app, sftp, &local_path, &remote_path, _task_id, _session_id, cancel_token)).await?;
+                Box::pin(Self::upload_dir_recursive(app, sftp, &local_path, &remote_path, task_id, session_id, cancel_token)).await?;
             } else {
+                let local_metadata = tokio::fs::metadata(&local_path).await.map_err(|e| e.to_string())?;
+                let total_bytes = local_metadata.len();
                 let mut local_file = tokio::fs::File::open(&local_path).await.map_err(|e| e.to_string())?;
                 let handle = sftp.open(&remote_path, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                 let mut buffer = [0u8; 256 * 1024];
                 let mut offset = 0u64;
+                let mut transferred = 0u64;
+                let mut last_emit = Instant::now();
                 
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id.to_string(),
+                    type_: "upload".to_string(),
+                    session_id: session_id.to_string(),
+                    file_name: file_name.to_string_lossy().to_string(),
+                    source: local_path.clone(),
+                    destination: remote_path.clone(),
+                    total_bytes,
+                    transferred_bytes: 0,
+                    speed: 0.0,
+                    eta: None,
+                    status: "transferring".to_string(),
+                    error: None,
+                });
+
                 loop {
                     if cancel_token.load(Ordering::SeqCst) {
                         let _ = sftp.close(handle).await;
+                        let _ = app.emit("transfer-progress", TransferProgress {
+                            task_id: task_id.to_string(),
+                            type_: "upload".to_string(),
+                            session_id: session_id.to_string(),
+                            file_name: file_name.to_string_lossy().to_string(),
+                            source: local_path.clone(),
+                            destination: remote_path.clone(),
+                            total_bytes,
+                            transferred_bytes: transferred,
+                            speed: 0.0,
+                            eta: None,
+                            status: "cancelled".to_string(),
+                            error: None,
+                        });
                         return Err("Cancelled".to_string());
                     }
                     let n = local_file.read(&mut buffer).await.map_err(|e| e.to_string())?;
                     if n == 0 { break; }
-                    sftp.write(&handle, offset, buffer[..n].to_vec()).await.map_err(|e| e.to_string())?;
-                    offset += n as u64;
+                    match sftp.write(&handle, offset, buffer[..n].to_vec()).await {
+                        Ok(_) => {
+                            offset += n as u64;
+                            transferred += n as u64;
+                            
+                            if last_emit.elapsed().as_millis() > 500 {
+                                let _ = app.emit("transfer-progress", TransferProgress {
+                                    task_id: task_id.to_string(),
+                                    type_: "upload".to_string(),
+                                    session_id: session_id.to_string(),
+                                    file_name: file_name.to_string_lossy().to_string(),
+                                    source: local_path.clone(),
+                                    destination: remote_path.clone(),
+                                    total_bytes,
+                                    transferred_bytes: transferred,
+                                    speed: 0.0,
+                                    eta: None,
+                                    status: "transferring".to_string(),
+                                    error: None,
+                                });
+                                last_emit = Instant::now();
+                            }
+                        }
+                        Err(e) => {
+                            let _ = app.emit("transfer-progress", TransferProgress {
+                                task_id: task_id.to_string(),
+                                type_: "upload".to_string(),
+                                session_id: session_id.to_string(),
+                                file_name: file_name.to_string_lossy().to_string(),
+                                source: local_path.clone(),
+                                destination: remote_path.clone(),
+                                total_bytes,
+                                transferred_bytes: transferred,
+                                speed: 0.0,
+                                eta: None,
+                                status: "failed".to_string(),
+                                error: Some(e.to_string()),
+                            });
+                            return Err(e.to_string());
+                        }
+                    }
                 }
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id.to_string(),
+                    type_: "upload".to_string(),
+                    session_id: session_id.to_string(),
+                    file_name: file_name.to_string_lossy().to_string(),
+                    source: local_path.clone(),
+                    destination: remote_path.clone(),
+                    total_bytes,
+                    transferred_bytes: total_bytes,
+                    speed: 0.0,
+                    eta: None,
+                    status: "completed".to_string(),
+                    error: None,
+                });
                 let _ = sftp.close(handle).await;
             }
         }
