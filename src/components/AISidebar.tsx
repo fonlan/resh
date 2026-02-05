@@ -268,6 +268,10 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
     return msg.tool_calls.filter(call => call.function.name !== 'get_terminal_output');
   }, [msg.tool_calls, isPending]);
 
+  const hasContentToCopy = useMemo(() => {
+    return msg.content && msg.content.trim().length > 0;
+  }, [msg.content]);
+
   return (
     <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       <div className={`relative max-w-[90%] flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -351,7 +355,8 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
         </div>
         <button
           type="button"
-          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : 'opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'} ${msg.role === 'user' ? '-left-8' : '-right-8'}`}
+          disabled={!hasContentToCopy}
+          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : 'opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'} ${msg.role === 'user' ? '-left-8' : '-right-8'} ${!hasContentToCopy ? 'disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]' : ''}`}
           onClick={handleCopy}
           title={t.ai.copyMessage}
         >
