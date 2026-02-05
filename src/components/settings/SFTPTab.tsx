@@ -4,7 +4,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { Config, EditorRule } from '../../types/config';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../../i18n';
-import { useTabDragDrop } from '../../hooks/useTabDragDrop';
 
 interface SFTPTabProps {
   config: Config;
@@ -30,15 +29,6 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
       },
     });
   }, [config, onChange]);
-
-  const {
-    draggedIndex,
-    dropTargetIndex,
-    handleDragStart,
-    handleDragOver,
-    handleDrop,
-    handleDragEnd
-  } = useTabDragDrop<EditorRule>(editors, handleReorderEditors);
 
   const handleDownloadPathChange = (path: string) => {
     onChange({
@@ -172,82 +162,96 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
               </tr>
             </thead>
             <tbody>
-                {isAdding && (
-                    <tr className="bg-[var(--bg-tertiary)]">
-                        <td className="px-2 py-3 border-b border-[var(--glass-border)]"></td>
-                        <td className="px-4 py-3">
-                            <input
-                                id="new-rule-pattern"
-                                type="text"
-                                value={editingRule.pattern || ''}
-                                onChange={(e) => setEditingRule(prev => ({ ...prev, pattern: e.target.value }))}
-                                placeholder={t.sftp.settings.patternPlaceholder}
-                                className="form-input px-2.5 py-1.5"
-                            />
-                        </td>
-                        <td className="px-4 py-3">
-                             <div className="flex gap-2">
-                                <input
-                                    id="new-rule-editor"
-                                    type="text"
-                                    value={editingRule.editor || ''}
-                                    onChange={(e) => setEditingRule(prev => ({ ...prev, editor: e.target.value }))}
-                                    placeholder={t.sftp.settings.editorPlaceholder}
-                                    className="form-input px-2.5 py-1.5"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={handlePickEditor}
-                                    className="btn btn-secondary btn-icon w-8 h-8"
-                                    title={t.sftp.settings.browseFile}
-                                >
-                                    <FolderOpen size={14} />
-                                </button>
-                            </div>
-                        </td>
-                        <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
-                            <div className="flex justify-end gap-1">
-                                <button
-                                    type="button"
-                                    onClick={handleAddRule}
-                                    className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(0,210,106,0.1)] hover:text-[var(--color-success)]"
-                                    title={t.common.save}
-                                >
-                                    <Check size={16} />
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setIsAdding(false);
-                                        setEditingRule({});
-                                    }}
-                                    className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-                                    title={t.common.cancel}
-                                >
-                                    <X size={16} />
-                                </button>
-                            </div>
-                        </td>
-                    </tr>
-                )}
+              {isAdding && (
+                <tr className="bg-[var(--bg-tertiary)]">
+                  <td className="px-2 py-3 border-b border-[var(--glass-border)]"></td>
+                  <td className="px-4 py-3">
+                    <input
+                      id="new-rule-pattern"
+                      type="text"
+                      value={editingRule.pattern || ''}
+                      onChange={(e) => setEditingRule(prev => ({ ...prev, pattern: e.target.value }))}
+                      placeholder={t.sftp.settings.patternPlaceholder}
+                      className="form-input px-2.5 py-1.5"
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex gap-2">
+                      <input
+                        id="new-rule-editor"
+                        type="text"
+                        value={editingRule.editor || ''}
+                        onChange={(e) => setEditingRule(prev => ({ ...prev, editor: e.target.value }))}
+                        placeholder={t.sftp.settings.editorPlaceholder}
+                        className="form-input px-2.5 py-1.5"
+                      />
+                      <button
+                        type="button"
+                        onClick={handlePickEditor}
+                        className="btn btn-secondary btn-icon w-8 h-8"
+                        title={t.sftp.settings.browseFile}
+                      >
+                        <FolderOpen size={14} />
+                      </button>
+                    </div>
+                  </td>
+                  <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={handleAddRule}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(0,210,106,0.1)] hover:text-[var(--color-success)]"
+                        title={t.common.save}
+                      >
+                        <Check size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAdding(false);
+                          setEditingRule({});
+                        }}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                        title={t.common.cancel}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              )}
               {editors.map((rule, index) => (
                 <tr
                   key={rule.id}
+                  className="hover:bg-white/[0.02]"
                   draggable={editors.length > 1}
-                  onDragStart={(e) => handleDragStart(index)}
-                  onDragOver={(e) => handleDragOver(e, index)}
-                  onDrop={(e) => handleDrop(e, index)}
-                  onDragEnd={handleDragEnd}
-                  className={`
-                    hover:bg-white/[0.02] cursor-default
-                    ${draggedIndex === index ? 'opacity-40' : ''}
-                    ${dropTargetIndex === index && draggedIndex !== index ? 'bg-[var(--accent-color)]/5 border-t-2 border-[var(--accent-color)]' : ''}
-                  `}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/plain', index.toString());
+                    e.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const rawData = e.dataTransfer.getData('text/plain');
+                    const sourceIndex = parseInt(rawData, 10);
+                    if (!isNaN(sourceIndex) && sourceIndex !== index) {
+                      const newEditors = [...editors];
+                      const [draggedItem] = newEditors.splice(sourceIndex, 1);
+                      newEditors.splice(index, 0, draggedItem);
+                      handleReorderEditors(newEditors);
+                    }
+                  }}
                 >
                   <td className="px-2 py-2 border-b border-[var(--glass-border)] last:border-b-0 text-zinc-400">
-                    <div className={`flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-tertiary)] ${editors.length > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}>
-                      <GripVertical size={14} />
-                    </div>
+                    {editors.length > 1 ? (
+                      <div className="flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-tertiary)] cursor-grab select-none">
+                        <GripVertical size={14} />
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center w-5 h-5" />
+                    )}
                   </td>
                   <td className="font-mono text-[var(--accent-cyan)] w-[30%] px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
                     {rule.pattern}
@@ -269,9 +273,9 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
               ))}
               {editors.length === 0 && !isAdding && (
                 <tr>
-                    <td colSpan={4} className="px-8 py-8 text-center text-zinc-500 italic">
-                        {t.sftp.settings.noRules}
-                    </td>
+                  <td colSpan={4} className="px-8 py-8 text-center text-zinc-500 italic">
+                    {t.sftp.settings.noRules}
+                  </td>
                 </tr>
               )}
             </tbody>

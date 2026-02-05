@@ -26,7 +26,8 @@
         "fullscreen": false,
         "decorations": false,
         "label": "main",
-        "visible": false
+        "visible": false,
+        "dragDropEnabled": false
       }
     ]
   },
