@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
-import { Authentication } from '../../types/config';
+import { Authentication } from '../../types';
 import { validateRequired, validateUniqueName } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 import { Upload } from 'lucide-react';

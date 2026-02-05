@@ -1,4 +1,4 @@
-import { Server, GeneralSettings } from '../types/config';
+import { Server, GeneralSettings } from '../types';
 
 /**
  * Add a server to the recent servers list

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Server as ServerIcon, Plus, Terminal } from 'lucide-react';
-import { Server } from '../types/config';
+import { Server } from '../types';
 import { useTranslation } from '../i18n';
 import { EmojiText } from './EmojiText';
 

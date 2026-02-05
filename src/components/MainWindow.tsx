@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { Settings, X, Code, Circle, MessageSquare, Folder } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Config } from '../types/config';
+import { Config } from '../types';
 // SettingsModal is now lazy loaded
 const SettingsModal = React.lazy(() => 
   import('./settings/SettingsModal').then(module => ({ default: module.SettingsModal }))

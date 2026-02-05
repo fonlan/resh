@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
-import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from '../../types/config';
+import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from '../../types';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';

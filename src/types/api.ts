@@ -1,6 +1,4 @@
-// src/types/api.ts
-
-import { Config } from './config';
+import type { Config } from './config';
 
 export interface ConnectRequest {
   serverId: string;
@@ -44,7 +42,9 @@ export interface SaveConfigRequest {
 }
 
 export interface SyncWebDAVRequest {
-  // Empty - uses stored WebDAV config
+  url?: string;
+  username?: string;
+  password?: string;
 }
 
 export interface ExportLogRequest {

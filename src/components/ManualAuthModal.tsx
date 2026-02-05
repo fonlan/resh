@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import type { ManualAuthCredentials } from '../types/config';
+import type { ManualAuthCredentials } from '../types';
 import { useTranslation } from '../i18n';
 import { Upload } from 'lucide-react';
 

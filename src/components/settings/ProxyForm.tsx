@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { ProxyConfig } from '../../types/config';
+import { ProxyConfig } from '../../types';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 

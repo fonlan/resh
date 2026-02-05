@@ -1,5 +1,5 @@
 import React from 'react';
-import { GeneralSettings } from '../../types/config';
+import { GeneralSettings } from '../../types';
 import { useTranslation } from '../../i18n';
 import { CustomSelect } from '../CustomSelect';
 

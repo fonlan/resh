@@ -3,7 +3,7 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { WebglAddon } from 'xterm-addon-webgl';
 import 'xterm/css/xterm.css';
-import { TerminalSettings } from '../types/config';
+import { TerminalSettings } from '../types';
 import { debounce } from '../utils/common';
 
 export const useTerminal = (

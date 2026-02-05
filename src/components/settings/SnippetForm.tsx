@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef, useRef, useEffect, useMemo, useCallback } from 'react';
-import { Snippet } from '../../types/config';
+import { Snippet } from '../../types';
 import { validateRequired } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 import { ChevronDown } from 'lucide-react';

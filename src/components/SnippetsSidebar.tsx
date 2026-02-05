@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Snippet } from '../types/config';
+import { Snippet } from '../types';
 import { X, Code, Play, ChevronRight, ChevronDown, Plus, Lock, LockOpen } from 'lucide-react';
 import { useTranslation } from '../i18n';
 

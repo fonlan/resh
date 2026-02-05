@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { FolderOpen, Plus, Trash2, Check, X, GripVertical } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { Config, EditorRule } from '../../types/config';
+import { Config, EditorRule } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../../i18n';
 

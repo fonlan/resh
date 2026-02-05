@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTerminal } from '../hooks/useTerminal';
 import { useConfig } from '../hooks/useConfig'; // Import useConfig
-import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types/config';
+import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../i18n';
 import { StatusBar } from './StatusBar';

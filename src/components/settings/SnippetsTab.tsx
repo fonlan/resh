@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Code, Folder } from 'lucide-react';
-import { Snippet } from '../../types/config';
+import { Snippet } from '../../types';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { SnippetForm, SnippetFormHandle } from './SnippetForm';

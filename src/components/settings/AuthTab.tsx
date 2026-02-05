@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { Authentication, Server as ServerType } from '../../types/config';
+import { Authentication, Server as ServerType } from '../../types';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { AuthForm, AuthFormHandle } from './AuthForm';

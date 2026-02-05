@@ -1,6 +1,6 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
 import { Settings, Network, Terminal, Code, Trash2, Edit2, Check, X, Bot } from 'lucide-react';
-import { Server, Authentication, ProxyConfig, PortForward } from '../../types/config';
+import { Server, Authentication, ProxyConfig, PortForward } from '../../types';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
 import { CustomSelect } from '../CustomSelect';

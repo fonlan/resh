@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { ProxyConfig as ProxyType, Server as ServerType } from '../../types/config';
+import { ProxyConfig as ProxyType, Server as ServerType } from '../../types';
 import { FormModal } from '../FormModal';
 import { ConfirmationModal } from '../ConfirmationModal';
 import { ProxyForm, ProxyFormHandle } from './ProxyForm';

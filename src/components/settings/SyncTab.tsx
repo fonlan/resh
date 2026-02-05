@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { RefreshCw, Check, AlertCircle, Loader2 } from 'lucide-react';
-import { GeneralSettings } from '../../types/config';
+import { GeneralSettings } from '../../types';
 import { useTranslation } from '../../i18n';
 import { useConfig } from '../../hooks/useConfig';
 import { CustomSelect } from '../CustomSelect';

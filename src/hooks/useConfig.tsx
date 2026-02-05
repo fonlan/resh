@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useCallback, useEffect, useState, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Config } from '../types/config';
+import { Config } from '../types';
 import { logger } from '../utils/logger';
 
 interface ConfigContextType {
