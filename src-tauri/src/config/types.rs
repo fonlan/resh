@@ -2,7 +2,6 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 fn default_true() -> bool {
     true
@@ -29,8 +28,6 @@ pub struct Server {
     pub keep_alive: u32,
     #[serde(default)]
     pub auto_exec_commands: Vec<String>,
-    #[serde(default)]
-    pub env_vars: HashMap<String, String>,
     #[serde(default)]
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,

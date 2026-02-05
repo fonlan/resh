@@ -1,5 +1,5 @@
 import { useState, useImperativeHandle, forwardRef } from 'react';
-import { Settings, Network, Terminal, Code, Trash2, Edit2, Check, X, Bot } from 'lucide-react';
+import { Settings, Network, Terminal, Code, Bot } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
@@ -50,7 +50,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
         portForwards: server.portForwards || [],
         keepAlive: server.keepAlive || 0,
         autoExecCommands: server.autoExecCommands || [],
-        envVars: server.envVars || {},
         snippets: server.snippets || [],
         synced: server.synced !== undefined ? server.synced : true,
         updatedAt: server.updatedAt || new Date().toISOString(),
@@ -69,7 +68,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       portForwards: [],
       keepAlive: 0,
       autoExecCommands: [],
-      envVars: {},
       snippets: [],
       synced: true,
       updatedAt: new Date().toISOString(),
@@ -78,9 +76,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
-
-  // Env var editing state
-  const [editingEnvVar, setEditingEnvVar] = useState<{ key: string; newKey: string; newValue: string } | null>(null);
 
   // Port forward input state
   const [newPortForward, setNewPortForward] = useState({ local: '', remote: '' });
@@ -181,27 +176,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     }));
   };
 
-  const handleEnvVarChange = (key: string, value: string) => {
-    setFormData((prev) => ({
-      ...prev,
-      envVars: {
-        ...prev.envVars,
-        [key]: value,
-      },
-    }));
-  };
-
-  const removeEnvVar = (key: string) => {
-    setFormData((prev) => {
-      const newEnvVars = { ...prev.envVars };
-      delete newEnvVars[key];
-      return {
-        ...prev,
-        envVars: newEnvVars,
-      };
-    });
-  };
-
   const handleAutoExecCommandChange = (index: number, value: string) => {
     setFormData((prev) => {
       const newCommands = [...prev.autoExecCommands];
@@ -231,7 +205,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
     const fieldsByTab: Record<TabId, string[]> = {
       general: ['name', 'host', 'port', 'username', 'authId'],
       routing: ['proxyId', 'jumphostId', 'keepAlive'],
-      advanced: ['portForwards', 'autoExecCommands', 'envVars'],
+      advanced: ['portForwards', 'autoExecCommands'],
       snippets: [],
       ai: [],
     };
@@ -560,129 +534,6 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 >
                   {t.serverForm.addCommand}
                 </button>
-              </div>
-
-              {/* Environment Variables */}
-              <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3 border-b border-gray-700 pb-2">
-                  {t.serverForm.envVarsTitle}
-                </h3>
-
-                {/* Existing Env Vars */}
-                {Object.entries(formData.envVars).length > 0 && (
-                  <div className="space-y-2 mb-3">
-                    {Object.entries(formData.envVars).map(([key, value]) => {
-                      const isEditing = editingEnvVar?.key === key;
-
-                      if (isEditing) {
-                        return (
-                          <div key={key} className="flex gap-2">
-                            <input
-                              type="text"
-                              value={editingEnvVar.newKey}
-                              onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newKey: e.target.value })}
-                              className="w-24 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <span className="text-gray-500 self-center">=</span>
-                            <input
-                              type="text"
-                              value={editingEnvVar.newValue}
-                              onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newValue: e.target.value })}
-                              className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                             <button
-                               type="button"
-                               onClick={() => {
-                                 const { key: oldKey, newKey, newValue } = editingEnvVar;
-                                 const newEnvVars = { ...formData.envVars };
-                                 delete newEnvVars[oldKey];
-                                 newEnvVars[newKey] = newValue;
-                                 setFormData((prev) => ({ ...prev, envVars: newEnvVars }));
-                                 setEditingEnvVar(null);
-                               }}
-                               className="p-1.5 rounded bg-transparent border-none text-[var(--accent-success)] cursor-pointer hover:bg-[rgba(34,197,94,0.1)] transition-all"
-                             >
-                               <Check size={16} />
-                             </button>
-                             <button
-                               type="button"
-                               onClick={() => setEditingEnvVar(null)}
-                               className="p-1.5 rounded bg-transparent border-none text-[var(--color-danger)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] transition-all"
-                             >
-                               <X size={16} />
-                             </button>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div key={key} className="flex gap-2">
-                          <input
-                            type="text"
-                            value={key}
-                            disabled
-                            className="w-24 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
-                          />
-                          <span className="text-gray-500 self-center">=</span>
-                          <input
-                            type="text"
-                            value={value}
-                            disabled
-                            className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setEditingEnvVar({ key, newKey: key, newValue: value })}
-                            className="p-1.5 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--accent-primary)] transition-all"
-                            title={t.common.edit}
-                          >
-                            <Edit2 size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => removeEnvVar(key)}
-                            className="p-1.5 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--color-danger)] transition-all"
-                            title={t.common.remove}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Add Env Var */}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder={t.serverForm.varNamePlaceholder}
-                    id="envVarName"
-                    className="w-32 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-gray-500 self-center">=</span>
-                  <input
-                    type="text"
-                    placeholder={t.serverForm.varValuePlaceholder}
-                    id="envVarValue"
-                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const nameInput = document.getElementById('envVarName') as HTMLInputElement;
-                      const valueInput = document.getElementById('envVarValue') as HTMLInputElement;
-                      if (nameInput.value && valueInput.value) {
-                        handleEnvVarChange(nameInput.value, valueInput.value);
-                        nameInput.value = '';
-                        valueInput.value = '';
-                      }
-                    }}
-                    className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
-                  >
-                    {t.common.add}
-                  </button>
-                </div>
               </div>
             </div>
           )}

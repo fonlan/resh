@@ -10,7 +10,6 @@ export interface Server {
   portForwards: PortForward[];
   keepAlive: number;
   autoExecCommands: string[];
-  envVars: Record<string, string>;
   snippets?: import('./snippet').Snippet[];
   additionalPrompt?: string | null;
   synced: boolean;
