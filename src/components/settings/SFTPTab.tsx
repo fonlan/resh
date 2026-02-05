@@ -69,7 +69,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
         ...config.general,
         sftp: {
           ...config.general.sftp,
-          editors: [...config.general.sftp.editors, newRule],
+          editors: [newRule, ...config.general.sftp.editors],
         },
       },
     });
