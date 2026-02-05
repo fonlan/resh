@@ -15,8 +15,12 @@ pub async fn sftp_edit_file(
     session_id: String,
     remote_path: String,
 ) -> Result<String, String> {
-    // 1. Create temp directory
-    let temp_dir = std::env::temp_dir().join("resh_sftp").join(&session_id);
+    // 1. Create unique temp directory for this specific edit task
+    let task_uuid = Uuid::new_v4().to_string();
+    let temp_dir = std::env::temp_dir()
+        .join("resh_sftp")
+        .join(&session_id)
+        .join(&task_uuid);
     fs::create_dir_all(&temp_dir).await.map_err(|e| e.to_string())?;
 
     // 2. Determine local filename
@@ -25,6 +29,10 @@ pub async fn sftp_edit_file(
         .ok_or("Invalid remote path")?
         .to_string_lossy();
     let local_path = temp_dir.join(file_name_str.as_ref());
+
+    // Kill any existing watch for the same remote file in this session
+    // This ensures only one watcher exists per remote file
+    state.sftp_edit_manager.stop_watching_remote(&session_id, &remote_path);
 
     let task_id = Uuid::new_v4().to_string();
 

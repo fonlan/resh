@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 pub struct SftpEditManager {
     watched_files: Arc<Mutex<HashMap<PathBuf, (String, String)>>>,
+    watched_directories: Arc<Mutex<HashMap<PathBuf, usize>>>,
     // watcher must be kept alive
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     _tx: mpsc::Sender<PathBuf>,
@@ -136,8 +137,6 @@ impl SftpEditManager {
         let watcher = RecommendedWatcher::new(move |res: Result<notify::Event, notify::Error>| {
             match res {
                 Ok(event) => {
-                    // Editors often use atomic writes (rename), so we should listen to Create/Modify/Remove/Rename
-                    // We just forward the path, the loop checks if it's a watched file
                     for path in event.paths {
                         let _ = tx_clone.blocking_send(path);
                     }
@@ -152,6 +151,7 @@ impl SftpEditManager {
 
         SftpEditManager {
             watched_files,
+            watched_directories: Arc::new(Mutex::new(HashMap::new())),
             watcher: Arc::new(Mutex::new(watcher)),
             _tx: tx,
             _app: app,
@@ -160,35 +160,98 @@ impl SftpEditManager {
 
     pub fn watch_file(&self, local_path: PathBuf, session_id: String, remote_path: String) -> Result<(), String> {
         let mut files = self.watched_files.lock().unwrap();
+        
+        // If already watching, just update info
+        let is_new = !files.contains_key(&local_path);
         files.insert(local_path.clone(), (session_id, remote_path));
 
-        let mut watcher_guard = self.watcher.lock().unwrap();
-        if let Some(watcher) = watcher_guard.as_mut() {
-            // Watch the parent directory to catch atomic renames/replacements
+        if is_new {
             if let Some(parent) = local_path.parent() {
-                if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
-                    return Err(format!("Failed to watch directory: {}", e));
-                }
-            } else {
-                // Fallback to watching file if no parent (unlikely)
-                if let Err(e) = watcher.watch(&local_path, RecursiveMode::NonRecursive) {
-                    return Err(format!("Failed to watch file: {}", e));
+                let mut dirs = self.watched_directories.lock().unwrap();
+                let count = dirs.entry(parent.to_path_buf()).or_insert(0);
+                *count += 1;
+                
+                if *count == 1 {
+                    let mut watcher_guard = self.watcher.lock().unwrap();
+                    if let Some(watcher) = watcher_guard.as_mut() {
+                        info!("Starting to watch directory: {:?}", parent);
+                        if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
+                            error!("Failed to watch directory {:?}: {}", parent, e);
+                            // Cleanup if failed
+                            *count -= 1;
+                            if *count == 0 { dirs.remove(parent); }
+                            files.remove(&local_path);
+                            return Err(format!("Failed to watch directory: {}", e));
+                        }
+                    }
                 }
             }
-        } else {
-            return Err("Watcher not initialized".to_string());
         }
         
         Ok(())
     }
 
-    pub fn stop_watching(&self, local_path: &PathBuf) {
+    pub fn stop_watching(&self, local_path: &Path) {
         let mut files = self.watched_files.lock().unwrap();
-        files.remove(local_path);
-        
-        let mut watcher_guard = self.watcher.lock().unwrap();
-        if let Some(watcher) = watcher_guard.as_mut() {
-            let _ = watcher.unwatch(local_path);
+        if files.remove(local_path).is_some() {
+            if let Some(parent) = local_path.parent() {
+                let mut dirs = self.watched_directories.lock().unwrap();
+                if let Some(count) = dirs.get_mut(parent) {
+                    if *count > 0 {
+                        *count -= 1;
+                        if *count == 0 {
+                            dirs.remove(parent);
+                            let mut watcher_guard = self.watcher.lock().unwrap();
+                            if let Some(watcher) = watcher_guard.as_mut() {
+                                info!("Stopping watch for directory: {:?}", parent);
+                                let _ = watcher.unwatch(parent);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn stop_watching_remote(&self, session_id: &str, remote_path: &str) {
+        let to_remove = {
+            let files = self.watched_files.lock().unwrap();
+            files.iter()
+                .filter(|(_, (sid, rp))| sid == session_id && rp == remote_path)
+                .map(|(lp, _)| lp.clone())
+                .collect::<Vec<_>>()
+        };
+
+        for lp in to_remove {
+            info!("Stopping existing watch for remote file {} in session {}", remote_path, session_id);
+            self.stop_watching(&lp);
+            // Clean up the old temp directory
+            if let Some(parent) = lp.parent() {
+                if parent.to_string_lossy().contains("resh_sftp") {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
+        }
+    }
+
+    pub fn cleanup_session(&self, session_id: &str) {
+        let to_remove = {
+            let files = self.watched_files.lock().unwrap();
+            files.iter()
+                .filter(|(_, (sid, _))| sid == session_id)
+                .map(|(lp, _)| lp.clone())
+                .collect::<Vec<_>>()
+        };
+
+        for path in to_remove {
+            info!("Cleaning up edit session for file: {:?}", path);
+            self.stop_watching(&path);
+            
+            if let Some(parent) = path.parent() {
+                if parent.to_string_lossy().contains("resh_sftp") {
+                    let _ = std::fs::remove_dir_all(parent);
+                }
+            }
         }
     }
 }

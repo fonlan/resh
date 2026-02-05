@@ -546,12 +546,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleEditLocal = async () => {
     if (!contextMenu || !sessionId || !config || !contextMenu.entry) return;
-    const entryName = contextMenu.entry.name;
+    const entry = contextMenu.entry;
+    const entryName = entry.name;
+    const remotePath = entry.path;
+    handleCloseContextMenu();
+
     try {
-        console.log('[handleEditLocal] Starting edit', contextMenu.entry.path);
+        console.log('[handleEditLocal] Starting edit', remotePath);
         const localPath = await invoke<string>('sftp_edit_file', {
             sessionId,
-            remotePath: contextMenu.entry.path
+            remotePath
         });
         console.log('[handleEditLocal] Downloaded to', localPath);
 
@@ -570,7 +574,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     } catch (e) {
         console.error('[handleEditLocal] Edit failed', e);
     }
-    handleCloseContextMenu();
   };
 
   useEffect(() => {

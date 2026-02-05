@@ -41,19 +41,21 @@ pub struct ResizeParams {
 pub async fn connect_to_server(
     window: Window,
     params: ConnectParams,
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<ConnectResponse, String> {
     // Create channel for receiving SSH data
     let (tx, mut rx) = mpsc::channel::<(String, Vec<u8>)>(100);
 
     // Spawn a task to forward SSH data to frontend events
     let window_clone = window.clone();
+    let state_clone = state.inner().clone();
     tokio::spawn(async move {
         let mut current_session_id = None;
         while let Some((session_id, data)) = rx.recv().await {
             if current_session_id.is_none() {
                 current_session_id = Some(session_id.clone());
             }
+            // ... (keeping existing logic for brevity)
 
             // Handle recording if active
             {
@@ -97,6 +99,10 @@ pub async fn connect_to_server(
         // Notify frontend that connection is closed
         if let Some(session_id) = current_session_id {
             tracing::info!("SSH Session {} loop ended (connection closed)", session_id);
+            
+            // Clean up SFTP edit sessions and watchers
+            state_clone.sftp_edit_manager.cleanup_session(&session_id);
+
             // Ensure recording is stopped
             {
                 let mut sessions = RECORDING_SESSIONS.lock().await;
@@ -183,8 +189,9 @@ pub async fn resize_terminal(
 #[tauri::command]
 pub async fn close_session(
     session_id: String,
-    _state: State<'_, Arc<AppState>>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
+    state.sftp_edit_manager.cleanup_session(&session_id);
     SSHClient::disconnect(&session_id).await?;
     Ok(())
 }
