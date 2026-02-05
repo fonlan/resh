@@ -50,6 +50,24 @@ export const MainWindow: React.FC = () => {
       setIsSidebarsInitialized(true);
     }
   }, [config, isSidebarsInitialized]);
+
+  useEffect(() => {
+    if (!config?.servers) return;
+
+    setTabs(prevTabs => {
+      let hasChanges = false;
+      const newTabs = prevTabs.map(tab => {
+        const server = config.servers.find(s => s.id === tab.serverId);
+        if (server && server.name !== tab.label) {
+          hasChanges = true;
+          return { ...tab, label: server.name };
+        }
+        return tab;
+      });
+      return hasChanges ? newTabs : prevTabs;
+    });
+  }, [config?.servers]);
+
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
   // Listen for sync failed events
