@@ -164,6 +164,15 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     }
   }, [conflicts, removeConflict]);
 
+  // Ensure width doesn't exceed 50% on window resize
+  useEffect(() => {
+    const handleResize = () => {
+      setWidth(prev => Math.min(prev, window.innerWidth * 0.5));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [sessions, setSessions] = useState<Record<string, SessionState>>({});
 
   const currentSession = sessionId ? sessions[sessionId] : undefined;
@@ -624,7 +633,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     const resize = (e: MouseEvent) => {
       if (isResizing) {
         const newWidth = e.clientX; 
-        if (newWidth >= 200 && newWidth <= 600) {
+        if (newWidth >= 200 && newWidth <= window.innerWidth * 0.5) {
           setWidth(newWidth);
         }
       }
