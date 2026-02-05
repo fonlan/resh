@@ -2,7 +2,7 @@ import { FileConflict, ConflictResolution } from '../types/sftp'
 
 interface FileConflictDialogProps {
   conflict: FileConflict
-  onResolve: (resolution: ConflictResolution) => void
+  onResolve: (resolution: ConflictResolution | "overwrite-all") => void
 }
 
 function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
@@ -105,6 +105,13 @@ function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
             className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors"
           >
             覆盖
+          </button>
+          <button
+            type="button"
+            onClick={() => onResolve('overwrite-all')}
+            className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
+          >
+            覆盖所有
           </button>
         </div>
       </div>

@@ -145,9 +145,23 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const overwriteAllRef = useRef(false);
 
   const conflicts = useTransferStore(state => state.conflicts);
   const removeConflict = useTransferStore(state => state.removeConflict);
+
+  // Auto-resolve conflicts if overwrite all is active
+  useEffect(() => {
+    if (overwriteAllRef.current && conflicts.length > 0) {
+      conflicts.forEach(conflict => {
+        invoke('sftp_resolve_conflict', {
+          taskId: conflict.task_id,
+          resolution: 'overwrite'
+        }).catch(console.error);
+        removeConflict(conflict.task_id);
+      });
+    }
+  }, [conflicts, removeConflict]);
 
   const [sessions, setSessions] = useState<Record<string, SessionState>>({});
 
@@ -636,6 +650,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const handleUpload = async () => {
       if (!sessionId) return;
       const targetPath = contextMenu && contextMenu.entry?.is_dir ? contextMenu.entry.path : currentPath;
+      
+      // Reset overwrite all flag for new upload batch
+      overwriteAllRef.current = false;
 
       try {
           const selected = await invoke<string[] | null>('pick_files');
@@ -928,8 +945,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     handleCloseContextMenu();
   };
 
-  const handleResolveConflict = async (conflict: FileConflict, resolution: ConflictResolution) => {
+  const handleResolveConflict = async (conflict: FileConflict, resolution: ConflictResolution | "overwrite-all") => {
     try {
+      if (resolution === 'overwrite-all') {
+        overwriteAllRef.current = true;
+        resolution = 'overwrite';
+      }
+      
       await invoke('sftp_resolve_conflict', {
         taskId: conflict.task_id,
         resolution: resolution
