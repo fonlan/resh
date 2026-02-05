@@ -754,4 +754,110 @@ impl SftpManager {
         sftp.rename(old_path, new_path).await.map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    pub async fn copy_item(session_id: &str, source_path: &str, dest_path: &str) -> Result<(), String> {
+        let sftp = Self::get_session(session_id).await?;
+
+        let metadata = sftp.stat(source_path).await.map_err(|e| e.to_string())?.attrs;
+        let is_dir = metadata.is_dir();
+
+        if is_dir {
+            Self::copy_dir_recursive(&sftp, source_path, dest_path).await?;
+        } else {
+            Self::copy_file(&sftp, source_path, dest_path).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn copy_file(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+        let handle = sftp.open(source, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+
+        let mut attrs = FileAttributes::default();
+        if let Ok(source_attrs) = sftp.stat(source).await {
+            attrs.permissions = source_attrs.attrs.permissions;
+        }
+
+        let dest_handle = sftp.open(dest, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, attrs).await.map_err(|e| e.to_string())?.handle;
+
+        let total_bytes = sftp.fstat(&handle).await.map_err(|e| e.to_string())?.attrs.size.unwrap_or(0);
+        let chunk_size = 256 * 1024;
+
+        let mut futures = FuturesUnordered::new();
+        let mut next_offset = 0u64;
+        let max_concurrent_requests = 64;
+
+        for _ in 0..max_concurrent_requests {
+            if next_offset >= total_bytes { break; }
+            let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+            let offset = next_offset;
+            let sftp_clone = sftp.clone();
+            let handle_clone = handle.clone();
+
+            futures.push(async move {
+                let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
+                (offset, data)
+            }.boxed());
+            next_offset += current_chunk_size;
+        }
+
+        while let Some((offset, result)) = futures.next().await {
+            let data = result.map_err(|e| e.to_string())?.data;
+            sftp.write(&dest_handle, offset, data).await.map_err(|e| e.to_string())?;
+
+            if next_offset < total_bytes {
+                let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                let offset = next_offset;
+                let sftp_clone = sftp.clone();
+                let handle_clone = handle.clone();
+
+                futures.push(Box::pin(async move {
+                    let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
+                    (offset, data)
+                }));
+                next_offset += current_chunk_size;
+            }
+        }
+
+        let _ = sftp.close(handle).await;
+        let _ = sftp.close(dest_handle).await;
+        Ok(())
+    }
+
+    async fn copy_dir_recursive(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+        sftp.mkdir(dest, FileAttributes::default()).await.map_err(|e| e.to_string())?;
+
+        let handle = sftp.opendir(source).await.map_err(|e| e.to_string())?.handle;
+
+        loop {
+            match sftp.readdir(&handle).await {
+                Ok(name) => {
+                    for entry in name.files {
+                        let file_name = entry.filename;
+                        if file_name == "." || file_name == ".." { continue; }
+
+                        let source_path = format!("{}/{}", source.trim_end_matches('/'), file_name);
+                        let dest_path = format!("{}/{}", dest.trim_end_matches('/'), file_name);
+                        let is_dir = entry.attrs.is_dir();
+
+                        if is_dir {
+                            Box::pin(Self::copy_dir_recursive(sftp, &source_path, &dest_path)).await?;
+                        } else {
+                            Box::pin(async {
+                                Self::copy_file(sftp, &source_path, &dest_path).await
+                            }).await?;
+                        }
+                    }
+                }
+                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
+                Err(e) => {
+                    let _ = sftp.close(handle).await;
+                    return Err(e.to_string());
+                }
+            }
+        }
+
+        let _ = sftp.close(handle).await;
+        Ok(())
+    }
 }

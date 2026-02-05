@@ -227,6 +227,7 @@ async fn main() {
             commands::sftp::sftp_create_file,
             commands::sftp::sftp_chmod,
             commands::sftp::sftp_rename,
+            commands::sftp::sftp_copy,
             commands::sftp_edit::sftp_edit_file,
             commands::sftp_edit::open_local_editor,
             commands::sftp_edit::pick_folder,

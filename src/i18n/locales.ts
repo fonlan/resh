@@ -313,6 +313,11 @@ export const locales = {
         edit: 'Edit',
         editServerVim: 'Open with Server Vim',
         editLocal: 'Open with Local Editor',
+        copy: 'Copy',
+        cut: 'Cut',
+        pasteCopy: 'Paste Copy',
+        pasteMove: 'Paste Move',
+        cancel: 'Cancel',
       },
       tooltips: {
         sort: 'Sort',
@@ -671,6 +676,11 @@ export const locales = {
         edit: '编辑',
         editServerVim: '使用服务器 Vim 打开',
         editLocal: '使用本地编辑器打开',
+        copy: '复制',
+        cut: '剪切',
+        pasteCopy: '粘贴副本',
+        pasteMove: '移动到此处',
+        cancel: '取消',
       },
       tooltips: {
         sort: '排序',

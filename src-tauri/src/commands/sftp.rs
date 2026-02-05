@@ -64,3 +64,8 @@ pub async fn sftp_chmod(session_id: String, path: String, mode: u32) -> Result<(
 pub async fn sftp_rename(session_id: String, old_path: String, new_path: String) -> Result<(), String> {
     SftpManager::rename_item(&session_id, &old_path, &new_path).await
 }
+
+#[tauri::command]
+pub async fn sftp_copy(session_id: String, source_path: String, dest_path: String) -> Result<(), String> {
+    SftpManager::copy_item(&session_id, &source_path, &dest_path).await
+}

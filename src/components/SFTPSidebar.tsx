@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link, Edit, FileCode } from 'lucide-react';
+import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link, Edit, FileCode, Clipboard } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../hooks/useConfig';
@@ -37,15 +37,17 @@ const FileTreeItem: React.FC<{
   depth: number;
   onToggle: (entry: FileEntry) => void;
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
-}> = ({ entry, depth, onToggle, onContextMenu }) => {
+  clipboardSourcePath?: string;
+}> = ({ entry, depth, onToggle, onContextMenu, clipboardSourcePath }) => {
+  const isInClipboard = clipboardSourcePath === entry.path;
   return (
     <div>
       <button
         type="button"
-        className="flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)]"
+        className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? 'opacity-50' : ''}`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
-        style={{ color: 'inherit', paddingLeft: `${depth * 12 + 4}px` }}
+        style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         <div className="w-4 flex-shrink-0 flex items-center justify-center">
            {(entry.is_dir || (entry.is_symlink && entry.target_is_dir)) && (
@@ -58,7 +60,7 @@ const FileTreeItem: React.FC<{
              )
            )}
         </div>
-        
+
         {entry.is_symlink ? (
           entry.target_is_dir ? (
             <FolderSymlink size={16} className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400" />
@@ -75,7 +77,7 @@ const FileTreeItem: React.FC<{
           <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
 
-        <span className="truncate ml-0.25">
+        <span className={`truncate ml-0.25 ${isInClipboard ? 'line-through opacity-60' : ''}`}>
           {entry.name}
           {entry.link_target && (
             <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
@@ -84,7 +86,7 @@ const FileTreeItem: React.FC<{
           )}
         </span>
       </button>
-      
+
       {entry.isExpanded && entry.children && (
         <div className="sftp-tree-children">
           {entry.children.map((child) => (
@@ -94,6 +96,7 @@ const FileTreeItem: React.FC<{
               depth={depth + 1}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
+              clipboardSourcePath={clipboardSourcePath}
             />
           ))}
         </div>
@@ -108,6 +111,14 @@ type SortOrder = 'asc' | 'desc';
 interface SortState {
   type: SortType;
   order: SortOrder;
+}
+
+interface ClipboardState {
+  sourcePath: string;
+  sourceName: string;
+  isDir: boolean;
+  isCut: boolean;
+  sessionId: string;
 }
 
 interface SessionState {
@@ -130,18 +141,20 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
-  
+
   const [sessions, setSessions] = useState<Record<string, SessionState>>({});
-  
+
   const currentSession = sessionId ? sessions[sessionId] : undefined;
   const rootFiles = currentSession?.rootFiles || [];
   const currentPath = currentSession?.currentPath || '/';
   const isLoading = currentSession?.isLoading || false;
   const sortState = currentSession?.sortState || { type: 'name', order: 'asc' };
 
+  const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
+
   const [showSortMenu, setShowSortMenu] = useState(false);
 
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry: FileEntry } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry: FileEntry | null } | null>(null);
 
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
   const [newFileModal, setNewFileModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
@@ -497,7 +510,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   }, []);
 
   const handleEditVim = () => {
-    if (!contextMenu || !sessionId) return;
+    if (!contextMenu || !sessionId || !contextMenu.entry) return;
     const path = contextMenu.entry.path.replace(/"/g, '\\"');
     const command = `vim "${path}"\r`;
     window.dispatchEvent(new CustomEvent('paste-snippet', { detail: command }));
@@ -510,15 +523,15 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleEditLocal = async () => {
-    if (!contextMenu || !sessionId || !config) return;
+    if (!contextMenu || !sessionId || !config || !contextMenu.entry) return;
     try {
         console.log('[handleEditLocal] Starting edit', contextMenu.entry.path);
-        const localPath = await invoke<string>('sftp_edit_file', { 
-            sessionId, 
-            remotePath: contextMenu.entry.path 
+        const localPath = await invoke<string>('sftp_edit_file', {
+            sessionId,
+            remotePath: contextMenu.entry.path
         });
         console.log('[handleEditLocal] Downloaded to', localPath);
-        
+
         let editorCmd = undefined;
         if (config.general.sftp?.editors) {
             const rule = config.general.sftp.editors.find(r => matchPattern(contextMenu.entry.name, r.pattern));
@@ -597,11 +610,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   }, [isOpen, isLocked, onClose]);
 
   const handleDownload = async () => {
-    if (!contextMenu || !sessionId || !config) return;
+    if (!contextMenu || !sessionId || !config || !contextMenu.entry) return;
     try {
-        const localPath = await invoke<string>('select_save_path', { 
+        const localPath = await invoke<string>('select_save_path', {
             defaultName: contextMenu.entry.name,
-            initialDir: config.general.sftp?.defaultDownloadPath 
+            initialDir: config.general.sftp?.defaultDownloadPath
         });
         if (localPath) {
              await invoke('sftp_download', { sessionId, remotePath: contextMenu.entry.path, localPath });
@@ -614,7 +627,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleUpload = async () => {
       if (!sessionId) return;
-      const targetPath = contextMenu && contextMenu.entry.is_dir ? contextMenu.entry.path : currentPath;
+      const targetPath = contextMenu && contextMenu.entry?.is_dir ? contextMenu.entry.path : currentPath;
 
       try {
           const selected = await invoke<string[] | null>('pick_files');
@@ -625,7 +638,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                   const filename = file.split(/[\\/]/).pop();
                   await invoke('sftp_upload', { sessionId, localPath: file, remotePath: `${targetPath}/${filename}` });
               }
-              // Upload is async now, tracked in TransferStatusPanel
           }
       } catch (e) {
           console.error('Upload failed', e);
@@ -659,7 +671,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleDelete = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     setDeleteModal({ isOpen: true, entry: contextMenu.entry });
     handleCloseContextMenu();
   };
@@ -676,7 +688,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleNewFile = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
     setNewFileModal({ isOpen: true, parentPath });
     setNewItemName('');
@@ -697,7 +709,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleNewFolder = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
     setNewFolderModal({ isOpen: true, parentPath });
     setNewItemName('');
@@ -718,7 +730,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleRename = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     setRenameModal({ isOpen: true, entry: contextMenu.entry });
     setNewItemName(contextMenu.entry.name);
     handleCloseContextMenu();
@@ -731,7 +743,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       setNewItemName('');
       return;
     }
-    
+
     try {
       const parentPath = getParentPath(renameModal.entry.path);
       const newPath = `${parentPath}/${newItemName.trim()}`;
@@ -745,7 +757,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleProperties = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     const octalPerms = permissionsToOctal(contextMenu.entry.permissions);
     setPropertiesModal({ isOpen: true, entry: contextMenu.entry, permissions: octalPerms });
     setPermissionInput(octalPerms);
@@ -765,29 +777,103 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   };
 
   const handleCopyName = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     navigator.clipboard.writeText(contextMenu.entry.name);
     handleCloseContextMenu();
   };
 
   const handleCopyFullPath = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     navigator.clipboard.writeText(contextMenu.entry.path);
     handleCloseContextMenu();
   };
 
   const handleSendPath = () => {
-    if (!contextMenu) return;
+    if (!contextMenu || !contextMenu.entry) return;
     window.dispatchEvent(new CustomEvent('paste-snippet', { detail: contextMenu.entry.path }));
     handleCloseContextMenu();
   };
 
   const handleTerminalJump = () => {
-    if (!contextMenu) return;
-    // Escape double quotes in path if present
+    if (!contextMenu || !contextMenu.entry) return;
     const path = contextMenu.entry.path.replace(/"/g, '\\"');
     const command = `cd "${path}"\r`;
     window.dispatchEvent(new CustomEvent('paste-snippet', { detail: command }));
+    handleCloseContextMenu();
+  };
+
+  const handleCopyForPaste = () => {
+    if (!contextMenu || !sessionId || !contextMenu.entry) return;
+    setClipboard({
+      sourcePath: contextMenu.entry.path,
+      sourceName: contextMenu.entry.name,
+      isDir: contextMenu.entry.is_dir,
+      isCut: false,
+      sessionId
+    });
+    handleCloseContextMenu();
+  };
+
+  const handleCut = () => {
+    if (!contextMenu || !sessionId || !contextMenu.entry) return;
+    setClipboard({
+      sourcePath: contextMenu.entry.path,
+      sourceName: contextMenu.entry.name,
+      isDir: contextMenu.entry.is_dir,
+      isCut: true,
+      sessionId
+    });
+    handleCloseContextMenu();
+  };
+
+  const handlePaste = async () => {
+    if (!contextMenu || !sessionId || !clipboard) return;
+
+    const targetPath = (contextMenu.entry && contextMenu.entry.is_dir)
+      ? contextMenu.entry.path
+      : currentPath;
+
+    const sourceParentPath = clipboard.sourcePath.substring(0, clipboard.sourcePath.lastIndexOf('/')) || '/';
+    const isSameDirectory = sourceParentPath === targetPath;
+
+    const destName = clipboard.isCut
+      ? clipboard.sourceName
+      : (isSameDirectory ? `copy_of_${clipboard.sourceName}` : clipboard.sourceName);
+
+    const destPath = `${targetPath}/${destName}`;
+
+    try {
+      if (clipboard.isCut) {
+        await invoke('sftp_rename', {
+          sessionId,
+          oldPath: clipboard.sourcePath,
+          newPath: destPath
+        });
+      } else {
+        await invoke('sftp_copy', {
+          sessionId,
+          sourcePath: clipboard.sourcePath,
+          destPath
+        });
+      }
+
+      const currentSessionState = sessions[sessionId];
+      if (currentSessionState) {
+        const expandedPaths = getAllExpandedPaths(currentSessionState.rootFiles);
+        await loadDirectory(targetPath, sessionId, expandedPaths);
+      } else {
+        await loadDirectory(targetPath);
+      }
+    } catch (e) {
+      console.error('Paste failed', e);
+    }
+
+    setClipboard(null);
+    handleCloseContextMenu();
+  };
+
+  const handleClearClipboard = () => {
+    setClipboard(null);
     handleCloseContextMenu();
   };
 
@@ -866,12 +952,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden py-0 px-2">
           {rootFiles.map(entry => (
-              <FileTreeItem 
-                key={entry.path} 
-                entry={entry} 
-                depth={0} 
+              <FileTreeItem
+                key={entry.path}
+                entry={entry}
+                depth={0}
                 onToggle={handleToggle}
                 onContextMenu={handleContextMenu}
+                clipboardSourcePath={clipboard?.sourcePath}
               />
           ))}
           {rootFiles.length === 0 && !isLoading && (
@@ -894,7 +981,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
-            {!isDirectory(contextMenu.entry) && (
+            {contextMenu.entry && !isDirectory(contextMenu.entry) && (
                 <div className="relative">
                     <div
                         onMouseEnter={() => {
@@ -930,13 +1017,33 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                     </div>
                 </div>
             )}
-            <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                <Download size={14} /> {t.sftp.contextMenu.download}
-            </button>
+            {contextMenu.entry && (
+                <>
+                    <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Download size={14} /> {t.sftp.contextMenu.download}
+                    </button>
+                    <button type="button" onClick={handleCopyForPaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Copy size={14} /> {t.sftp.contextMenu.copy}
+                    </button>
+                    <button type="button" onClick={handleCut} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Pencil size={14} /> {t.sftp.contextMenu.cut}
+                    </button>
+                </>
+            )}
+            {clipboard && (
+                <>
+                    <button type="button" onClick={handlePaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Clipboard size={14} /> {clipboard.isCut ? t.sftp.contextMenu.pasteMove : t.sftp.contextMenu.pasteCopy}
+                    </button>
+                    <button type="button" onClick={handleClearClipboard} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-muted)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]">
+                        <X size={14} /> {t.sftp.contextMenu.cancel}
+                    </button>
+                </>
+            )}
             <button type="button" onClick={handleUpload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Upload size={14} /> {t.sftp.contextMenu.upload}
             </button>
-            {(isDirectory(contextMenu.entry)) && (
+            {contextMenu.entry && isDirectory(contextMenu.entry) && (
                 <>
                     <button type="button" onClick={handleNewFile} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                         <Plus size={14} /> {t.sftp.contextMenu.newFile}
@@ -966,7 +1073,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                         <Link size={14} /> {t.sftp.contextMenu.path}
                         <ChevronRight size={14} style={{ marginLeft: 'auto', opacity: 0.5 }} />
                     </button>
-                    {showPathSubmenu && (
+                    {showPathSubmenu && contextMenu.entry && (
                         <div
                             className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in"
                         >
@@ -988,12 +1095,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                     )}
                 </div>
             </div>
-            <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                <Settings size={14} /> {t.sftp.contextMenu.properties}
-            </button>
-            <button type="button" onClick={handleRename} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                <Pencil size={14} /> {t.sftp.contextMenu.rename}
-            </button>
+            {contextMenu.entry && (
+                <>
+                    <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Settings size={14} /> {t.sftp.contextMenu.properties}
+                    </button>
+                    <button type="button" onClick={handleRename} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Pencil size={14} /> {t.sftp.contextMenu.rename}
+                    </button>
+                </>
+            )}
             <button type="button" onClick={handleDelete} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Trash size={14} /> {t.sftp.contextMenu.delete}
             </button>
