@@ -234,10 +234,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
               type="button"
               onClick={() => setActiveTab(tab.id)}
               className={`
-                w-full text-left px-3 py-2.5 rounded bg-transparent border-none
+                w-full text-left px-[14px] py-2.5 rounded bg-transparent border-none
                 text-[var(--text-secondary)] cursor-pointer text-[13px] font-medium
                 transition-all duration-200 flex items-center gap-2.5 relative
-                hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text-primary)]
+                hover:bg-[rgba(255,255,255,0.03)] hover:text-[var(--text-primary)] hover:translate-x-0.5
                 ${isActive ? 'active' : ''}
               `}
               style={
@@ -250,22 +250,31 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   : {}
               }
             >
+              {isActive && (
+                <span
+                  className="absolute -left-3 top-[20%] bottom-[20%] w-[3px] rounded-r"
+                  style={{
+                    background: 'var(--accent-primary)',
+                    boxShadow: '0 0 10px var(--accent-primary)'
+                  }}
+                />
+              )}
               {tab.icon}
-              <span>{tab.label}</span>
-              {hasError && <span className="ml-auto w-2 h-2 rounded-full bg-red-500" />}
+              <span className="relative z-[1]">{tab.label}</span>
+              {hasError && <span className="ml-auto w-2 h-2 rounded-full bg-red-500 relative z-[1]" />}
             </button>
           );
         })}
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-primary)]">
+      <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-secondary)]">
         <div className="space-y-6">
           {activeTab === 'general' && (
             <>
               {/* Name */}
               <div>
-                <label htmlFor="server-name" className="block text-sm font-medium text-gray-300 mb-1">
+                <label htmlFor="server-name" className="block text-sm font-medium text-zinc-400 mb-1.5">
                   {t.serverForm.nameLabel}
                 </label>
                 <input
@@ -274,16 +283,16 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   value={formData.name}
                   onChange={(e) => handleChange('name', e.target.value)}
                   placeholder={t.serverForm.namePlaceholder}
-                  className={`w-full px-3 py-2 rounded-md border ${
-                    errors.name ? 'border-red-500' : 'border-gray-600'
-                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-all ${
+                    errors.name ? 'border-red-500' : 'border-zinc-700/50'
+                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
                 />
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
               </div>
 
               {/* Host */}
               <div>
-                <label htmlFor="server-host" className="block text-sm font-medium text-gray-300 mb-1">
+                <label htmlFor="server-host" className="block text-sm font-medium text-zinc-400 mb-1.5">
                   {t.common.host}
                 </label>
                 <input
@@ -292,9 +301,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                   value={formData.host}
                   onChange={(e) => handleChange('host', e.target.value)}
                   placeholder={t.serverForm.hostPlaceholder}
-                  className={`w-full px-3 py-2 rounded-md border ${
-                    errors.host ? 'border-red-500' : 'border-gray-600'
-                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                  className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-all ${
+                    errors.host ? 'border-red-500' : 'border-zinc-700/50'
+                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
                 />
                 {errors.host && <p className="text-red-400 text-xs mt-1">{errors.host}</p>}
               </div>
@@ -302,7 +311,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
               {/* Port and Username (Side by Side) */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="server-port" className="block text-sm font-medium text-gray-300 mb-1">
+                  <label htmlFor="server-port" className="block text-sm font-medium text-zinc-400 mb-1.5">
                     {t.common.port}
                   </label>
                   <input
@@ -312,9 +321,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) => handleChange('port', parseInt(e.target.value, 10))}
                     min={1}
                     max={65535}
-                    className={`w-full px-3 py-2 rounded-md border ${
-                      errors.port ? 'border-red-500' : 'border-gray-600'
-                    } bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500`}
+                    className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-all ${
+                      errors.port ? 'border-red-500' : 'border-zinc-700/50'
+                    } bg-[var(--bg-primary)] text-[var(--text-primary)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
                   />
                   {errors.port && <p className="text-red-400 text-xs mt-1">{errors.port}</p>}
                 </div>
@@ -322,10 +331,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 {/* Username */}
                 <div>
                   <div className="flex items-center gap-2">
-                    <label htmlFor="server-username" className="block text-sm font-medium text-gray-300 mb-1">
+                    <label htmlFor="server-username" className="block text-sm font-medium text-zinc-400 mb-1.5">
                       {t.serverForm.usernameLabel}
                     </label>
-                    <span className="text-xs text-gray-500">({t.common.optional})</span>
+                    <span className="text-xs text-zinc-500 mb-1.5">({t.common.optional})</span>
                   </div>
                   <input
                     id="server-username"
@@ -333,7 +342,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     value={formData.username}
                     onChange={(e) => handleChange('username', e.target.value)}
                     placeholder={t.serverForm.usernamePlaceholder}
-                    className="w-full px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                   />
                 </div>
               </div>
@@ -341,10 +350,10 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
               {/* Authentication Selection */}
               <div>
                 <div className="flex items-center gap-2">
-                  <label htmlFor="server-auth" className="block text-sm font-medium text-gray-300 mb-1">
+                  <label htmlFor="server-auth" className="block text-sm font-medium text-zinc-400 mb-1.5">
                     {t.serverForm.authLabel}
                   </label>
-                  <span className="text-xs text-gray-500">({t.common.optional})</span>
+                  <span className="text-xs text-zinc-500 mb-1.5">({t.common.optional})</span>
                 </div>
                 <CustomSelect
                   id="server-auth"
@@ -363,15 +372,15 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           )}
 
           {activeTab === 'routing' && (
-            <>
-              <h3 className="text-sm font-medium text-gray-300 mb-4 border-b border-gray-700 pb-2">
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium text-zinc-300 mb-4 border-b border-zinc-700/50 pb-2">
                 {t.serverForm.routingTitle}
               </h3>
               
               <div className="space-y-4">
                 {/* Proxy */}
-                <div>
-                  <label htmlFor="server-proxy" className="block text-sm font-medium text-gray-400 mb-1">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="server-proxy" className="block text-sm font-medium text-zinc-400">
                     {t.serverForm.proxyLabel}
                   </label>
                   <CustomSelect
@@ -391,8 +400,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 </div>
 
                 {/* Jumphost */}
-                <div>
-                  <label htmlFor="server-jumphost" className="block text-sm font-medium text-gray-400 mb-1">
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="server-jumphost" className="block text-sm font-medium text-zinc-400">
                     {t.serverForm.jumphostLabel}
                   </label>
                   <CustomSelect
@@ -413,12 +422,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 </div>
 
                 {/* Keepalive Settings */}
-                <div className="pt-4 border-t border-gray-700">
-                  <h3 className="text-sm font-medium text-gray-300 mb-3">
+                <div className="pt-4 border-t border-zinc-700/50">
+                  <h3 className="text-sm font-medium text-zinc-300 mb-3">
                     {t.serverForm.keepaliveTitle}
                   </h3>
-                  <div>
-                    <label htmlFor="server-keepalive" className="block text-sm font-medium text-gray-400 mb-1">
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="server-keepalive" className="block text-sm font-medium text-zinc-400">
                       {t.serverForm.keepaliveInterval}
                     </label>
                     <input
@@ -427,19 +436,19 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                       value={formData.keepAlive}
                       onChange={(e) => handleChange('keepAlive', parseInt(e.target.value, 10))}
                       min={0}
-                      className="w-full px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                     />
                   </div>
                 </div>
               </div>
-            </>
+            </div>
           )}
 
           {activeTab === 'advanced' && (
             <div className="space-y-6">
               {/* Port Forwarding */}
               <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3 border-b border-gray-700 pb-2">
+                <h3 className="text-sm font-medium text-zinc-300 mb-3 border-b border-zinc-700/50 pb-2">
                   {t.serverForm.portForwardingTitle}
                 </h3>
 
@@ -449,15 +458,15 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     {formData.portForwards.map((pf, index) => (
                       <div
                         key={`${pf.local}-${pf.remote}`}
-                        className="flex items-center justify-between bg-[var(--bg-primary)] px-3 py-2 rounded-md"
+                        className="flex items-center justify-between bg-[var(--bg-secondary)] border border-zinc-700/50 px-3 py-2 rounded-md"
                       >
-                        <span className="text-gray-300 text-sm">
+                        <span className="text-zinc-300 text-sm">
                           {pf.local} → {pf.remote}
                         </span>
                         <button
                           type="button"
                           onClick={() => removePortForward(index)}
-                          className="text-red-400 hover:text-red-300 text-sm"
+                          className="text-red-400 hover:text-red-300 text-sm transition-colors"
                         >
                           {t.common.remove}
                         </button>
@@ -475,9 +484,9 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, local: e.target.value }))
                     }
-                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                   />
-                  <span className="text-gray-500 self-center">→</span>
+                  <span className="text-zinc-500 self-center">→</span>
                   <input
                     type="number"
                     placeholder={t.serverForm.remotePortPlaceholder}
@@ -485,12 +494,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, remote: e.target.value }))
                     }
-                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                   />
                   <button
                     type="button"
                     onClick={addPortForward}
-                    className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
+                    className="px-4 py-2 text-sm bg-zinc-700/30 text-white rounded-md border border-zinc-700/50 hover:bg-zinc-700/50 transition-all flex items-center justify-center whitespace-nowrap"
                   >
                     {t.common.add}
                   </button>
@@ -499,7 +508,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
 
               {/* Auto-Execute Commands */}
               <div>
-                <h3 className="text-sm font-medium text-gray-300 mb-3 border-b border-gray-700 pb-2">
+                <h3 className="text-sm font-medium text-zinc-300 mb-3 border-b border-zinc-700/50 pb-2">
                   {t.serverForm.autoExecTitle}
                 </h3>
 
@@ -513,12 +522,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           value={cmd}
                           onChange={(e) => handleAutoExecCommandChange(index, e.target.value)}
                           placeholder="e.g., cd /var/log"
-                          className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                         />
                         <button
                           type="button"
                           onClick={() => removeAutoExecCommand(index)}
-                          className="text-red-400 hover:text-red-300 px-3 py-2 text-sm flex items-center"
+                          className="text-red-400 hover:text-red-300 px-3 py-2 text-sm flex items-center transition-colors"
                         >
                           {t.common.remove}
                         </button>
@@ -530,7 +539,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 <button
                   type="button"
                   onClick={addAutoExecCommand}
-                  className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
+                  className="px-4 py-2 text-sm bg-zinc-700/30 text-white rounded-md border border-zinc-700/50 hover:bg-zinc-700/50 transition-all flex items-center justify-center whitespace-nowrap"
                 >
                   {t.serverForm.addCommand}
                 </button>
@@ -549,17 +558,17 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
           {activeTab === 'ai' && (
              <div>
                <div className="mb-4">
-                 <label htmlFor="server-additional-prompt" className="block text-sm font-medium text-gray-300 mb-1">
+                 <label htmlFor="server-additional-prompt" className="block text-sm font-medium text-zinc-400 mb-1.5">
                     {t.ai.serverAdditionalPrompt}
                  </label>
-                 <div className="text-xs text-gray-400 mb-2">
+                 <div className="text-xs text-zinc-500 mb-2">
                     {t.ai.serverAdditionalPromptDesc}
                  </div>
                   <textarea
                     id="server-additional-prompt"
                     value={formData.additionalPrompt || ''}
                     onChange={(e) => handleChange('additionalPrompt', e.target.value)}
-                    className="w-full h-48 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] placeholder:text-[13px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full h-48 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                     placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
                     style={{ resize: 'vertical' }}
                   />

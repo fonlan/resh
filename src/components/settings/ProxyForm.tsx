@@ -96,7 +96,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
     <div className="flex flex-col gap-4">
       {/* Name */}
       <div>
-        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+        <label className="block text-sm font-medium text-zinc-400 mb-1.5">
           {t.proxyForm.nameLabel}
         </label>
         <input
@@ -104,30 +104,30 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
           value={formData.name}
           onChange={(e) => handleChange('name', e.target.value)}
           placeholder={t.proxyForm.namePlaceholder}
-          className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
-            errors.name ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
-          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]`}
+          className={`w-full px-3 py-2 text-sm rounded-md bg-[var(--bg-primary)] border outline-none transition-all ${
+            errors.name ? 'border-red-500' : 'border-zinc-700/50'
+          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
         />
-        {errors.name && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.name}</p>}
+        {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
       </div>
 
       {/* Type */}
       <div>
-        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-2">
+        <label className="block text-sm font-medium text-zinc-400 mb-2">
           {t.proxyForm.typeLabel}
         </label>
         <div className="flex gap-4">
           {(['http', 'socks5'] as const).map((type) => (
-            <label key={type} className="flex items-center gap-2 cursor-pointer">
+            <label key={type} className="flex items-center gap-2 cursor-pointer group">
               <input
                 type="radio"
                 name="proxyType"
                 value={type}
                 checked={formData.type === type}
                 onChange={() => handleChange('type', type)}
-                className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border border-[1.5px] border-[var(--glass-border)] rounded-full bg-[var(--bg-primary)] cursor-pointer relative transition-all duration-[150ms] flex-shrink-0 inline-flex items-center justify-center vertical-align-middle checked:border-[var(--accent-primary)] checked:shadow-[var(--glow-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] after:content-[''] after:checked:w-2 after:checked:h-2 after:checked:bg-[var(--accent-primary)] after:checked:rounded-full"
+                className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded-full bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] after:content-[''] after:checked:w-2 after:checked:h-2 after:checked:bg-blue-500 after:checked:rounded-full"
               />
-              <span className="text-[var(--text-secondary)] uppercase">{type}</span>
+              <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors uppercase">{type}</span>
             </label>
           ))}
         </div>
@@ -135,7 +135,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
 
       {/* Host */}
       <div>
-        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+        <label className="block text-sm font-medium text-zinc-400 mb-1.5">
           {t.proxyForm.hostLabel}
         </label>
         <input
@@ -143,16 +143,16 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
           value={formData.host}
           onChange={(e) => handleChange('host', e.target.value)}
           placeholder={t.proxyForm.hostPlaceholder}
-          className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
-            errors.host ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
-          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]`}
+          className={`w-full px-3 py-2 text-sm rounded-md bg-[var(--bg-primary)] border outline-none transition-all ${
+            errors.host ? 'border-red-500' : 'border-zinc-700/50'
+          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
         />
-        {errors.host && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.host}</p>}
+        {errors.host && <p className="text-red-400 text-xs mt-1">{errors.host}</p>}
       </div>
 
       {/* Port */}
       <div>
-        <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+        <label className="block text-sm font-medium text-zinc-400 mb-1.5">
           {t.proxyForm.portLabel}
         </label>
         <input
@@ -161,32 +161,32 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
           onChange={(e) => handleChange('port', parseInt(e.target.value, 10))}
           min={1}
           max={65535}
-          className={`w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border ${
-            errors.port ? 'border-[var(--color-danger)]' : 'border-[var(--glass-border)]'
-          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]`}
+          className={`w-full px-3 py-2 text-sm rounded-md bg-[var(--bg-primary)] border outline-none transition-all ${
+            errors.port ? 'border-red-500' : 'border-zinc-700/50'
+          } text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
         />
-        {errors.port && <p className="text-[var(--color-danger)] text-xs mt-1">{errors.port}</p>}
+        {errors.port && <p className="text-red-400 text-xs mt-1">{errors.port}</p>}
       </div>
 
       {/* Optional Credentials */}
-      <div className="border-t border-[var(--glass-border)] pt-4 mt-4">
-        <h3 className="text-sm font-medium text-[var(--text-secondary)] mb-3">
+      <div className="border-t border-zinc-700/50 pt-4 mt-4">
+        <h3 className="text-sm font-medium text-zinc-300 mb-3">
           {t.proxyForm.authTitle}
         </h3>
 
         {/* Ignore SSL checkbox - only show for HTTP proxy */}
         {formData.type === 'http' && (
-          <div className="mb-4 p-3 bg-[rgba(15,23,42,0.5)] rounded-[var(--radius-sm)]">
+          <div className="mb-4 p-3 bg-zinc-700/20 rounded-md border border-zinc-700/50">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
                 checked={formData.ignoreSslErrors}
                 onChange={(e) => handleChange('ignoreSslErrors', e.target.checked)}
-                className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border border-[1.5px] border-[var(--glass-border)] rounded-[4px] bg-[var(--bg-primary)] cursor-pointer relative transition-all duration-[150ms] flex-shrink-0 inline-flex items-center justify-center vertical-align-middle checked:bg-[var(--accent-primary)] checked:border-[var(--accent-primary)] checked:shadow-[var(--glow-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
+                className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
               />
               <div>
-                <span className="text-[var(--text-secondary)] font-medium block">{t.proxyForm.ignoreSslLabel}</span>
-                <span className="text-[var(--text-muted)] text-xs">{t.proxyForm.ignoreSslDesc}</span>
+                <span className="text-sm font-medium text-zinc-300 block">{t.proxyForm.ignoreSslLabel}</span>
+                <span className="text-xs text-zinc-500">{t.proxyForm.ignoreSslDesc}</span>
               </div>
             </label>
           </div>
@@ -195,7 +195,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
         <div className="flex flex-col gap-3">
           {/* Username */}
           <div>
-            <label className="block text-sm font-medium text-[var(--text-muted)] mb-1">
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">
               {t.username}
             </label>
             <input
@@ -203,13 +203,13 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
               value={formData.username || ''}
               onChange={(e) => handleChange('username', e.target.value)}
               placeholder={t.proxyForm.usernamePlaceholder}
-              className="w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border border-[var(--glass-border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]"
+              className="w-full px-3 py-2 text-sm rounded-md bg-[var(--bg-primary)] border border-zinc-700/50 outline-none transition-all text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
             />
           </div>
 
           {/* Password */}
           <div>
-            <label className="block text-sm font-medium text-[var(--text-muted)] mb-1">
+            <label className="block text-sm font-medium text-zinc-400 mb-1.5">
               {t.password}
             </label>
             <input
@@ -217,7 +217,7 @@ export const ProxyForm = forwardRef<ProxyFormHandle, ProxyFormProps>(
               value={formData.password || ''}
               onChange={(e) => handleChange('password', e.target.value)}
               placeholder={t.proxyForm.passwordPlaceholder}
-              className="w-full px-3 py-2 rounded-[var(--radius-sm)] bg-[var(--bg-primary)] border border-[var(--glass-border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-primary)] focus:shadow-[var(--glow-primary)] transition-all duration-[150ms]"
+              className="w-full px-3 py-2 text-sm rounded-md bg-[var(--bg-primary)] border border-zinc-700/50 outline-none transition-all text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
             />
           </div>
         </div>

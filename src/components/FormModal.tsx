@@ -84,7 +84,7 @@ export const FormModal: React.FC<FormModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={loading || isLoading}
-              className="px-5 py-2.5 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)] text-[14px] font-semibold cursor-pointer transition-all duration-200 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] hover:border-[var(--text-muted)] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)] text-[13px] font-medium cursor-pointer transition-all duration-200 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] hover:border-[var(--text-muted)] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {t.common.cancel}
             </button>
@@ -92,7 +92,7 @@ export const FormModal: React.FC<FormModalProps> = ({
               type="button"
               onClick={handleSubmit}
               disabled={loading || isLoading}
-              className="px-6 py-2.5 rounded bg-[var(--accent-primary)] text-white text-[14px] font-semibold border-none cursor-pointer transition-all duration-200 flex items-center gap-2 hover:-translate-y-0.5 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              className="px-5 py-2 rounded bg-[var(--accent-primary)] text-white text-[13px] font-medium border-none cursor-pointer transition-all duration-200 flex items-center gap-2 hover:-translate-y-0.5 hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
               style={{ boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)' }}
             >
               {(loading || isLoading) && <span className="inline-block animate-spin">⟳</span>}
