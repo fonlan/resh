@@ -230,6 +230,7 @@ async fn main() {
             commands::sftp::sftp_download,
             commands::sftp::sftp_upload,
             commands::sftp::sftp_cancel_transfer,
+            commands::sftp::sftp_resolve_conflict,
             commands::sftp::pick_files,
             commands::sftp::sftp_delete,
             commands::sftp::sftp_create_folder,

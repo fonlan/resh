@@ -42,6 +42,7 @@ export const TransferStatusPanel: React.FC = () => {
     const getProgressBarClass = (status: string) => {
         if (status === 'failed') return 'bg-[#ff4d4f]';
         if (status === 'completed') return 'bg-[#52c41a]';
+        if (status === 'cancelled') return 'bg-[#888]';
         return 'bg-[var(--accent-color,#3c8ce7)]';
     };
 
@@ -62,6 +63,11 @@ export const TransferStatusPanel: React.FC = () => {
                             <div className="whitespace-nowrap overflow-hidden text-ellipsis mb-1 text-[var(--text-color,#fff)]" title={task.file_name}>
                                 {task.file_name}
                             </div>
+                            {task.error && (
+                                <div className="text-[10px] text-[#ff4d4f] mb-1">
+                                    {task.error}
+                                </div>
+                            )}
                             <div className="flex justify-between text-[10px] text-[var(--text-muted,#888)] mb-1">
                                 <span className="transfer-size">{formatBytes(task.transferred_bytes)} / {formatBytes(task.total_bytes)}</span>
                                 <span className="transfer-speed">

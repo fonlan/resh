@@ -23,6 +23,7 @@ import { addRecentServer, getRecentServers } from '../utils/recentServers';
 import { useTranslation } from '../i18n';
 import { useTabDragDrop } from '../hooks/useTabDragDrop';
 import { EmojiText } from './EmojiText';
+import { useTransferStore } from '../stores/transferStore';
 
 interface Tab {
   id: string;
@@ -41,6 +42,19 @@ export const MainWindow: React.FC = () => {
   const [isSFTPOpen, setIsSFTPOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isSidebarsInitialized, setIsSidebarsInitialized] = useState(false);
+
+  const initListener = useTransferStore(state => state.initListener);
+
+  // Initialize transfer store listener
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    initListener().then(unlisten => {
+      cleanup = unlisten;
+    });
+    return () => {
+      cleanup?.();
+    };
+  }, [initListener]);
 
   useEffect(() => {
     if (config && !isSidebarsInitialized) {

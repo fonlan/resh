@@ -26,6 +26,11 @@ pub async fn sftp_cancel_transfer(task_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn sftp_resolve_conflict(task_id: String, resolution: String) -> Result<(), String> {
+    SftpManager::resolve_conflict(task_id, resolution).await
+}
+
+#[tauri::command]
 pub async fn pick_files() -> Result<Option<Vec<String>>, String> {
     use rfd::FileDialog;
     let files = tokio::task::spawn_blocking(move || {

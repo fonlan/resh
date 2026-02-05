@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link, Edit, FileCode, Clipboard } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../hooks/useConfig';
 
 import { TransferStatusPanel } from './TransferStatusPanel';
 import { ConfirmationModal } from './ConfirmationModal';
 import { FormModal } from './FormModal';
+import FileConflictDialog from './FileConflictDialog';
+import { useTransferStore } from '../stores/transferStore';
+import type { ConflictResolution, FileConflict, TransferTask } from '../types/sftp';
 
 interface SFTPSidebarProps {
   isOpen: boolean;
@@ -141,6 +145,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [width, setWidth] = useState(300);
   const [isResizing, setIsResizing] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const conflicts = useTransferStore(state => state.conflicts);
+  const removeConflict = useTransferStore(state => state.removeConflict);
 
   const [sessions, setSessions] = useState<Record<string, SessionState>>({});
 
@@ -637,11 +644,54 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               const files = selected;
               for (const file of files) {
                   const filename = file.split(/[\\/]/).pop();
-                  await invoke('sftp_upload', { sessionId, localPath: file, remotePath: `${targetPath}/${filename}` });
+                  try {
+                    // Upload and wait for completion/cancellation
+                    const taskId = await invoke<string>('sftp_upload', { sessionId, localPath: file, remotePath: `${targetPath}/${filename}` });
+                    
+                    await new Promise<void>((resolve, reject) => {
+                        let unlisten: (() => void) | undefined;
+                        // Start listening immediately
+                        listen<TransferTask>('transfer-progress', (event) => {
+                            const task = event.payload;
+                            if (task.task_id === taskId) {
+                                if (task.status === 'completed') {
+                                    unlisten?.();
+                                    resolve();
+                                } else if (task.status === 'cancelled') {
+                                    unlisten?.();
+                                    // Check if it was skipped or cancelled
+                                    if (task.error && task.error.includes('Skipped')) {
+                                        reject(new Error('Skipped'));
+                                    } else {
+                                        reject(new Error('Cancelled'));
+                                    }
+                                } else if (task.status === 'failed') {
+                                    unlisten?.();
+                                    reject(new Error(task.error || 'Failed'));
+                                }
+                            }
+                        }).then(fn => { unlisten = fn; });
+                    });
+
+                  } catch (e: any) {
+                    console.error('Upload failed for file:', file, e);
+                    // Check if error is "Cancelled" (Cancel All)
+                    if (e && e.toString().includes('Cancelled')) {
+                      console.log('Upload cancelled by user, stopping queue');
+                      break; // Stop processing remaining files
+                    }
+                    // If error is "Skipped" (which comes as cancelled status with specific error?), 
+                    // actually our backend sends 'cancelled' status for Skip too.
+                    // But wait, for single file upload:
+                    // Backend: ConflictResolution::Skip -> Err("Skipped") -> upload_file returns Err -> Task Failed
+                    // So frontend receives 'failed' status with error 'Skipped'.
+                    // Let's adjust the catch block to handle 'Skipped' if needed, 
+                    // but loop 'continue' is implied.
+                  }
               }
           }
       } catch (e) {
-          console.error('Upload failed', e);
+          console.error('File selection failed', e);
       }
       handleCloseContextMenu();
   };
@@ -876,6 +926,18 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const handleClearClipboard = () => {
     setClipboard(null);
     handleCloseContextMenu();
+  };
+
+  const handleResolveConflict = async (conflict: FileConflict, resolution: ConflictResolution) => {
+    try {
+      await invoke('sftp_resolve_conflict', {
+        taskId: conflict.task_id,
+        resolution: resolution
+      });
+      removeConflict(conflict.task_id);
+    } catch (error) {
+      console.error('Failed to resolve conflict:', error);
+    }
   };
 
   return (
@@ -1226,6 +1288,14 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
         />
       </div>
     </FormModal>
+
+    {conflicts.map((conflict) => (
+      <FileConflictDialog
+        key={conflict.task_id}
+        conflict={conflict}
+        onResolve={(resolution) => handleResolveConflict(conflict, resolution)}
+      />
+    ))}
     </>
   );
 };

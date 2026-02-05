@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 use std::time::Instant;
 use crate::db::DatabaseManager;
+use tokio::sync::oneshot;
 
 pub mod edit;
 
@@ -50,9 +51,28 @@ pub struct TransferProgress {
     pub error: Option<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct FileConflict {
+    pub task_id: String,
+    pub session_id: String,
+    pub file_path: String,
+    pub local_size: Option<u64>,
+    pub remote_size: Option<u64>,
+    pub local_modified: Option<u64>,
+    pub remote_modified: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConflictResolution {
+    Overwrite,
+    Skip,
+    Cancel,
+}
+
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> = Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
+    static ref CONFLICT_RESPONSES: Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>> = Mutex::new(HashMap::new());
 }
 
 
@@ -62,6 +82,65 @@ impl SftpManager {
     pub async fn metadata(session_id: &str, path: &str) -> Result<russh_sftp::protocol::Attrs, String> {
         let sftp = Self::get_session(session_id).await?;
         sftp.stat(path).await.map_err(|e| e.to_string())
+    }
+
+    async fn check_file_exists(sftp: &Arc<RawSftpSession>, path: &str) -> Result<Option<FileAttributes>, String> {
+        match sftp.stat(path).await {
+            Ok(attrs) => Ok(Some(attrs.attrs)),
+            Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::NoSuchFile => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    async fn wait_for_conflict_resolution(
+        app: &AppHandle,
+        task_id: &str,
+        session_id: &str,
+        remote_path: &str,
+        local_metadata: &std::fs::Metadata,
+        remote_attrs: &FileAttributes,
+    ) -> Result<ConflictResolution, String> {
+        let (tx, rx) = oneshot::channel();
+        
+        {
+            let mut responses = CONFLICT_RESPONSES.lock().await;
+            responses.insert(task_id.to_string(), tx);
+        }
+
+        let conflict = FileConflict {
+            task_id: task_id.to_string(),
+            session_id: session_id.to_string(),
+            file_path: remote_path.to_string(),
+            local_size: Some(local_metadata.len()),
+            remote_size: remote_attrs.size,
+            local_modified: local_metadata.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs()),
+            remote_modified: remote_attrs.mtime.map(|m| m as u64),
+        };
+
+        app.emit("sftp-file-conflict", conflict)
+            .map_err(|e| e.to_string())?;
+
+        match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+            Ok(Ok(resolution)) => Ok(resolution),
+            Ok(Err(_)) => Err("Conflict resolution sender dropped".to_string()),
+            Err(_) => Err("Conflict resolution timeout (5 minutes)".to_string()),
+        }
+    }
+
+    pub async fn resolve_conflict(task_id: String, resolution: String) -> Result<(), String> {
+        let mut responses = CONFLICT_RESPONSES.lock().await;
+        if let Some(tx) = responses.remove(&task_id) {
+            let res = match resolution.as_str() {
+                "overwrite" => ConflictResolution::Overwrite,
+                "skip" => ConflictResolution::Skip,
+                "cancel" => ConflictResolution::Cancel,
+                _ => return Err("Invalid resolution".to_string()),
+            };
+            tx.send(res).map_err(|_| "Failed to send resolution".to_string())?;
+            Ok(())
+        } else {
+            Err("Conflict not found".to_string())
+        }
     }
 
     pub async fn get_session(session_id: &str) -> Result<Arc<RawSftpSession>, String> {
@@ -604,6 +683,31 @@ impl SftpManager {
                 if local_metadata.is_dir() {
                     Self::upload_dir_recursive(&app, &sftp, &local_path_inner, &remote_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
                 } else {
+                    // Check if remote file exists
+                    if let Some(remote_attrs) = Self::check_file_exists(&sftp, &remote_path_inner).await? {
+                        let std_metadata = std::fs::metadata(&local_path_inner).map_err(|e| e.to_string())?;
+                        let resolution = Self::wait_for_conflict_resolution(
+                            &app,
+                            &task_id_inner,
+                            &session_id_inner,
+                            &remote_path_inner,
+                            &std_metadata,
+                            &remote_attrs,
+                        ).await?;
+
+                        match resolution {
+                            ConflictResolution::Skip => {
+                                return Err("Skipped".to_string());
+                            },
+                            ConflictResolution::Cancel => {
+                                return Err("Cancelled".to_string());
+                            },
+                            ConflictResolution::Overwrite => {
+                                // Continue with upload
+                            }
+                        }
+                    }
+
                     let total_bytes = local_metadata.len();
                     let mut local_file = tokio::fs::File::open(&local_path_inner).await.map_err(|e| e.to_string())?;
                     let handle = sftp.open(&remote_path_inner, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
@@ -734,10 +838,16 @@ impl SftpManager {
             let final_status = match &result {
                 Ok(_) => "completed",
                 Err(e) if e == "Cancelled" => "cancelled",
+                Err(e) if e == "Skipped" => "cancelled",
                 Err(_) => "failed",
             };
             
-            let final_error = result.as_ref().err().cloned();
+            let final_error = match &result {
+                Err(e) if e == "Skipped" => Some("Skipped by user".to_string()),
+                Err(e) if e == "Cancelled" => Some("Cancelled by user".to_string()),
+                Ok(_) => None,
+                Err(e) => Some(e.clone()),
+            };
 
             let _ = app.emit("transfer-progress", TransferProgress {
                 task_id: task_id_inner,
@@ -809,6 +919,47 @@ impl SftpManager {
             if metadata.is_dir() {
                 Box::pin(Self::upload_dir_recursive(app, sftp, &local_path, &remote_path, task_id, session_id, cancel_token)).await?;
             } else {
+                // Check if remote file exists
+                if let Some(remote_attrs) = Self::check_file_exists(sftp, &remote_path).await? {
+                    let std_metadata = std::fs::metadata(&local_path).map_err(|e| e.to_string())?;
+                    let conflict_task_id = format!("{}-{}", task_id, file_name.to_string_lossy());
+                    let resolution = Self::wait_for_conflict_resolution(
+                        app,
+                        &conflict_task_id,
+                        session_id,
+                        &remote_path,
+                        &std_metadata,
+                        &remote_attrs,
+                    ).await?;
+
+                    match resolution {
+                        ConflictResolution::Skip => {
+                            // Send cancelled status for skipped file in folder upload
+                            let _ = app.emit("transfer-progress", TransferProgress {
+                                task_id: format!("{}-{}", task_id, file_name.to_string_lossy()),
+                                type_: "upload".to_string(),
+                                session_id: session_id.to_string(),
+                                file_name: file_name.to_string_lossy().to_string(),
+                                source: local_path.clone(),
+                                destination: remote_path.clone(),
+                                total_bytes: std_metadata.len(),
+                                transferred_bytes: 0,
+                                speed: 0.0,
+                                eta: None,
+                                status: "cancelled".to_string(),
+                                error: Some("Skipped by user".to_string()),
+                            });
+                            continue;
+                        },
+                        ConflictResolution::Cancel => {
+                            return Err("Cancelled".to_string());
+                        },
+                        ConflictResolution::Overwrite => {
+                            // Continue with upload
+                        }
+                    }
+                }
+
                 let local_metadata = tokio::fs::metadata(&local_path).await.map_err(|e| e.to_string())?;
                 let total_bytes = local_metadata.len();
                 let mut local_file = tokio::fs::File::open(&local_path).await.map_err(|e| e.to_string())?;
@@ -848,7 +999,7 @@ impl SftpManager {
                             speed: 0.0,
                             eta: None,
                             status: "cancelled".to_string(),
-                            error: None,
+                            error: Some("Cancelled by user".to_string()),
                         });
                         return Err("Cancelled".to_string());
                     }
