@@ -42,7 +42,7 @@ const FileTreeItem: React.FC<{
     <div>
       <button
         type="button"
-        className="flex items-center gap-2 p-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)]"
+        className="flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)]"
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         style={{ color: 'inherit', paddingLeft: `${depth * 12 + 4}px` }}

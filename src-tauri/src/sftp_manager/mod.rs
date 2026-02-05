@@ -88,6 +88,11 @@ impl SftpManager {
         Ok(sftp)
     }
 
+    pub async fn remove_session(session_id: &str) {
+        let mut sessions = SFTP_SESSIONS.lock().await;
+        sessions.remove(session_id);
+    }
+
     pub async fn list_dir(session_id: &str, path: &str) -> Result<Vec<FileEntry>, String> {
         let sftp = Self::get_session(session_id).await?;
         let path = if path.is_empty() { "." } else { path };

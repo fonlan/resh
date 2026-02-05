@@ -1,5 +1,6 @@
 use crate::config::types::Proxy;
 use crate::ssh_manager::handler::ClientHandler;
+use crate::sftp_manager::SftpManager;
 use base64::prelude::*;
 use lazy_static::lazy_static;
 use russh::client;
@@ -616,6 +617,9 @@ impl SSHClient {
             }
         };
 
+        // Clear stale SFTP session
+        SftpManager::remove_session(session_id).await;
+
         // Notify user about reconnection attempt
         let _ = tx
             .send((
@@ -678,6 +682,7 @@ impl SSHClient {
     }
 
     pub async fn disconnect(session_id: &str) -> Result<(), String> {
+        SftpManager::remove_session(session_id).await;
         let mut sessions = SESSIONS.lock().await;
         if let Some(_) = sessions.remove(session_id) {
             info!("[SSH] Session {} disconnected and removed.", session_id);
