@@ -696,6 +696,14 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     handleCloseContextMenu();
   };
 
+  const handleNewFolder = () => {
+    if (!contextMenu || !contextMenu.entry) return;
+    const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
+    setNewFolderModal({ isOpen: true, parentPath });
+    setNewItemName('');
+    handleCloseContextMenu();
+  };
+
   const confirmNewFile = async () => {
     if (!sessionId || !newItemName.trim()) return;
     try {
@@ -707,14 +715,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     }
     setNewFileModal({ isOpen: false, parentPath: '' });
     setNewItemName('');
-  };
-
-  const handleNewFolder = () => {
-    if (!contextMenu || !contextMenu.entry) return;
-    const parentPath = isDirectory(contextMenu.entry) ? contextMenu.entry.path : getParentPath(contextMenu.entry.path);
-    setNewFolderModal({ isOpen: true, parentPath });
-    setNewItemName('');
-    handleCloseContextMenu();
   };
 
   const confirmNewFolder = async () => {
@@ -977,11 +977,27 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       <TransferStatusPanel />
     </div>
 
-     {contextMenu && (
+      {contextMenu && (
         <div
             className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
             style={{ top: contextMenu.y, left: contextMenu.x }}
         >
+            <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                <Download size={14} /> {t.sftp.contextMenu.download}
+            </button>
+            <button type="button" onClick={handleUpload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                <Upload size={14} /> {t.sftp.contextMenu.upload}
+            </button>
+            {contextMenu.entry && isDirectory(contextMenu.entry) && (
+                <>
+                    <button type="button" onClick={handleNewFile} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Plus size={14} /> {t.sftp.contextMenu.newFile}
+                    </button>
+                    <button type="button" onClick={handleNewFolder} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
+                    </button>
+                </>
+            )}
             {contextMenu.entry && !isDirectory(contextMenu.entry) && (
                 <div className="relative">
                     <div
@@ -1017,42 +1033,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                         )}
                     </div>
                 </div>
-            )}
-            {contextMenu.entry && (
-                <>
-                    <button type="button" onClick={handleDownload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Download size={14} /> {t.sftp.contextMenu.download}
-                    </button>
-                    <button type="button" onClick={handleCopyForPaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Copy size={14} /> {t.sftp.contextMenu.copy}
-                    </button>
-                    <button type="button" onClick={handleCut} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Pencil size={14} /> {t.sftp.contextMenu.cut}
-                    </button>
-                </>
-            )}
-            {clipboard && (
-                <>
-                    <button type="button" onClick={handlePaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Clipboard size={14} /> {clipboard.isCut ? t.sftp.contextMenu.pasteMove : t.sftp.contextMenu.pasteCopy}
-                    </button>
-                    <button type="button" onClick={handleClearClipboard} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-muted)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]">
-                        <X size={14} /> {t.sftp.contextMenu.cancel}
-                    </button>
-                </>
-            )}
-            <button type="button" onClick={handleUpload} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                <Upload size={14} /> {t.sftp.contextMenu.upload}
-            </button>
-            {contextMenu.entry && isDirectory(contextMenu.entry) && (
-                <>
-                    <button type="button" onClick={handleNewFile} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Plus size={14} /> {t.sftp.contextMenu.newFile}
-                    </button>
-                    <button type="button" onClick={handleNewFolder} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
-                    </button>
-                </>
             )}
             <div className="relative">
                 <div
@@ -1098,19 +1078,39 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             </div>
             {contextMenu.entry && (
                 <>
-                    <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Settings size={14} /> {t.sftp.contextMenu.properties}
+                    <button type="button" onClick={handleCopyForPaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Copy size={14} /> {t.sftp.contextMenu.copy}
                     </button>
-                    <button type="button" onClick={handleRename} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
-                        <Pencil size={14} /> {t.sftp.contextMenu.rename}
+                    <button type="button" onClick={handleCut} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Pencil size={14} /> {t.sftp.contextMenu.cut}
+                    </button>
+                </>
+            )}
+            {clipboard && (
+                <>
+                    <button type="button" onClick={handlePaste} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Clipboard size={14} /> {clipboard.isCut ? t.sftp.contextMenu.pasteMove : t.sftp.contextMenu.pasteCopy}
+                    </button>
+                    <button type="button" onClick={handleClearClipboard} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-muted)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]">
+                        <X size={14} /> {t.sftp.contextMenu.cancel}
                     </button>
                 </>
             )}
             <button type="button" onClick={handleDelete} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
                 <Trash size={14} /> {t.sftp.contextMenu.delete}
             </button>
+            {contextMenu.entry && (
+                <>
+                    <button type="button" onClick={handleRename} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Pencil size={14} /> {t.sftp.contextMenu.rename}
+                    </button>
+                    <button type="button" onClick={handleProperties} className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5">
+                        <Settings size={14} /> {t.sftp.contextMenu.properties}
+                    </button>
+                </>
+            )}
         </div>
-    )}
+      )}
 
     <ConfirmationModal
       isOpen={deleteModal.isOpen}
