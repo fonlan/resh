@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { FolderOpen, Plus, Trash2, Check, X } from 'lucide-react';
+import React, { useState, useCallback } from 'react';
+import { FolderOpen, Plus, Trash2, Check, X, GripVertical } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Config, EditorRule } from '../../types/config';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../../i18n';
+import { useTabDragDrop } from '../../hooks/useTabDragDrop';
 
 interface SFTPTabProps {
   config: Config;
@@ -14,6 +15,30 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   const { t } = useTranslation();
   const [editingRule, setEditingRule] = useState<Partial<EditorRule>>({});
   const [isAdding, setIsAdding] = useState(false);
+
+  const editors = config.general.sftp.editors;
+
+  const handleReorderEditors = useCallback((newEditors: EditorRule[]) => {
+    onChange({
+      ...config,
+      general: {
+        ...config.general,
+        sftp: {
+          ...config.general.sftp,
+          editors: newEditors,
+        },
+      },
+    });
+  }, [config, onChange]);
+
+  const {
+    draggedIndex,
+    dropTargetIndex,
+    handleDragStart,
+    handleDragOver,
+    handleDrop,
+    handleDragEnd
+  } = useTabDragDrop<EditorRule>(editors, handleReorderEditors);
 
   const handleDownloadPathChange = (path: string) => {
     onChange({
@@ -134,6 +159,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
           <table className="w-full border-collapse text-[13px] text-[var(--text-primary)]">
             <thead>
               <tr>
+                <th className="w-8 bg-[var(--bg-tertiary)] px-2 py-2.5 border-b border-[var(--glass-border)]"></th>
                 <th className="bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
                   {t.sftp.settings.filePattern}
                 </th>
@@ -148,6 +174,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
             <tbody>
                 {isAdding && (
                     <tr className="bg-[var(--bg-tertiary)]">
+                        <td className="px-2 py-3 border-b border-[var(--glass-border)]"></td>
                         <td className="px-4 py-3">
                             <input
                                 id="new-rule-pattern"
@@ -178,7 +205,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                                 </button>
                             </div>
                         </td>
-                        <td className="w-[15%] text-right px-4 py-3">
+                        <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
                             <div className="flex justify-end gap-1">
                                 <button
                                     type="button"
@@ -203,8 +230,25 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                         </td>
                     </tr>
                 )}
-              {config.general.sftp.editors.map((rule) => (
-                <tr key={rule.id} className="hover:bg-white/[0.02]">
+              {editors.map((rule, index) => (
+                <tr
+                  key={rule.id}
+                  draggable={editors.length > 1}
+                  onDragStart={(e) => handleDragStart(index)}
+                  onDragOver={(e) => handleDragOver(e, index)}
+                  onDrop={(e) => handleDrop(e, index)}
+                  onDragEnd={handleDragEnd}
+                  className={`
+                    hover:bg-white/[0.02] cursor-default
+                    ${draggedIndex === index ? 'opacity-40' : ''}
+                    ${dropTargetIndex === index && draggedIndex !== index ? 'bg-[var(--accent-color)]/5 border-t-2 border-[var(--accent-color)]' : ''}
+                  `}
+                >
+                  <td className="px-2 py-2 border-b border-[var(--glass-border)] last:border-b-0 text-zinc-400">
+                    <div className={`flex items-center justify-center w-5 h-5 rounded hover:bg-[var(--bg-tertiary)] ${editors.length > 1 ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+                      <GripVertical size={14} />
+                    </div>
+                  </td>
                   <td className="font-mono text-[var(--accent-cyan)] w-[30%] px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
                     {rule.pattern}
                   </td>
@@ -223,9 +267,9 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                   </td>
                 </tr>
               ))}
-              {config.general.sftp.editors.length === 0 && !isAdding && (
+              {editors.length === 0 && !isAdding && (
                 <tr>
-                    <td colSpan={3} className="px-8 py-8 text-center text-zinc-500 italic">
+                    <td colSpan={4} className="px-8 py-8 text-center text-zinc-500 italic">
                         {t.sftp.settings.noRules}
                     </td>
                 </tr>
@@ -233,6 +277,11 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
             </tbody>
           </table>
         </div>
+        {editors.length > 1 && (
+          <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.priorityHint}
+          </p>
+        )}
       </div>
     </div>
   );

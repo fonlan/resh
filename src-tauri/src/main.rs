@@ -5,15 +5,15 @@
 
 use resh::commands;
 use resh::config::ConfigManager;
-use resh::master_password::MasterPasswordManager;
 use resh::db::DatabaseManager;
-use resh::sftp_manager::edit::SftpEditManager;
 use resh::logger;
-use std::sync::Arc;
-use tauri::Manager;
-use tauri::image::Image;
-use tokio::sync::Mutex;
+use resh::master_password::MasterPasswordManager;
+use resh::sftp_manager::edit::SftpEditManager;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tauri::image::Image;
+use tauri::Manager;
+use tokio::sync::Mutex;
 
 static APP_DATA_DIR_SET: AtomicBool = AtomicBool::new(false);
 static mut APP_DATA_DIR: Option<std::path::PathBuf> = None;
@@ -40,21 +40,18 @@ async fn main() {
         } else {
             "Unknown panic".to_string()
         };
-        
+
         let location = if let Some(loc) = info.location() {
             format!("{}:{}:{}", loc.file(), loc.line(), loc.column())
         } else {
             "unknown location".to_string()
         };
-        
-        let error_msg = format!(
-            "[PANIC] {} at {}\n",
-            message, location
-        );
-        
+
+        let error_msg = format!("[PANIC] {} at {}\n", message, location);
+
         // 打印到 stderr
         eprintln!("{}", error_msg);
-        
+
         // 尝试写入 panic 日志文件
         let log_path = get_panic_log_path();
         // 确保日志目录存在
@@ -71,7 +68,7 @@ async fn main() {
             let _ = writeln!(file, "[{}] {}", timestamp, error_msg);
         }
     }));
-    
+
     tauri::Builder::default()
         .setup(|app| {
             // Set window icon
@@ -85,8 +82,9 @@ async fn main() {
                 }
             }
 
-            // Get the default app data dir (e.g., %AppData%/com.resh.ssh)
-            let default_app_data_dir = app.path()
+            // Get the default app data dir (e.g., %AppData%/com.fonlan.resh)
+            let default_app_data_dir = app
+                .path()
                 .app_data_dir()
                 .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
 
@@ -107,7 +105,9 @@ async fn main() {
                 .map_err(|e| format!("数据库初始化失败: {}", e))?;
 
             // Load initial config
-            let local_config = config_manager.load_local_config().unwrap_or_else(|_| resh::config::Config::empty());
+            let local_config = config_manager
+                .load_local_config()
+                .unwrap_or_else(|_| resh::config::Config::empty());
             let debug_enabled = local_config.general.debug_enabled;
 
             // Initialize logging
@@ -148,22 +148,31 @@ async fn main() {
                 let state_for_event = state.clone();
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_) | tauri::WindowEvent::CloseRequested { .. } = event {
+                    if let tauri::WindowEvent::Resized(_)
+                    | tauri::WindowEvent::Moved(_)
+                    | tauri::WindowEvent::CloseRequested { .. } = event
+                    {
                         let window = &window_clone;
-                        
+
                         // Don't save state if minimized
                         if window.is_minimized().unwrap_or(false) {
                             return;
                         }
 
                         let is_maximized = window.is_maximized().unwrap_or(false);
-                        let size = window.inner_size().unwrap_or_default().to_logical(window.scale_factor().unwrap_or(1.0));
-                        let position = window.outer_position().unwrap_or_default().to_logical(window.scale_factor().unwrap_or(1.0));
+                        let size = window
+                            .inner_size()
+                            .unwrap_or_default()
+                            .to_logical(window.scale_factor().unwrap_or(1.0));
+                        let position = window
+                            .outer_position()
+                            .unwrap_or_default()
+                            .to_logical(window.scale_factor().unwrap_or(1.0));
 
                         let state = state_for_event.clone();
                         tokio::spawn(async move {
                             let mut config_guard = state.config.lock().await;
-                            
+
                             // Only update if not maximized, to preserve the "restored" size
                             if !is_maximized {
                                 config_guard.general.window_state.width = size.width;

@@ -349,6 +349,7 @@ export const locales = {
         noRules: 'No editor rules defined. Add one to associate file types with local editors.',
         patternPlaceholder: '*.log',
         editorPlaceholder: 'C:\\Windows\\notepad.exe',
+        priorityHint: 'Tip: Drag rules to reorder. Rules at the top have higher priority.',
       }
     },
     about: {
@@ -712,6 +713,7 @@ export const locales = {
         noRules: '暂无关联规则。添加规则以将文件类型关联到本地编辑器。',
         patternPlaceholder: '*.log',
         editorPlaceholder: 'C:\\Windows\\notepad.exe',
+        priorityHint: '提示：拖拽规则可调整优先级。靠前的规则优先级更高。',
       }
     },
     about: {
