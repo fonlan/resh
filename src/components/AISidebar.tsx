@@ -270,7 +270,7 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
 
   return (
     <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-      <div className={`relative max-w-[90%] flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+      <div className={`relative max-w-[90%] flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
         <div className={`p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white rounded-tr-sm' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm'}`}>
           {msg.reasoning_content && (
             <div className="w-full mb-2">
@@ -351,7 +351,7 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
         </div>
         <button
           type="button"
-          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : 'opacity-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'} ${msg.role === 'user' ? '-left-8' : '-right-8'}`}
+          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : 'opacity-0 group-hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'} ${msg.role === 'user' ? '-left-8' : '-right-8'}`}
           onClick={handleCopy}
           title={t.ai.copyMessage}
         >
