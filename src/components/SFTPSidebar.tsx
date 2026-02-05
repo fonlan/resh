@@ -524,6 +524,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleEditLocal = async () => {
     if (!contextMenu || !sessionId || !config || !contextMenu.entry) return;
+    const entryName = contextMenu.entry.name;
     try {
         console.log('[handleEditLocal] Starting edit', contextMenu.entry.path);
         const localPath = await invoke<string>('sftp_edit_file', {
@@ -534,7 +535,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
         let editorCmd = undefined;
         if (config.general.sftp?.editors) {
-            const rule = config.general.sftp.editors.find(r => matchPattern(contextMenu.entry.name, r.pattern));
+            const rule = config.general.sftp.editors.find(r => matchPattern(entryName, r.pattern));
             if (rule) {
                 editorCmd = rule.editor;
                 console.log('[handleEditLocal] Found custom editor rule', rule);
