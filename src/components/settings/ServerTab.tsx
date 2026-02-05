@@ -126,11 +126,11 @@ export const ServerTab: React.FC<ServerTabProps> = ({
       </div>
 
       {sortedServers.length === 0 ? (
-        <div className="bg-[var(--bg-tertiary)] border border-[var(--glass-border)] rounded-lg p-8 text-center">
-          <p className="text-[var(--text-muted)] text-[13px] m-0">{t.serverTab.emptyState}</p>
+        <div className="empty-state-mini">
+          <p>{t.serverTab.emptyState}</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="item-list">
           {sortedServers.map((server) => {
             const auth = authentications.find((a) => a.id === server.authId);
             const proxy = proxies.find((p) => p.id === server.proxyId);
@@ -139,29 +139,29 @@ export const ServerTab: React.FC<ServerTabProps> = ({
             return (
               <div
                 key={server.id}
-                className="bg-[var(--bg-tertiary)] border border-[var(--glass-border)] rounded-lg p-4 flex items-center justify-between hover:border-[var(--accent-primary)]/30 transition-all"
+                className="item-card"
               >
-                <div className="flex-1 min-w-0">
-                  <p className="text-[14px] font-medium text-[var(--text-primary)] m-0 mb-1">
+                <div className="item-info">
+                  <p className="item-name">
                     <EmojiText text={server.name} />
                   </p>
-                  <p className="text-[12px] text-[var(--text-muted)] m-0 mb-2">
+                  <p className="item-detail">
                     {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
                   </p>
                   {(auth || proxy || jumphost) && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {auth && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.auth}: <EmojiText text={auth.name} /></span>}
-                      {proxy && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.common.proxy}: <EmojiText text={proxy.name} /></span>}
-                      {jumphost && <span className="text-[11px] px-2 py-0.5 rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-[var(--glass-border)] flex items-center gap-1">{t.serverTab.jumphost}: <EmojiText text={jumphost.name} /></span>}
+                    <div className="item-tags">
+                      {auth && <span className="tag">{t.auth}: <EmojiText text={auth.name} /></span>}
+                      {proxy && <span className="tag">{t.common.proxy}: <EmojiText text={proxy.name} /></span>}
+                      {jumphost && <span className="tag">{t.serverTab.jumphost}: <EmojiText text={jumphost.name} /></span>}
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-1.5 ml-4">
+                <div className="item-actions">
                   {onConnectServer && (
                     <button
                       type="button"
                       onClick={() => onConnectServer(server.id)}
-                      className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--accent-primary)] transition-all"
+                      className="btn-icon icon-btn-connect"
                       title={t.serverTab.connectTooltip}
                     >
                       <Power size={14} />
@@ -170,7 +170,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleEditServer(server)}
-                    className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[var(--bg-primary)] hover:text-[var(--text-primary)] transition-all"
+                    className="btn-icon icon-btn-edit"
                     title={t.serverTab.editTooltip}
                   >
                     <Edit2 size={14} />
@@ -178,7 +178,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   <button
                     type="button"
                     onClick={() => handleDeleteServer(server.id)}
-                    className="p-2 rounded bg-transparent border-none text-[var(--text-muted)] cursor-pointer hover:bg-[rgba(239,68,68,0.1)] hover:text-[var(--color-danger)] transition-all"
+                    className="btn-icon icon-btn-delete"
                     title={t.serverTab.deleteTooltip}
                   >
                     <Trash2 size={14} />

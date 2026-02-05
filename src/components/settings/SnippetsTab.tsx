@@ -84,7 +84,7 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
         <button
           type="button"
           onClick={handleAddSnippet}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans"
+          className="btn btn-primary"
         >
           <Plus size={16} />
           {t.snippetsTab.addSnippet}
@@ -92,23 +92,23 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
       </div>
 
       {snippets.length === 0 ? (
-        <div className="flex flex-col items-center justify-center p-12 text-center bg-[var(--bg-primary)] border-[1.5px] border-dashed border-zinc-700/50 rounded-md">
-          <p className="text-sm text-[var(--text-muted)] m-0">{t.snippetsTab.emptyState}</p>
+        <div className="empty-state-mini">
+          <p>{t.snippetsTab.emptyState}</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="item-list">
           {snippets.map((snippet) => (
             <div
               key={snippet.id}
-              className="flex items-center justify-between p-3 bg-[var(--bg-primary)] border-[1.5px] border-zinc-700/50 rounded-md transition-all gap-3 hover:border-blue-500 hover:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:-translate-y-px"
+              className="item-card"
             >
-              <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-overflow-ellipsis flex items-center gap-2">
-                    <Code size={14} className="text-[var(--text-muted)]" />
-                    {snippet.name}
+              <div className="item-info">
+                <p className="item-name flex items-center gap-2">
+                  <Code size={14} className="text-[var(--text-muted)]" />
+                  {snippet.name}
                 </p>
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mt-1">
-                   <span className="flex items-center gap-1 bg-[var(--bg-primary)] px-1.5 py-0.5 rounded border border-zinc-700/50">
+                   <span className="tag flex items-center gap-1">
                      <Folder size={10} />
                      {snippet.group || t.snippetForm.defaultGroup}
                    </span>
@@ -117,11 +117,11 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
                    )}
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="item-actions">
                 <button
                   type="button"
                   onClick={() => handleEditSnippet(snippet)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500"
+                  className="btn-icon icon-btn-edit"
                   title={t.snippetsTab.editTooltip}
                 >
                   <Edit2 size={14} />
@@ -129,7 +129,7 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleDeleteSnippet(snippet.id)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 rounded cursor-pointer transition-all hover:bg-red-500/10 hover:border-red-500 hover:text-red-500"
+                  className="btn-icon icon-btn-delete"
                   title={t.snippetsTab.deleteTooltip}
                 >
                   <Trash2 size={14} />
@@ -161,9 +161,8 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
                   formRef.current.setSynced(e.target.checked);
                 }
               }}
-              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
             />
-            <label htmlFor="synced-footer-snippet" className="text-sm font-medium text-zinc-300 cursor-pointer">
+            <label htmlFor="synced-footer-snippet" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
               {t.common.syncThisItem}
             </label>
           </div>

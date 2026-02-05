@@ -108,29 +108,29 @@ export const AuthTab: React.FC<AuthTabProps> = ({
       </div>
 
       {authentications.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 px-6 text-center bg-[var(--bg-primary)] border-2 border-dashed border-[var(--glass-border)] rounded-[var(--radius-md)]">
-          <p className="text-sm text-[var(--text-muted)] m-0">{t.authTab.emptyState}</p>
+        <div className="empty-state-mini">
+          <p>{t.authTab.emptyState}</p>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="item-list">
           {authentications.map((auth) => (
             <div
               key={auth.id}
-              className="flex items-center justify-between p-3 px-4 bg-[var(--bg-primary)] border border-[1.5px] border-[var(--glass-border)] rounded-[var(--radius-md)] transition-all duration-[150ms] gap-3 hover:border-[var(--accent-primary)] hover:shadow-[var(--glow-primary)] hover:-translate-y-px"
+              className="item-card"
             >
-              <div className="flex flex-col gap-1 flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[var(--text-primary)] m-0 whitespace-nowrap overflow-hidden text-ellipsis">
+              <div className="item-info">
+                <p className="item-name">
                   <EmojiText text={auth.name} />
                 </p>
-                <p className="text-xs text-[var(--text-secondary)] m-0 whitespace-nowrap overflow-hidden text-ellipsis">
+                <p className="item-detail">
                   {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType}
                 </p>
               </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
+              <div className="item-actions">
                 <button
                   type="button"
                   onClick={() => handleEditAuth(auth)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[1.5px] border-[var(--glass-border)] rounded-[var(--radius-sm)] cursor-pointer transition-all duration-[150ms] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-[var(--accent-primary)]"
+                  className="btn-icon icon-btn-edit"
                   title={t.authTab.editTooltip}
                 >
                   <Edit2 size={14} />
@@ -138,7 +138,7 @@ export const AuthTab: React.FC<AuthTabProps> = ({
                 <button
                   type="button"
                   onClick={() => handleDeleteAuth(auth.id)}
-                  className="inline-flex items-center justify-center w-8 h-8 p-0 bg-[var(--bg-tertiary)] text-[var(--text-secondary)] border border-[1.5px] border-[var(--glass-border)] rounded-[var(--radius-sm)] cursor-pointer transition-all duration-[150ms] hover:bg-[rgba(239,68,68,0.1)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]"
+                  className="btn-icon icon-btn-delete"
                   title={t.authTab.deleteTooltip}
                 >
                   <Trash2 size={14} />
