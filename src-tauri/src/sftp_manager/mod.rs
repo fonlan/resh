@@ -609,8 +609,8 @@ impl SftpManager {
                     let handle = sftp.open(&remote_path_inner, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                     
                     let mut transferred = 0u64;
-                    let chunk_size = 256 * 1024;
-                    let max_concurrent_requests = 64;
+                    let chunk_size = 32 * 1024; // 32KB chunks
+                    let max_concurrent_requests = 16; // 16 concurrent requests
                     let start_time = Instant::now();
                     let mut last_emit = Instant::now();
 
@@ -645,8 +645,17 @@ impl SftpManager {
                         let handle_clone = handle.clone();
                         
                         futures.push(async move {
-                            let res = sftp_clone.write(handle_clone, offset, buffer).await;
-                            res
+                            // 30 seconds timeout per chunk
+                            let res = tokio::time::timeout(
+                                std::time::Duration::from_secs(30),
+                                sftp_clone.write(handle_clone, offset, buffer)
+                            ).await;
+                            match res {
+                                Ok(r) => r,
+                                Err(_) => Err(russh_sftp::client::error::Error::IO(
+                                    "Chunk upload timeout (30s)".to_string()
+                                ))
+                            }
                         }.boxed());
                         next_offset += current_chunk_size;
                     }
@@ -699,8 +708,17 @@ impl SftpManager {
                             let handle_clone = handle.clone();
                             
                             futures.push(Box::pin(async move {
-                                let res = sftp_clone.write(handle_clone, offset, buffer).await;
-                                res
+                                // 30 seconds timeout per chunk
+                                let res = tokio::time::timeout(
+                                    std::time::Duration::from_secs(30),
+                                    sftp_clone.write(handle_clone, offset, buffer)
+                                ).await;
+                                match res {
+                                    Ok(r) => r,
+                                    Err(_) => Err(russh_sftp::client::error::Error::IO(
+                                        "Chunk upload timeout (30s)".to_string()
+                                    ))
+                                }
                             }));
                             next_offset += current_chunk_size;
                         }
