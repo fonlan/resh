@@ -131,6 +131,37 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
       </div>
 
       <div className="form-group">
+        <label htmlFor="sftp-max-concurrent" className="form-label">
+          {t.sftp.settings.maxConcurrentTransfers}
+        </label>
+        <input
+          id="sftp-max-concurrent"
+          type="number"
+          min="1"
+          max="10"
+          value={config.general.sftp.maxConcurrentTransfers}
+          onChange={(e) => {
+            const value = Math.max(1, Math.min(10, parseInt(e.target.value) || 1));
+            onChange({
+              ...config,
+              general: {
+                ...config.general,
+                sftp: {
+                  ...config.general.sftp,
+                  maxConcurrentTransfers: value,
+                },
+              },
+            });
+            invoke('sftp_set_max_concurrent', { max: value }).catch(console.error);
+          }}
+          className="form-input w-32"
+        />
+        <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+          {t.sftp.settings.maxConcurrentTransfersDesc}
+        </p>
+      </div>
+
+      <div className="form-group">
         <div className="flex justify-between items-center mb-3">
             <h3 className="section-title">
                 {t.sftp.settings.editorAssociations}

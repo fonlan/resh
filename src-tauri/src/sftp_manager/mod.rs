@@ -5,7 +5,7 @@ use futures::stream::FuturesUnordered;
 use std::io::SeekFrom;
 use tokio::io::AsyncSeekExt;
 use futures::FutureExt;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
-use std::time::Instant;
+use std::time::{Instant, Duration};
 use crate::db::DatabaseManager;
 use tokio::sync::oneshot;
 
@@ -69,16 +69,172 @@ pub enum ConflictResolution {
     Cancel,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub enum TransferType {
+    Download,
+    Upload,
+}
+
+#[derive(Clone)]
+pub struct PendingTask {
+    pub task_id: String,
+    pub transfer_type: TransferType,
+    pub session_id: String,
+    pub remote_path: String,
+    pub local_path: String,
+    pub app: Arc<AppHandle>,
+    pub db_manager: DatabaseManager,
+    pub cancel_token: Arc<AtomicBool>,
+}
+
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> = Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref CONFLICT_RESPONSES: Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>> = Mutex::new(HashMap::new());
+    static ref TASK_QUEUE: Mutex<VecDeque<PendingTask>> = Mutex::new(VecDeque::new());
+    static ref ACTIVE_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
+    static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(2);
 }
 
 
 pub struct SftpManager;
 
 impl SftpManager {
+    pub async fn set_max_concurrent_transfers(max: u32) {
+        let mut current = MAX_CONCURRENT_TRANSFERS.lock().await;
+        *current = max;
+    }
+
+    async fn process_queue() {
+        loop {
+            let mut queue = TASK_QUEUE.lock().await;
+            let max_concurrent = *MAX_CONCURRENT_TRANSFERS.lock().await;
+            let mut active = ACTIVE_TASKS.lock().await;
+
+            if queue.is_empty() || active.len() >= max_concurrent as usize {
+                drop(queue);
+                drop(active);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            if let Some(task) = queue.pop_front() {
+                let task_id = task.task_id.clone();
+                let cancel_token = task.cancel_token.clone();
+                active.insert(task_id.clone(), cancel_token.clone());
+
+                let transfer_type = task.transfer_type.clone();
+                let app = Arc::clone(&task.app);
+                let db_manager = task.db_manager.clone();
+                let session_id = task.session_id.clone();
+                let remote_path = task.remote_path.clone();
+                let local_path = task.local_path.clone();
+                let task_id_for_log = task.task_id.clone();
+
+                drop(queue);
+                drop(active);
+
+                tokio::spawn(async move {
+                    let _ = match transfer_type {
+                        TransferType::Download => {
+                            Self::_download_file((*app).clone(), db_manager, session_id, remote_path, local_path, task_id.clone(), cancel_token, None).await
+                        }
+                        TransferType::Upload => {
+                            Self::_upload_file((*app).clone(), db_manager, session_id, local_path, remote_path, task_id.clone(), cancel_token, None).await
+                        }
+                    };
+
+                    let mut active = ACTIVE_TASKS.lock().await;
+                    active.remove(&task_id_for_log);
+                });
+            } else {
+                drop(queue);
+                drop(active);
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+
+    fn spawn_scheduler() {
+        tokio::spawn(async move {
+            Self::process_queue().await;
+        });
+    }
+
+    pub async fn queue_download(
+        app: AppHandle,
+        db_manager: DatabaseManager,
+        session_id: String,
+        remote_path: String,
+        local_path: String,
+        task_id: Option<String>,
+    ) -> Result<String, String> {
+        let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+
+        {
+            let mut tasks = TRANSFER_TASKS.lock().await;
+            tasks.insert(task_id.clone(), cancel_token.clone());
+        }
+
+        let pending_task = PendingTask {
+            task_id: task_id.clone(),
+            transfer_type: TransferType::Download,
+            session_id,
+            remote_path,
+            local_path,
+            app: Arc::new(app),
+            db_manager,
+            cancel_token,
+        };
+
+        {
+            let mut queue = TASK_QUEUE.lock().await;
+            queue.push_back(pending_task);
+        }
+
+        Self::spawn_scheduler();
+
+        Ok(task_id)
+    }
+
+    pub async fn queue_upload(
+        app: AppHandle,
+        db_manager: DatabaseManager,
+        session_id: String,
+        local_path: String,
+        remote_path: String,
+        task_id: Option<String>,
+    ) -> Result<String, String> {
+        let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let cancel_token = Arc::new(AtomicBool::new(false));
+
+        {
+            let mut tasks = TRANSFER_TASKS.lock().await;
+            tasks.insert(task_id.clone(), cancel_token.clone());
+        }
+
+        let pending_task = PendingTask {
+            task_id: task_id.clone(),
+            transfer_type: TransferType::Upload,
+            session_id,
+            remote_path,
+            local_path,
+            app: Arc::new(app),
+            db_manager,
+            cancel_token,
+        };
+
+        {
+            let mut queue = TASK_QUEUE.lock().await;
+            queue.push_back(pending_task);
+        }
+
+        Self::spawn_scheduler();
+
+        Ok(task_id)
+    }
+
     pub async fn metadata(session_id: &str, path: &str) -> Result<russh_sftp::protocol::Attrs, String> {
         let sftp = Self::get_session(session_id).await?;
         sftp.stat(path).await.map_err(|e| e.to_string())
@@ -261,218 +417,221 @@ impl SftpManager {
         session_id: String,
         remote_path: String,
         local_path: String,
+        task_id: Option<String>,
+        ai_session_id: Option<String>,
+    ) -> Result<String, String> {
+        Self::queue_download(app, db_manager, session_id, remote_path, local_path, task_id).await
+    }
+
+    async fn _download_file(
+        app: AppHandle,
+        db_manager: DatabaseManager,
+        session_id: String,
+        remote_path: String,
+        local_path: String,
+        task_id: String,
+        cancel_token: Arc<AtomicBool>,
         ai_session_id: Option<String>,
     ) -> Result<String, String> {
         let sftp = Self::get_session(&session_id).await?;
-        let task_id = Uuid::new_v4().to_string();
-        let cancel_token = Arc::new(AtomicBool::new(false));
-        
-        {
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.insert(task_id.clone(), cancel_token.clone());
-        }
 
         let task_id_clone = task_id.clone();
-        let _session_id_clone = session_id.clone();
-        let _remote_path_clone = remote_path.clone();
-        let _local_path_clone = local_path.clone();
+        let session_id_clone = session_id.clone();
+        let remote_path_clone = remote_path.clone();
+        let local_path_clone = local_path.clone();
         let ai_session_id_clone = ai_session_id.clone();
-
         let task_id_inner = task_id.clone();
         let session_id_inner = session_id.clone();
         let remote_path_inner = remote_path.clone();
         let local_path_inner = local_path.clone();
 
-        tokio::spawn(async move {
-            let metadata = match sftp.stat(&remote_path_inner).await {
-                Ok(m) => m.attrs,
-                Err(e) => {
-                    let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_inner,
-                        type_: "download".to_string(),
-                        session_id: session_id_inner,
-                        file_name: std::path::Path::new(&remote_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
-                        source: remote_path_inner.clone(),
-                        destination: local_path_inner.clone(),
-                        total_bytes: 0,
-                        transferred_bytes: 0,
-                        speed: 0.0,
-                        eta: None,
-                        status: "failed".to_string(),
-                        error: Some(e.to_string()),
-                    });
-                    return;
+        let metadata = match sftp.stat(&remote_path_inner).await {
+            Ok(m) => m.attrs,
+            Err(e) => {
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id_inner,
+                    type_: "download".to_string(),
+                    session_id: session_id_inner,
+                    file_name: std::path::Path::new(&remote_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
+                    source: remote_path_inner.clone(),
+                    destination: local_path_inner.clone(),
+                    total_bytes: 0,
+                    transferred_bytes: 0,
+                    speed: 0.0,
+                    eta: None,
+                    status: "failed".to_string(),
+                    error: Some(e.to_string()),
+                });
+                return Ok(task_id);
+            }
+        };
+
+        let file_name = std::path::Path::new(&remote_path_inner)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let result = async {
+            if metadata.is_dir() {
+                Self::download_dir_recursive(&app, &sftp, &remote_path_inner, &local_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
+            } else {
+                let total_bytes = metadata.size.unwrap_or(0);
+                let handle = sftp.open(&remote_path_inner, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
+                let mut local_file = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&local_path_inner)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                let mut transferred = 0u64;
+                let chunk_size = 256 * 1024;
+                let max_concurrent_requests = 64;
+                let start_time = Instant::now();
+                let mut last_emit = Instant::now();
+
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id_inner.clone(),
+                    type_: "download".to_string(),
+                    session_id: session_id_inner.clone(),
+                    file_name: file_name.clone(),
+                    source: remote_path_inner.clone(),
+                    destination: local_path_inner.clone(),
+                    total_bytes,
+                    transferred_bytes: 0,
+                    speed: 0.0,
+                    eta: None,
+                    status: "transferring".to_string(),
+                    error: None,
+                });
+
+                let mut futures = FuturesUnordered::new();
+                let mut next_offset = 0u64;
+
+                for _ in 0..max_concurrent_requests {
+                    if next_offset >= total_bytes { break; }
+                    let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                    let offset = next_offset;
+                    let sftp_clone = sftp.clone();
+                    let handle_clone = handle.clone();
+
+                    futures.push(async move {
+                        let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
+                        (offset, data)
+                    }.boxed());
+                    next_offset += current_chunk_size;
                 }
-            };
-            
-            let file_name = std::path::Path::new(&remote_path_inner)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            
-            let result = async {
-                if metadata.is_dir() {
-                    Self::download_dir_recursive(&app, &sftp, &remote_path_inner, &local_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
-                } else {
-                    let total_bytes = metadata.size.unwrap_or(0);
-                    let handle = sftp.open(&remote_path_inner, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
-                    let mut local_file = tokio::fs::OpenOptions::new()
-                        .write(true)
-                        .create(true)
-                        .truncate(true)
-                        .open(&local_path_inner)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    
-                    let mut transferred = 0u64;
-                    let chunk_size = 256 * 1024;
-                    let max_concurrent_requests = 64;
-                    let start_time = Instant::now();
-                    let mut last_emit = Instant::now();
 
-                    let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_inner.clone(),
-                        type_: "download".to_string(),
-                        session_id: session_id_inner.clone(),
-                        file_name: file_name.clone(),
-                        source: remote_path_inner.clone(),
-                        destination: local_path_inner.clone(),
-                        total_bytes,
-                        transferred_bytes: 0,
-                        speed: 0.0,
-                        eta: None,
-                        status: "transferring".to_string(),
-                        error: None,
-                    });
+                while let Some((offset, result)) = futures.next().await {
+                    if cancel_token.load(Ordering::SeqCst) {
+                        return Err("Cancelled".to_string());
+                    }
 
-                    let mut futures = FuturesUnordered::new();
-                    let mut next_offset = 0u64;
+                    let data = result.map_err(|e| e.to_string())?.data;
 
-                    for _ in 0..max_concurrent_requests {
-                        if next_offset >= total_bytes { break; }
+                    local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
+                    local_file.write_all(&data).await.map_err(|e| e.to_string())?;
+
+                    transferred += data.len() as u64;
+
+                    if last_emit.elapsed().as_millis() > 500 {
+                        let duration = start_time.elapsed().as_secs_f64();
+                        let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
+                        let eta = if speed > 0.0 {
+                            Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
+                        } else {
+                            None
+                        };
+
+                        let _ = app.emit("transfer-progress", TransferProgress {
+                            task_id: task_id_inner.clone(),
+                            type_: "download".to_string(),
+                            session_id: session_id_inner.clone(),
+                            file_name: file_name.clone(),
+                            source: remote_path_inner.clone(),
+                            destination: local_path_inner.clone(),
+                            total_bytes,
+                            transferred_bytes: transferred,
+                            speed,
+                            eta,
+                            status: "transferring".to_string(),
+                            error: None,
+                        });
+                        last_emit = Instant::now();
+                    }
+
+                    if next_offset < total_bytes {
                         let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
                         let offset = next_offset;
                         let sftp_clone = sftp.clone();
                         let handle_clone = handle.clone();
-                        
-                        futures.push(async move {
+
+                        futures.push(Box::pin(async move {
                             let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
                             (offset, data)
-                        }.boxed());
+                        }));
                         next_offset += current_chunk_size;
                     }
-
-                    while let Some((offset, result)) = futures.next().await {
-                        if cancel_token.load(Ordering::SeqCst) {
-                            return Err("Cancelled".to_string());
-                        }
-
-                        let data = result.map_err(|e| e.to_string())?.data;
-                        
-                        local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
-                        local_file.write_all(&data).await.map_err(|e| e.to_string())?;
-                        
-                        transferred += data.len() as u64;
-
-                        if last_emit.elapsed().as_millis() > 500 {
-                            let duration = start_time.elapsed().as_secs_f64();
-                            let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
-                            let eta = if speed > 0.0 {
-                                Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
-                            } else {
-                                None
-                            };
-                            
-                            let _ = app.emit("transfer-progress", TransferProgress {
-                                task_id: task_id_inner.clone(),
-                                type_: "download".to_string(),
-                                session_id: session_id_inner.clone(),
-                                file_name: file_name.clone(),
-                                source: remote_path_inner.clone(),
-                                destination: local_path_inner.clone(),
-                                total_bytes,
-                                transferred_bytes: transferred,
-                                speed,
-                                eta,
-                                status: "transferring".to_string(),
-                                error: None,
-                            });
-                            last_emit = Instant::now();
-                        }
-
-                        if next_offset < total_bytes {
-                            let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
-                            let offset = next_offset;
-                            let sftp_clone = sftp.clone();
-                            let handle_clone = handle.clone();
-                            
-                            futures.push(Box::pin(async move {
-                                let data = sftp_clone.read(handle_clone, offset, current_chunk_size as u32).await;
-                                (offset, data)
-                            }));
-                            next_offset += current_chunk_size;
-                        }
-                    }
-                    local_file.flush().await.map_err(|e| e.to_string())?;
-                    let _ = sftp.close(handle).await;
-                    Ok(())
                 }
-            }.await;
-
-            let is_dir = metadata.is_dir();
-            let final_total_bytes = if is_dir { 0 } else { metadata.size.unwrap_or(0) };
-
-            let final_status = match &result {
-                Ok(_) => "completed",
-                Err(e) if e == "Cancelled" => "cancelled",
-                Err(_) => "failed",
-            };
-            
-            let final_error = result.as_ref().err().cloned();
-
-            let _ = app.emit("transfer-progress", TransferProgress {
-                task_id: task_id_inner,
-                type_: "download".to_string(),
-                session_id: session_id_inner,
-                file_name: file_name.clone(),
-                source: remote_path_inner.clone(),
-                destination: local_path_inner.clone(),
-                total_bytes: final_total_bytes,
-                transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
-                speed: 0.0,
-                eta: None,
-                status: final_status.to_string(),
-                error: final_error.clone(),
-            });
-
-            if let Some(ai_sid) = ai_session_id_clone {
-                let msg_id = Uuid::new_v4().to_string();
-                let content = match &result {
-                    Ok(_) => format!("SFTP Download completed successfully: {} -> {}", remote_path_inner, local_path_inner),
-                    Err(e) => format!("SFTP Download failed: {}. Path: {}", e, remote_path_inner),
-                };
-
-
-                let conn = db_manager.get_connection();
-                let conn = conn.lock().unwrap();
-                let _ = conn.execute(
-                    "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![msg_id, ai_sid, "system", content],
-                );
-                
-                let _ = app.emit(&format!("ai-message-batch-{}", ai_sid), vec![
-                    serde_json::json!({
-                        "role": "system",
-                        "content": content
-                    })
-                ]);
-                let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+                local_file.flush().await.map_err(|e| e.to_string())?;
+                let _ = sftp.close(handle).await;
+                Ok(())
             }
+        }.await;
 
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.remove(&task_id_clone);
+        let is_dir = metadata.is_dir();
+        let final_total_bytes = if is_dir { 0 } else { metadata.size.unwrap_or(0) };
+
+        let final_status = match &result {
+            Ok(_) => "completed",
+            Err(e) if e == "Cancelled" => "cancelled",
+            Err(_) => "failed",
+        };
+
+        let final_error = result.as_ref().err().cloned();
+
+        let _ = app.emit("transfer-progress", TransferProgress {
+            task_id: task_id_inner,
+            type_: "download".to_string(),
+            session_id: session_id_inner,
+            file_name: file_name.clone(),
+            source: remote_path_inner.clone(),
+            destination: local_path_inner.clone(),
+            total_bytes: final_total_bytes,
+            transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
+            speed: 0.0,
+            eta: None,
+            status: final_status.to_string(),
+            error: final_error.clone(),
         });
+
+        if let Some(ai_sid) = ai_session_id_clone {
+            let msg_id = Uuid::new_v4().to_string();
+            let content = match &result {
+                Ok(_) => format!("SFTP Download completed successfully: {} -> {}", remote_path_inner, local_path_inner),
+                Err(e) => format!("SFTP Download failed: {}. Path: {}", e, remote_path_inner),
+            };
+
+            let conn = db_manager.get_connection();
+            let conn = conn.lock().unwrap();
+            let _ = conn.execute(
+                "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![msg_id, ai_sid, "system", content],
+            );
+
+            let _ = app.emit(&format!("ai-message-batch-{}", ai_sid), vec![
+                serde_json::json!({
+                    "role": "system",
+                    "content": content
+                })
+            ]);
+            let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+        }
+
+        let mut tasks = TRANSFER_TASKS.lock().await;
+        tasks.remove(&task_id);
 
         Ok(task_id)
     }
@@ -630,126 +789,187 @@ impl SftpManager {
         session_id: String,
         local_path: String,
         remote_path: String,
+        task_id: Option<String>,
+        ai_session_id: Option<String>,
+    ) -> Result<String, String> {
+        Self::queue_upload(app, db_manager, session_id, local_path, remote_path, task_id).await
+    }
+
+    async fn _upload_file(
+        app: AppHandle,
+        db_manager: DatabaseManager,
+        session_id: String,
+        local_path: String,
+        remote_path: String,
+        task_id: String,
+        cancel_token: Arc<AtomicBool>,
         ai_session_id: Option<String>,
     ) -> Result<String, String> {
         let sftp = Self::get_session(&session_id).await?;
-        let task_id = Uuid::new_v4().to_string();
-        let cancel_token = Arc::new(AtomicBool::new(false));
-        
-        {
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.insert(task_id.clone(), cancel_token.clone());
-        }
-
-        let task_id_clone = task_id.clone();
-        let _session_id_clone = session_id.clone();
-        let _remote_path_clone = remote_path.clone();
-        let _local_path_clone = local_path.clone();
-        let ai_session_id_clone = ai_session_id.clone();
 
         let task_id_inner = task_id.clone();
         let session_id_inner = session_id.clone();
         let remote_path_inner = remote_path.clone();
         let local_path_inner = local_path.clone();
+        let ai_session_id_clone = ai_session_id.clone();
+        let task_id_clone = task_id.clone();
 
-        tokio::spawn(async move {
-            let local_metadata = match tokio::fs::metadata(&local_path_inner).await {
-                Ok(m) => m,
-                Err(e) => {
-                    let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_inner,
-                        type_: "upload".to_string(),
-                        session_id: session_id_inner,
-                        file_name: std::path::Path::new(&local_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
-                        source: local_path_inner.clone(),
-                        destination: remote_path_inner.clone(),
-                        total_bytes: 0,
-                        transferred_bytes: 0,
-                        speed: 0.0,
-                        eta: None,
-                        status: "failed".to_string(),
-                        error: Some(e.to_string()),
-                    });
-                    return;
-                }
-            };
-            let file_name = std::path::Path::new(&local_path_inner)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            
-            let result = async {
-                if local_metadata.is_dir() {
-                    Self::upload_dir_recursive(&app, &sftp, &local_path_inner, &remote_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
-                } else {
-                    // Check if remote file exists
-                    if let Some(remote_attrs) = Self::check_file_exists(&sftp, &remote_path_inner).await? {
-                        let std_metadata = std::fs::metadata(&local_path_inner).map_err(|e| e.to_string())?;
-                        let resolution = Self::wait_for_conflict_resolution(
-                            &app,
-                            &task_id_inner,
-                            &session_id_inner,
-                            &remote_path_inner,
-                            &std_metadata,
-                            &remote_attrs,
-                        ).await?;
+        let local_metadata = match tokio::fs::metadata(&local_path_inner).await {
+            Ok(m) => m,
+            Err(e) => {
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id_inner,
+                    type_: "upload".to_string(),
+                    session_id: session_id_inner,
+                    file_name: std::path::Path::new(&local_path_inner).file_name().unwrap_or_default().to_string_lossy().to_string(),
+                    source: local_path_inner.clone(),
+                    destination: remote_path_inner.clone(),
+                    total_bytes: 0,
+                    transferred_bytes: 0,
+                    speed: 0.0,
+                    eta: None,
+                    status: "failed".to_string(),
+                    error: Some(e.to_string()),
+                });
+                return Ok(task_id);
+            }
+        };
+        let file_name = std::path::Path::new(&local_path_inner)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
-                        match resolution {
-                            ConflictResolution::Skip => {
-                                return Err("Skipped".to_string());
-                            },
-                            ConflictResolution::Cancel => {
-                                return Err("Cancelled".to_string());
-                            },
-                            ConflictResolution::Overwrite => {
-                                // Continue with upload
-                            }
+        let result = async {
+            if local_metadata.is_dir() {
+                Self::upload_dir_recursive(&app, &sftp, &local_path_inner, &remote_path_inner, &task_id_inner, &session_id_inner, &cancel_token).await
+            } else {
+                if let Some(remote_attrs) = Self::check_file_exists(&sftp, &remote_path_inner).await? {
+                    let std_metadata = std::fs::metadata(&local_path_inner).map_err(|e| e.to_string())?;
+                    let resolution = Self::wait_for_conflict_resolution(
+                        &app,
+                        &task_id_inner,
+                        &session_id_inner,
+                        &remote_path_inner,
+                        &std_metadata,
+                        &remote_attrs,
+                    ).await?;
+
+                    match resolution {
+                        ConflictResolution::Skip => {
+                            return Err("Skipped".to_string());
+                        },
+                        ConflictResolution::Cancel => {
+                            return Err("Cancelled".to_string());
+                        },
+                        ConflictResolution::Overwrite => {
                         }
                     }
+                }
 
-                    let total_bytes = local_metadata.len();
-                    let mut local_file = tokio::fs::File::open(&local_path_inner).await.map_err(|e| e.to_string())?;
-                    let handle = sftp.open(&remote_path_inner, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
-                    
-                    let mut transferred = 0u64;
-                    let chunk_size = 32 * 1024; // 32KB chunks
-                    let max_concurrent_requests = 16; // 16 concurrent requests
-                    let start_time = Instant::now();
-                    let mut last_emit = Instant::now();
+                let total_bytes = local_metadata.len();
+                let mut local_file = tokio::fs::File::open(&local_path_inner).await.map_err(|e| e.to_string())?;
+                let handle = sftp.open(&remote_path_inner, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
 
-                    let _ = app.emit("transfer-progress", TransferProgress {
-                        task_id: task_id_inner.clone(),
-                        type_: "upload".to_string(),
-                        session_id: session_id_inner.clone(),
-                        file_name: file_name.clone(),
-                        source: local_path_inner.clone(),
-                        destination: remote_path_inner.clone(),
-                        total_bytes,
-                        transferred_bytes: 0,
-                        speed: 0.0,
-                        eta: None,
-                        status: "transferring".to_string(),
-                        error: None,
-                    });
+                let mut transferred = 0u64;
+                let chunk_size = 32 * 1024;
+                let max_concurrent_requests = 16;
+                let start_time = Instant::now();
+                let mut last_emit = Instant::now();
 
-                    let mut futures = FuturesUnordered::new();
-                    let mut next_offset = 0u64;
+                let _ = app.emit("transfer-progress", TransferProgress {
+                    task_id: task_id_inner.clone(),
+                    type_: "upload".to_string(),
+                    session_id: session_id_inner.clone(),
+                    file_name: file_name.clone(),
+                    source: local_path_inner.clone(),
+                    destination: remote_path_inner.clone(),
+                    total_bytes,
+                    transferred_bytes: 0,
+                    speed: 0.0,
+                    eta: None,
+                    status: "transferring".to_string(),
+                    error: None,
+                });
 
-                    for _ in 0..max_concurrent_requests {
-                        if next_offset >= total_bytes { break; }
+                let mut futures = FuturesUnordered::new();
+                let mut next_offset = 0u64;
+
+                for _ in 0..max_concurrent_requests {
+                    if next_offset >= total_bytes { break; }
+                    let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
+                    let offset = next_offset;
+
+                    let mut buffer = vec![0u8; current_chunk_size as usize];
+                    local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
+                    local_file.read_exact(&mut buffer).await.map_err(|e| e.to_string())?;
+
+                    let sftp_clone = sftp.clone();
+                    let handle_clone = handle.clone();
+
+                    futures.push(async move {
+                        let res = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            sftp_clone.write(handle_clone, offset, buffer)
+                        ).await;
+                        match res {
+                            Ok(r) => r,
+                            Err(_) => Err(russh_sftp::client::error::Error::IO(
+                                "Chunk upload timeout (30s)".to_string()
+                            ))
+                        }
+                    }.boxed());
+                    next_offset += current_chunk_size;
+                }
+
+                while let Some(result) = futures.next().await {
+                    if cancel_token.load(Ordering::SeqCst) {
+                        return Err("Cancelled".to_string());
+                    }
+
+                    result.map_err(|e| e.to_string())?;
+
+                    transferred += chunk_size;
+                    if transferred > total_bytes { transferred = total_bytes; }
+
+                    if last_emit.elapsed().as_millis() > 500 {
+                        let duration = start_time.elapsed().as_secs_f64();
+                        let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
+                        let eta = if speed > 0.0 {
+                            Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
+                        } else {
+                            None
+                        };
+
+                        let _ = app.emit("transfer-progress", TransferProgress {
+                            task_id: task_id_inner.clone(),
+                            type_: "upload".to_string(),
+                            session_id: session_id_inner.clone(),
+                            file_name: file_name.clone(),
+                            source: local_path_inner.clone(),
+                            destination: remote_path_inner.clone(),
+                            total_bytes,
+                            transferred_bytes: transferred,
+                            speed,
+                            eta,
+                            status: "transferring".to_string(),
+                            error: None,
+                        });
+                        last_emit = Instant::now();
+                    }
+
+                    if next_offset < total_bytes {
                         let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
                         let offset = next_offset;
-                        
+
                         let mut buffer = vec![0u8; current_chunk_size as usize];
                         local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
                         local_file.read_exact(&mut buffer).await.map_err(|e| e.to_string())?;
-                        
+
                         let sftp_clone = sftp.clone();
                         let handle_clone = handle.clone();
-                        
-                        futures.push(async move {
-                            // 30 seconds timeout per chunk
+
+                        futures.push(Box::pin(async move {
                             let res = tokio::time::timeout(
                                 std::time::Duration::from_secs(30),
                                 sftp_clone.write(handle_clone, offset, buffer)
@@ -760,136 +980,72 @@ impl SftpManager {
                                     "Chunk upload timeout (30s)".to_string()
                                 ))
                             }
-                        }.boxed());
+                        }));
                         next_offset += current_chunk_size;
                     }
-
-                    while let Some(result) = futures.next().await {
-                        if cancel_token.load(Ordering::SeqCst) {
-                            return Err("Cancelled".to_string());
-                        }
-
-                        result.map_err(|e| e.to_string())?;
-                        
-                        transferred += chunk_size; 
-                        if transferred > total_bytes { transferred = total_bytes; }
-
-                        if last_emit.elapsed().as_millis() > 500 {
-                            let duration = start_time.elapsed().as_secs_f64();
-                            let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
-                            let eta = if speed > 0.0 {
-                                Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
-                            } else {
-                                None
-                            };
-                            
-                            let _ = app.emit("transfer-progress", TransferProgress {
-                                task_id: task_id_inner.clone(),
-                                type_: "upload".to_string(),
-                                session_id: session_id_inner.clone(),
-                                file_name: file_name.clone(),
-                                source: local_path_inner.clone(),
-                                destination: remote_path_inner.clone(),
-                                total_bytes,
-                                transferred_bytes: transferred,
-                                speed,
-                                eta,
-                                status: "transferring".to_string(),
-                                error: None,
-                            });
-                            last_emit = Instant::now();
-                        }
-
-                        if next_offset < total_bytes {
-                            let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
-                            let offset = next_offset;
-                            
-                            let mut buffer = vec![0u8; current_chunk_size as usize];
-                            local_file.seek(SeekFrom::Start(offset)).await.map_err(|e| e.to_string())?;
-                            local_file.read_exact(&mut buffer).await.map_err(|e| e.to_string())?;
-
-                            let sftp_clone = sftp.clone();
-                            let handle_clone = handle.clone();
-                            
-                            futures.push(Box::pin(async move {
-                                // 30 seconds timeout per chunk
-                                let res = tokio::time::timeout(
-                                    std::time::Duration::from_secs(30),
-                                    sftp_clone.write(handle_clone, offset, buffer)
-                                ).await;
-                                match res {
-                                    Ok(r) => r,
-                                    Err(_) => Err(russh_sftp::client::error::Error::IO(
-                                        "Chunk upload timeout (30s)".to_string()
-                                    ))
-                                }
-                            }));
-                            next_offset += current_chunk_size;
-                        }
-                    }
-                    let _ = sftp.close(handle).await;
-                    Ok(())
                 }
-            }.await;
-
-            let is_dir = local_metadata.is_dir();
-            let final_total_bytes = if is_dir { 0 } else { local_metadata.len() };
-
-            let final_status = match &result {
-                Ok(_) => "completed",
-                Err(e) if e == "Cancelled" => "cancelled",
-                Err(e) if e == "Skipped" => "cancelled",
-                Err(_) => "failed",
-            };
-            
-            let final_error = match &result {
-                Err(e) if e == "Skipped" => Some("Skipped by user".to_string()),
-                Err(e) if e == "Cancelled" => Some("Cancelled by user".to_string()),
-                Ok(_) => None,
-                Err(e) => Some(e.clone()),
-            };
-
-            let _ = app.emit("transfer-progress", TransferProgress {
-                task_id: task_id_inner,
-                type_: "upload".to_string(),
-                session_id: session_id_inner,
-                file_name: file_name.clone(),
-                source: local_path_inner.clone(),
-                destination: remote_path_inner.clone(),
-                total_bytes: final_total_bytes,
-                transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
-                speed: 0.0,
-                eta: None,
-                status: final_status.to_string(),
-                error: final_error,
-            });
-
-            if let Some(ai_sid) = ai_session_id_clone {
-                let msg_id = Uuid::new_v4().to_string();
-                let content = match &result {
-                    Ok(_) => format!("SFTP Upload completed successfully: {} -> {}", local_path_inner, remote_path_inner),
-                    Err(e) => format!("SFTP Upload failed: {}. Path: {}", e, local_path_inner),
-                };
-
-                let conn = db_manager.get_connection();
-                let conn = conn.lock().unwrap();
-                let _ = conn.execute(
-                    "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-                    rusqlite::params![msg_id, ai_sid, "system", content],
-                );
-                
-                let _ = app.emit(&format!("ai-message-batch-{}", ai_sid), vec![
-                    serde_json::json!({
-                        "role": "system",
-                        "content": content
-                    })
-                ]);
-                let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+                let _ = sftp.close(handle).await;
+                Ok(())
             }
+        }.await;
 
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.remove(&task_id_clone);
+        let is_dir = local_metadata.is_dir();
+        let final_total_bytes = if is_dir { 0 } else { local_metadata.len() };
+
+        let final_status = match &result {
+            Ok(_) => "completed",
+            Err(e) if e == "Cancelled" => "cancelled",
+            Err(e) if e == "Skipped" => "cancelled",
+            Err(_) => "failed",
+        };
+
+        let final_error = match &result {
+            Err(e) if e == "Skipped" => Some("Skipped by user".to_string()),
+            Err(e) if e == "Cancelled" => Some("Cancelled by user".to_string()),
+            Ok(_) => None,
+            Err(e) => Some(e.clone()),
+        };
+
+        let _ = app.emit("transfer-progress", TransferProgress {
+            task_id: task_id_inner,
+            type_: "upload".to_string(),
+            session_id: session_id_inner,
+            file_name: file_name.clone(),
+            source: local_path_inner.clone(),
+            destination: remote_path_inner.clone(),
+            total_bytes: final_total_bytes,
+            transferred_bytes: if final_status == "completed" { final_total_bytes } else { 0 },
+            speed: 0.0,
+            eta: None,
+            status: final_status.to_string(),
+            error: final_error,
         });
+
+        if let Some(ai_sid) = ai_session_id_clone {
+            let msg_id = Uuid::new_v4().to_string();
+            let content = match &result {
+                Ok(_) => format!("SFTP Upload completed successfully: {} -> {}", local_path_inner, remote_path_inner),
+                Err(e) => format!("SFTP Upload failed: {}. Path: {}", e, local_path_inner),
+            };
+
+            let conn = db_manager.get_connection();
+            let conn = conn.lock().unwrap();
+            let _ = conn.execute(
+                "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![msg_id, ai_sid, "system", content],
+            );
+
+            let _ = app.emit(&format!("ai-message-batch-{}", ai_sid), vec![
+                serde_json::json!({
+                    "role": "system",
+                    "content": content
+                })
+            ]);
+            let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+        }
+
+        let mut tasks = TRANSFER_TASKS.lock().await;
+        tasks.remove(&task_id_clone);
 
         Ok(task_id)
     }

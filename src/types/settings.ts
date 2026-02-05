@@ -22,6 +22,7 @@ export interface EditorRule {
 export interface SftpSettings {
   defaultDownloadPath: string;
   editors: EditorRule[];
+  maxConcurrentTransfers: number;
 }
 
 export type Theme = 'light' | 'dark' | 'orange' | 'green' | 'system';

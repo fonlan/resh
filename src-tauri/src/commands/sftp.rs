@@ -9,15 +9,22 @@ pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileE
 }
 
 #[tauri::command]
-pub async fn sftp_download(app: AppHandle, session_id: String, remote_path: String, local_path: String) -> Result<String, String> {
+pub async fn sftp_download(app: AppHandle, session_id: String, remote_path: String, local_path: String, task_id: Option<String>) -> Result<String, String> {
     let db = app.state::<Arc<AppState>>().db_manager.clone();
-    SftpManager::download_file(app, db, session_id, remote_path, local_path, None).await
+    SftpManager::download_file(app, db, session_id, remote_path, local_path, task_id, None).await
 }
 
 #[tauri::command]
-pub async fn sftp_upload(app: AppHandle, session_id: String, local_path: String, remote_path: String) -> Result<String, String> {
+pub async fn sftp_upload(app: AppHandle, session_id: String, local_path: String, remote_path: String, task_id: Option<String>) -> Result<String, String> {
     let db = app.state::<Arc<AppState>>().db_manager.clone();
-    SftpManager::upload_file(app, db, session_id, local_path, remote_path, None).await
+    SftpManager::upload_file(app, db, session_id, local_path, remote_path, task_id, None).await
+}
+
+#[tauri::command]
+pub async fn sftp_set_max_concurrent(max: u32) -> Result<(), String> {
+    let max = std::cmp::max(1, std::cmp::min(10, max));
+    SftpManager::set_max_concurrent_transfers(max).await;
+    Ok(())
 }
 
 #[tauri::command]

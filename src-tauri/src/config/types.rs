@@ -174,6 +174,12 @@ pub struct SftpSettings {
     pub default_download_path: String,
     #[serde(default)]
     pub editors: Vec<EditorRule>,
+    #[serde(default = "default_max_concurrent_transfers")]
+    pub max_concurrent_transfers: u32,
+}
+
+fn default_max_concurrent_transfers() -> u32 {
+    2
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,6 +368,7 @@ impl Config {
                 sftp: SftpSettings {
                     default_download_path: String::new(),
                     editors: vec![],
+                    max_concurrent_transfers: 2,
                 },
                 ai_mode: default_ai_mode(),
                 ai_max_history: 20,

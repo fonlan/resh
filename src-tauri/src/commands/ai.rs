@@ -549,14 +549,15 @@ async fn execute_tools_and_save(
                                     }
 
                                     if parent_ok {
-                                        match crate::sftp_manager::SftpManager::download_file(
-                                            app_handle.clone(),
-                                            state.db_manager.clone(),
-                                            ssh_id.to_string(),
-                                            remote_path,
-                                            final_local_path.clone(),
-                                            Some(session_id.to_string()),
-                                        ).await {
+                                    match crate::sftp_manager::SftpManager::download_file(
+                                        app_handle.clone(),
+                                        state.db_manager.clone(),
+                                        ssh_id.to_string(),
+                                        remote_path,
+                                        final_local_path.clone(),
+                                        None,
+                                        Some(session_id.to_string()),
+                                    ).await {
                                             Ok(task_id) => format!("Download started in background. Task ID: {}. Local path: {}. I will notify you once it's finished.", task_id, final_local_path),
                                             Err(e) => format!("Error starting download: {}", e),
                                         }
@@ -566,14 +567,15 @@ async fn execute_tools_and_save(
                                 }
                                 Ok(Err(_)) => format!("Error: Remote path '{}' does not exist or is inaccessible. Please confirm the path with the user.", remote_path),
                                 Err(_) => {
-                                    match crate::sftp_manager::SftpManager::download_file(
-                                        app_handle.clone(),
-                                        state.db_manager.clone(),
-                                        ssh_id.to_string(),
-                                        remote_path,
-                                        "queued_download".to_string(),
-                                        Some(session_id.to_string()),
-                                    ).await {
+                                match crate::sftp_manager::SftpManager::download_file(
+                                    app_handle.clone(),
+                                    state.db_manager.clone(),
+                                    ssh_id.to_string(),
+                                    remote_path,
+                                    "queued_download".to_string(),
+                                    None,
+                                    Some(session_id.to_string()),
+                                ).await {
                                         Ok(task_id) => format!("SFTP session is busy. Download task {} has been queued and will start as soon as possible.", task_id),
                                         Err(e) => format!("Error queuing download: {}", e),
                                     }
@@ -616,6 +618,7 @@ async fn execute_tools_and_save(
                                             ssh_id.to_string(),
                                             local_path,
                                             remote_path.clone(),
+                                            None,
                                             Some(session_id.to_string()),
                                         ).await {
                                             Ok(task_id) => format!("Upload started in background. Task ID: {}. Target: {}. I will notify you once it's finished.", task_id, remote_path),
@@ -630,6 +633,7 @@ async fn execute_tools_and_save(
                                             ssh_id.to_string(),
                                             local_path,
                                             remote_path.clone(),
+                                            None,
                                             Some(session_id.to_string()),
                                         ).await {
                                             Ok(task_id) => format!("SFTP session is busy. Upload task {} has been queued and will start as soon as possible.", task_id),

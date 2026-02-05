@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Lock, LockOpen, Folder, File, ChevronRight, ChevronDown, Download, Upload, RefreshCw, FolderOpen, FolderSymlink, FileSymlink, ArrowDownUp, ArrowUp, ArrowDown, Trash, Settings, Plus, FolderPlus, Pencil, Copy, Terminal, Link, Edit, FileCode, Clipboard } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../hooks/useConfig';
 
@@ -657,55 +658,73 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       try {
           const selected = await invoke<string[] | null>('pick_files');
 
-          if (selected) {
+          if (selected && selected.length > 0) {
               const files = selected;
-              for (const file of files) {
+              
+              // We will create a promise for each file upload
+              const uploadPromises = files.map(async (file) => {
                   const filename = file.split(/[\\/]/).pop();
-                  try {
-                    // Upload and wait for completion/cancellation
-                    const taskId = await invoke<string>('sftp_upload', { sessionId, localPath: file, remotePath: `${targetPath}/${filename}` });
-                    
-                    await new Promise<void>((resolve, reject) => {
-                        let unlisten: (() => void) | undefined;
-                        // Start listening immediately
-                        listen<TransferTask>('transfer-progress', (event) => {
-                            const task = event.payload;
-                            if (task.task_id === taskId) {
-                                if (task.status === 'completed') {
-                                    unlisten?.();
-                                    resolve();
-                                } else if (task.status === 'cancelled') {
-                                    unlisten?.();
-                                    // Check if it was skipped or cancelled
-                                    if (task.error && task.error.includes('Skipped')) {
-                                        reject(new Error('Skipped'));
-                                    } else {
-                                        reject(new Error('Cancelled'));
-                                    }
-                                } else if (task.status === 'failed') {
-                                    unlisten?.();
-                                    reject(new Error(task.error || 'Failed'));
-                                }
-                            }
-                        }).then(fn => { unlisten = fn; });
-                    });
+                  const taskId = uuidv4(); // Generate ID in frontend
 
+                  // 1. Create a promise that waits for this specific task completion
+                  const completionPromise = new Promise<void>((resolve, reject) => {
+                      let unlisten: (() => void) | undefined;
+                      let resolved = false;
+
+                      // Start listening BEFORE invoking the backend
+                      listen<TransferTask>('transfer-progress', (event) => {
+                          const task = event.payload;
+                          if (task.task_id === taskId) {
+                              resolved = true;
+                              // Don't unlisten immediately if we want to catch all events? 
+                              // Actually we only care about terminal states.
+                              if (task.status === 'completed') {
+                                  unlisten?.();
+                                  resolve();
+                              } else if (task.status === 'cancelled') {
+                                  unlisten?.();
+                                  if (task.error && task.error.includes('Skipped')) {
+                                      reject(new Error('Skipped'));
+                                  } else {
+                                      reject(new Error('Cancelled'));
+                                  }
+                              } else if (task.status === 'failed') {
+                                  unlisten?.();
+                                  reject(new Error(task.error || 'Failed'));
+                              }
+                          }
+                      }).then(fn => { unlisten = fn; });
+
+                      // Timeout safety net (60 seconds)
+                      setTimeout(() => {
+                          if (!resolved) {
+                              unlisten?.();
+                              reject(new Error('Timeout waiting for transfer'));
+                          }
+                      }, 60000);
+                  });
+
+                  try {
+                      // 2. Start the upload with our pre-generated ID
+                      await invoke('sftp_upload', { 
+                          sessionId, 
+                          localPath: file, 
+                          remotePath: `${targetPath}/${filename}`,
+                          taskId 
+                      });
+                      
+                      // 3. Wait for completion
+                      await completionPromise;
                   } catch (e: any) {
-                    console.error('Upload failed for file:', file, e);
-                    // Check if error is "Cancelled" (Cancel All)
-                    if (e && e.toString().includes('Cancelled')) {
-                      console.log('Upload cancelled by user, stopping queue');
-                      break; // Stop processing remaining files
-                    }
-                    // If error is "Skipped" (which comes as cancelled status with specific error?), 
-                    // actually our backend sends 'cancelled' status for Skip too.
-                    // But wait, for single file upload:
-                    // Backend: ConflictResolution::Skip -> Err("Skipped") -> upload_file returns Err -> Task Failed
-                    // So frontend receives 'failed' status with error 'Skipped'.
-                    // Let's adjust the catch block to handle 'Skipped' if needed, 
-                    // but loop 'continue' is implied.
+                      console.error('Upload failed/cancelled for file:', file, e);
+                      // Rethrow if cancelled by user to stop other uploads?
+                      // With Promise.all, others are already started.
+                      // We just let them finish or fail independently.
                   }
-              }
+              });
+
+              // Run all uploads in parallel (backend manages concurrency queue)
+              await Promise.all(uploadPromises);
           }
       } catch (e) {
           console.error('File selection failed', e);

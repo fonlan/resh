@@ -340,6 +340,8 @@ export const locales = {
       settings: {
         defaultDownloadPath: 'Default Download Path',
         defaultDownloadPathDesc: 'Default directory for SFTP file downloads.',
+        maxConcurrentTransfers: 'Max Concurrent Transfers',
+        maxConcurrentTransfersDesc: 'Number of simultaneous download/upload tasks. Recommended: 2-4.',
         browse: 'Select Folder',
         editorAssociations: 'Editor Associations',
         addRule: 'Add Rule',
@@ -704,6 +706,8 @@ export const locales = {
       settings: {
         defaultDownloadPath: '默认下载路径',
         defaultDownloadPathDesc: 'SFTP 文件下载的默认存放目录。',
+        maxConcurrentTransfers: '最大并行传输任务数',
+        maxConcurrentTransfersDesc: '同时进行的下载/上传任务数量。推荐值：2-4。',
         browse: '选择文件夹',
         editorAssociations: '编辑器关联',
         addRule: '添加规则',
