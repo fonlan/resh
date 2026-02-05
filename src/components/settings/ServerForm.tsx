@@ -501,7 +501,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, local: e.target.value }))
                     }
-                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-gray-500 self-center">→</span>
                   <input
@@ -511,12 +511,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     onChange={(e) =>
                       setNewPortForward((prev) => ({ ...prev, remote: e.target.value }))
                     }
-                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
                     onClick={addPortForward}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
+                    className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
                   >
                     {t.common.add}
                   </button>
@@ -539,12 +539,12 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           value={cmd}
                           onChange={(e) => handleAutoExecCommandChange(index, e.target.value)}
                           placeholder="e.g., cd /var/log"
-                          className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                         <button
                           type="button"
                           onClick={() => removeAutoExecCommand(index)}
-                          className="text-red-400 hover:text-red-300 px-3 py-2"
+                          className="text-red-400 hover:text-red-300 px-3 py-2 text-sm flex items-center"
                         >
                           {t.common.remove}
                         </button>
@@ -556,7 +556,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                 <button
                   type="button"
                   onClick={addAutoExecCommand}
-                  className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
+                  className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
                 >
                   {t.serverForm.addCommand}
                 </button>
@@ -581,14 +581,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                               type="text"
                               value={editingEnvVar.newKey}
                               onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newKey: e.target.value })}
-                              className="w-24 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="w-24 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                             <span className="text-gray-500 self-center">=</span>
                             <input
                               type="text"
                               value={editingEnvVar.newValue}
                               onChange={(e) => setEditingEnvVar({ ...editingEnvVar, newValue: e.target.value })}
-                              className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                             />
                              <button
                                type="button"
@@ -621,14 +621,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                             type="text"
                             value={key}
                             disabled
-                            className="w-24 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
+                            className="w-24 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
                           />
                           <span className="text-gray-500 self-center">=</span>
                           <input
                             type="text"
                             value={value}
                             disabled
-                            className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
+                            className="flex-1 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-muted)] cursor-not-allowed"
                           />
                           <button
                             type="button"
@@ -658,14 +658,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                     type="text"
                     placeholder={t.serverForm.varNamePlaceholder}
                     id="envVarName"
-                    className="w-32 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-32 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <span className="text-gray-500 self-center">=</span>
                   <input
                     type="text"
                     placeholder={t.serverForm.varValuePlaceholder}
                     id="envVarValue"
-                    className="flex-1 px-3 py-2 rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-gray-600 bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <button
                     type="button"
@@ -678,7 +678,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                         valueInput.value = '';
                       }
                     }}
-                    className="px-4 py-2 bg-gray-700 text-white rounded-md hover:bg-gray-600"
+                    className="px-4 py-2 text-sm bg-gray-700 text-white rounded-md hover:bg-gray-600 flex items-center justify-center whitespace-nowrap"
                   >
                     {t.common.add}
                   </button>
