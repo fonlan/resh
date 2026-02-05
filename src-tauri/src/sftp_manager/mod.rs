@@ -450,7 +450,7 @@ impl SftpManager {
         remote_path: String,
         local_path: String,
         task_id: Option<String>,
-        ai_session_id: Option<String>,
+        _ai_session_id: Option<String>,
     ) -> Result<String, String> {
         Self::queue_download(app, db_manager, session_id, remote_path, local_path, task_id).await
     }
@@ -467,10 +467,6 @@ impl SftpManager {
     ) -> Result<String, String> {
         let sftp = Self::get_session(&session_id).await?;
 
-        let task_id_clone = task_id.clone();
-        let session_id_clone = session_id.clone();
-        let remote_path_clone = remote_path.clone();
-        let local_path_clone = local_path.clone();
         let ai_session_id_clone = ai_session_id.clone();
         let task_id_inner = task_id.clone();
         let session_id_inner = session_id.clone();
@@ -822,7 +818,7 @@ impl SftpManager {
         local_path: String,
         remote_path: String,
         task_id: Option<String>,
-        ai_session_id: Option<String>,
+        _ai_session_id: Option<String>,
     ) -> Result<String, String> {
         Self::queue_upload(app, db_manager, session_id, local_path, remote_path, task_id).await
     }
