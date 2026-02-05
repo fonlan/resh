@@ -114,7 +114,10 @@ impl SyncManager {
         }
         for cmd in &mut local.sftp_custom_commands {
             if remote.removed_ids.contains(&cmd.id) {
-                cmd.synced = false;
+                // Fix: Do not force disable sync if remote has it in removed_ids.
+                // If the user re-enabled sync locally (synced=true), we must respect that.
+                // Overwriting it to false here prevents re-enabling sync after cancellation.
+                // cmd.synced = false;
             }
         }
 
