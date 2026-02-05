@@ -206,10 +206,36 @@ const ToolConfirmation = ({
 };
 
 const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
+  const { config } = useConfig();
   const [copied, setCopied] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
   const reasoningContentRef = useRef<HTMLDivElement>(null);
   const prevReasoningLength = useRef(msg.reasoning_content?.length || 0);
+
+  const timeString = useMemo(() => {
+    if (!msg.created_at) return '';
+    try {
+      // SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS"
+      // We append 'Z' to ensure it's treated as UTC
+      const dateStr = msg.created_at.endsWith('Z') ? msg.created_at : msg.created_at.replace(' ', 'T') + 'Z';
+      const date = new Date(dateStr);
+      return date.toLocaleString([], { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
+    } catch {
+      return '';
+    }
+  }, [msg.created_at]);
+
+  const modelName = useMemo(() => {
+    if (msg.role !== 'assistant' || !msg.model_id || !config?.aiModels) return null;
+    const model = config.aiModels.find(m => m.id === msg.model_id);
+    return model ? model.name : msg.model_id;
+  }, [msg.model_id, msg.role, config?.aiModels]);
 
   useEffect(() => {
     if (showReasoning && reasoningContentRef.current) {
@@ -318,6 +344,10 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
               {msg.content}
             </ReactMarkdown>
           )}
+          <div className={`flex items-center gap-2 mt-1 text-[10px] select-none ${msg.role === 'user' ? 'text-white/60 justify-end' : 'text-[var(--text-muted)] justify-between'}`}>
+            {modelName && <span>{modelName}</span>}
+            {timeString && <span>{timeString}</span>}
+          </div>
         </div>
         <button
           type="button"
@@ -514,7 +544,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
       storeSetPendingToolCalls(activeSessionId, null);
-      newAssistantMessage(activeSessionId);
+      newAssistantMessage(activeSessionId, selectedModelId);
     });
 
     // Handle MessageBatch events (minimax-style multiple messages in one response)
@@ -679,7 +709,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
 
     // Optimistic update
-    addMessage(sessionId, { role: 'user', content });
+    addMessage(sessionId, { role: 'user', content, created_at: new Date().toISOString() });
     setGenerating(sessionId, true);
 
     try {

@@ -190,6 +190,8 @@ fn fix_tool_call_sequences(messages: &mut Vec<MessagePayload>, result: &mut Vali
                                 reasoning_content: None,
                                 tool_calls: None,
                                 tool_call_id: Some(call_id.clone()),
+                                created_at: None,
+                                model_id: None,
                             },
                         );
                         j += 1;
@@ -480,6 +482,8 @@ pub struct MessagePayload {
     pub reasoning_content: Option<String>,
     pub tool_calls: Option<Vec<ToolCallPayload>>,
     pub tool_call_id: Option<String>,
+    pub created_at: Option<String>,
+    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -505,6 +509,8 @@ mod tests {
             reasoning_content: None,
             tool_calls: None,
             tool_call_id: None,
+            created_at: None,
+            model_id: None,
         }
     }
 
@@ -579,6 +585,8 @@ mod tests {
                     },
                 ]),
                 tool_call_id: None,
+                created_at: None,
+                model_id: None,
             },
             MessagePayload {
                 role: "tool".to_string(),
@@ -586,6 +594,8 @@ mod tests {
                 reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: Some("tc1".to_string()),
+                created_at: None,
+                model_id: None,
             },
             // 用户突然插嘴，中断了 tc2 的响应
             create_message("user", Some("Actually, nevermind")),
@@ -620,6 +630,8 @@ mod tests {
                     },
                 }]),
                 tool_call_id: None,
+                created_at: None,
+                model_id: None,
             },
             // 用户突然插嘴，没有一个 tool 得到响应
             create_message("user", Some("Actually, nevermind")),
@@ -651,6 +663,8 @@ mod tests {
                     },
                 }]),
                 tool_call_id: None,
+                created_at: None,
+                model_id: None,
             },
         ];
 
@@ -680,6 +694,8 @@ mod tests {
                     },
                 }]),
                 tool_call_id: None,
+                created_at: None,
+                model_id: None,
             },
             MessagePayload {
                 role: "tool".to_string(),
@@ -687,6 +703,8 @@ mod tests {
                 reasoning_content: None,
                 tool_calls: None,
                 tool_call_id: Some("tc1".to_string()),
+                created_at: None,
+                model_id: None,
             },
         ];
 

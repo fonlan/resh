@@ -16,7 +16,7 @@ interface AIState {
   createSession: (serverId: string, modelId?: string, sshSessionId?: string) => Promise<string>;
   selectSession: (sessionId: string | null, serverId?: string) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
-  newAssistantMessage: (sessionId: string) => void;
+  newAssistantMessage: (sessionId: string, modelId?: string) => void;
   appendResponse: (sessionId: string, content: string) => void;
   appendReasoning: (sessionId: string, reasoning: string) => void;
   appendToolCalls: (sessionId: string, toolCalls: ToolCall[]) => void;
@@ -157,7 +157,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     });
   },
 
-  newAssistantMessage: (sessionId) => {
+  newAssistantMessage: (sessionId, modelId) => {
     set(state => {
       const current = state.messages[sessionId] || [];
       // Don't add a new message if the last one is already an empty assistant message
@@ -166,7 +166,12 @@ export const useAIStore = create<AIState>((set, get) => ({
         return state;
       }
       return {
-        messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '' }] }
+        messages: { ...state.messages, [sessionId]: [...current, { 
+          role: 'assistant', 
+          content: '',
+          created_at: new Date().toISOString(),
+          model_id: modelId
+        }] }
       };
     });
   },
@@ -184,7 +189,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       } else {
         // Create new assistant message
         return {
-          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content }] }
+          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content, created_at: new Date().toISOString() }] }
         };
       }
     });
@@ -201,7 +206,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         return { messages: { ...state.messages, [sessionId]: updated } };
       } else {
         return {
-          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', reasoning_content: reasoning }] }
+          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', reasoning_content: reasoning, created_at: new Date().toISOString() }] }
         };
       }
     });
@@ -218,7 +223,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         return { messages: { ...state.messages, [sessionId]: updated } };
       } else {
         return {
-          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', tool_calls: toolCalls }] }
+          messages: { ...state.messages, [sessionId]: [...current, { role: 'assistant', content: '', tool_calls: toolCalls, created_at: new Date().toISOString() }] }
         };
       }
     });

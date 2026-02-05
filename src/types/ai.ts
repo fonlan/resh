@@ -4,6 +4,8 @@ export interface ChatMessage {
   reasoning_content?: string | null;
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  created_at?: string;
+  model_id?: string;
 }
 
 export interface ToolCall {

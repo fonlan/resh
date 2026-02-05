@@ -67,6 +67,9 @@ impl DatabaseManager {
         // Migration: Ensure ssh_session_id column exists for ai_sessions
         let _ = conn.execute("ALTER TABLE ai_sessions ADD COLUMN ssh_session_id TEXT", []);
 
+        // Migration: Ensure model_id column exists for ai_messages
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN model_id TEXT", []);
+
         let _ = conn.execute(
             "DELETE FROM ai_sessions 
              WHERE NOT EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)",

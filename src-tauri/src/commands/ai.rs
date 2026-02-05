@@ -37,6 +37,10 @@ pub struct ChatMessage {
     pub tool_calls: Option<Vec<ToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -254,7 +258,7 @@ async fn load_history(
 
         let mut stmt = conn
             .prepare(
-                "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at 
+                "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
                 FROM ai_messages 
                 WHERE session_id = ?1 
                 ORDER BY created_at ASC",
@@ -268,6 +272,8 @@ async fn load_history(
                 let reasoning_raw: Option<String> = row.get(2)?;
                 let tool_calls_json: Option<String> = row.get(3).ok();
                 let tool_call_id: Option<String> = row.get(4).ok();
+                let created_at: String = row.get(5)?;
+                let model_id: Option<String> = row.get(6).ok();
 
                 let content = if content_raw.is_empty() {
                     None
@@ -287,6 +293,8 @@ async fn load_history(
                     reasoning_content: reasoning_raw,
                     tool_calls,
                     tool_call_id,
+                    created_at: Some(created_at),
+                    model_id,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -347,6 +355,8 @@ async fn load_history(
         reasoning_content: None,
         tool_calls: None,
         tool_call_id: None,
+        created_at: None,
+        model_id: None,
     });
 
     messages.extend(dialog_messages);
@@ -369,6 +379,8 @@ async fn load_history(
                     .collect()
             }),
             tool_call_id: m.tool_call_id.clone(),
+            created_at: m.created_at.clone(),
+            model_id: m.model_id.clone(),
         })
         .collect();
 
@@ -396,6 +408,8 @@ async fn load_history(
                     .collect()
             }),
             tool_call_id: m.tool_call_id,
+            created_at: m.created_at,
+            model_id: m.model_id,
         })
         .collect();
 
@@ -901,8 +915,8 @@ pub fn run_ai_turn(
 
             if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty() {
                 conn.execute(
-                    "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json],
+                    "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls, model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json, model.id],
                 ).map_err(|e| e.to_string())?;
             }
         }
