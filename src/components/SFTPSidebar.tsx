@@ -37,6 +37,22 @@ interface FileEntry {
   isLoading?: boolean;
 }
 
+const formatPermissions = (entry: FileEntry): string => {
+  const mode = entry.permissions;
+  if (mode === undefined) return '';
+  
+  let type = '-';
+  if (entry.is_dir) type = 'd';
+  else if (entry.is_symlink) type = 'l';
+  
+  const r = (m: number) => (m & 4 ? 'r' : '-');
+  const w = (m: number) => (m & 2 ? 'w' : '-');
+  const x = (m: number) => (m & 1 ? 'x' : '-');
+  const part = (m: number) => r(m) + w(m) + x(m);
+  
+  return type + part((mode >> 6) & 7) + part((mode >> 3) & 7) + part(mode & 7);
+};
+
 const FileTreeItem: React.FC<{
   entry: FileEntry;
   depth: number;
@@ -82,7 +98,7 @@ const FileTreeItem: React.FC<{
           <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
 
-        <span className={`truncate ml-0.25 ${isInClipboard ? 'line-through opacity-60' : ''}`}>
+        <span className={`truncate ml-0.25 flex-1 ${isInClipboard ? 'line-through opacity-60' : ''}`}>
           {entry.name}
           {entry.link_target && (
             <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
@@ -90,6 +106,12 @@ const FileTreeItem: React.FC<{
             </span>
           )}
         </span>
+
+        {entry.permissions !== undefined && (
+          <span className="ml-auto text-[10px] text-[var(--text-muted)] opacity-65 font-mono pr-1 flex-shrink-0">
+            {formatPermissions(entry)}
+          </span>
+        )}
       </button>
 
       {entry.isExpanded && entry.children && (
