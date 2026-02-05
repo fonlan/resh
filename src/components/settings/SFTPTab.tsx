@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { FolderOpen, Plus, Trash2, Check, X, GripVertical } from 'lucide-react';
+import { FolderOpen, Plus, Trash2, Check, X, GripVertical, Pencil } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Config, EditorRule, SftpCustomCommand } from '../../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -15,9 +15,11 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   const { t } = useTranslation();
   const [editingRule, setEditingRule] = useState<Partial<EditorRule>>({});
   const [isAdding, setIsAdding] = useState(false);
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 
   const [editingCommand, setEditingCommand] = useState<Partial<SftpCustomCommand>>({});
   const [isAddingCommand, setIsAddingCommand] = useState(false);
+  const [editingCommandId, setEditingCommandId] = useState<string | null>(null);
 
   const editors = config.general.sftp.editors;
   const customCommands = config.sftpCustomCommands || [];
@@ -106,6 +108,43 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
     }
   };
 
+  const handleEditRule = (rule: EditorRule) => {
+      setEditingRuleId(rule.id);
+      setEditingRule({ ...rule });
+      setIsAdding(false);
+  };
+
+  const handleCancelEditRule = () => {
+      setEditingRuleId(null);
+      setEditingRule({});
+  };
+
+  const handleSaveEditRule = () => {
+      if (!editingRuleId) return;
+      if (!editingRule.pattern || !editingRule.editor) return;
+
+      const newEditors = editors.map(r => {
+          if (r.id === editingRuleId) {
+              return { ...r, ...editingRule } as EditorRule;
+          }
+          return r;
+      });
+
+      onChange({
+          ...config,
+          general: {
+              ...config.general,
+              sftp: {
+                  ...config.general.sftp,
+                  editors: newEditors,
+              },
+          },
+      });
+
+      setEditingRuleId(null);
+      setEditingRule({});
+  };
+
   const handleAddCommand = () => {
     if (!editingCommand.name || !editingCommand.pattern || !editingCommand.command) return;
 
@@ -126,6 +165,24 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
     });
     setEditingCommand({});
     setIsAddingCommand(false);
+  };
+
+  const handleEditCommand = (cmd: SftpCustomCommand) => {
+      setEditingCommandId(cmd.id);
+      setEditingCommand({ ...cmd });
+      setIsAddingCommand(false);
+  };
+
+  const handleCancelEditCommand = () => {
+      setEditingCommandId(null);
+      setEditingCommand({});
+  };
+
+  const handleSaveEditCommand = () => {
+      if (!editingCommandId) return;
+      handleUpdateCommand(editingCommandId, editingCommand);
+      setEditingCommandId(null);
+      setEditingCommand({});
   };
 
   const handleDeleteCommand = (id: string) => {
@@ -300,8 +357,61 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                 </tr>
               )}
               {editors.map((rule, index) => (
+                <React.Fragment key={rule.id}>
+                {editingRuleId === rule.id ? (
+                  <tr className="bg-[var(--bg-tertiary)]">
+                    <td className="px-2 py-3 border-b border-[var(--glass-border)]"></td>
+                    <td className="px-4 py-3">
+                      <input
+                        type="text"
+                        value={editingRule.pattern || ''}
+                        onChange={(e) => setEditingRule(prev => ({ ...prev, pattern: e.target.value }))}
+                        placeholder={t.sftp.settings.patternPlaceholder}
+                        className="form-input px-2.5 py-1.5"
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={editingRule.editor || ''}
+                          onChange={(e) => setEditingRule(prev => ({ ...prev, editor: e.target.value }))}
+                          placeholder={t.sftp.settings.editorPlaceholder}
+                          className="form-input px-2.5 py-1.5"
+                        />
+                        <button
+                          type="button"
+                          onClick={handlePickEditor}
+                          className="btn btn-secondary btn-icon w-8 h-8"
+                          title={t.sftp.settings.browseFile}
+                        >
+                          <FolderOpen size={14} />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
+                      <div className="flex justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={handleSaveEditRule}
+                          className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(0,210,106,0.1)] hover:text-[var(--color-success)]"
+                          title={t.common.save}
+                        >
+                          <Check size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCancelEditRule}
+                          className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                          title={t.common.cancel}
+                        >
+                          <X size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
                 <tr
-                  key={rule.id}
                   className="hover:bg-white/[0.02]"
                   draggable={editors.length > 1}
                   onDragStart={(e) => {
@@ -339,16 +449,28 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                     {rule.editor}
                   </td>
                   <td className="w-[15%] text-right px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRule(rule.id)}
-                      className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(255,71,87,0.1)] hover:text-[var(--color-danger)]"
-                      title={t.common.delete}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex justify-end gap-1">
+                        <button
+                            type="button"
+                            onClick={() => handleEditRule(rule)}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                            title={t.common.edit}
+                        >
+                            <Pencil size={14} />
+                        </button>
+                        <button
+                        type="button"
+                        onClick={() => handleDeleteRule(rule.id)}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(255,71,87,0.1)] hover:text-[var(--color-danger)]"
+                        title={t.common.delete}
+                        >
+                        <Trash2 size={14} />
+                        </button>
+                    </div>
                   </td>
                 </tr>
+                )}
+                </React.Fragment>
               ))}
               {editors.length === 0 && !isAdding && (
                 <tr>
@@ -386,7 +508,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
           <table className="w-full border-collapse text-[13px] text-[var(--text-primary)]">
             <thead>
               <tr>
-                <th className="w-10 bg-[var(--bg-tertiary)] px-2 py-2.5 text-center font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
+                <th className="w-16 bg-[var(--bg-tertiary)] px-2 py-2.5 text-center font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
                     {t.sftp.settings.commandSync}
                 </th>
                 <th className="bg-[var(--bg-tertiary)] px-4 py-2.5 text-left font-semibold text-[var(--text-secondary)] border-b border-[var(--glass-border)]">
@@ -464,8 +586,64 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                 </tr>
               )}
               {customCommands.map((cmd) => (
+                <React.Fragment key={cmd.id}>
+                {editingCommandId === cmd.id ? (
+                    <tr className="bg-[var(--bg-tertiary)]">
+                      <td className="px-2 py-3 border-b border-[var(--glass-border)] text-center">
+                        <input
+                            type="checkbox"
+                            checked={editingCommand.synced ?? true}
+                            onChange={(e) => setEditingCommand(prev => ({ ...prev, synced: e.target.checked }))}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="text"
+                          value={editingCommand.name || ''}
+                          onChange={(e) => setEditingCommand(prev => ({ ...prev, name: e.target.value }))}
+                          placeholder={t.sftp.settings.commandPlaceholderName}
+                          className="form-input px-2.5 py-1.5 w-full"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="text"
+                          value={editingCommand.pattern || ''}
+                          onChange={(e) => setEditingCommand(prev => ({ ...prev, pattern: e.target.value }))}
+                          placeholder={t.sftp.settings.commandPlaceholderPattern}
+                          className="form-input px-2.5 py-1.5 w-full"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input
+                          type="text"
+                          value={editingCommand.command || ''}
+                          onChange={(e) => setEditingCommand(prev => ({ ...prev, command: e.target.value }))}
+                          placeholder={t.sftp.settings.commandPlaceholderExec}
+                          className="form-input px-2.5 py-1.5 w-full"
+                        />
+                      </td>
+                      <td className="w-[15%] text-right px-4 py-3 border-b border-[var(--glass-border)]">
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={handleSaveEditCommand}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(0,210,106,0.1)] hover:text-[var(--color-success)]"
+                          >
+                            <Check size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelEditCommand}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                ) : (
                 <tr
-                  key={cmd.id}
                   className="hover:bg-white/[0.02]"
                 >
                   <td className="px-2 py-2 border-b border-[var(--glass-border)] last:border-b-0 text-center">
@@ -488,16 +666,28 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                     {cmd.command}
                   </td>
                   <td className="w-[15%] text-right px-4 py-2 border-b border-[var(--glass-border)] last:border-b-0">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCommand(cmd.id)}
-                      className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(255,71,87,0.1)] hover:text-[var(--color-danger)]"
-                      title={t.common.delete}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="flex justify-end gap-1">
+                        <button
+                            type="button"
+                            onClick={() => handleEditCommand(cmd)}
+                            className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                            title={t.common.edit}
+                        >
+                            <Pencil size={14} />
+                        </button>
+                        <button
+                        type="button"
+                        onClick={() => handleDeleteCommand(cmd.id)}
+                        className="inline-flex items-center justify-center w-7 h-7 rounded bg-transparent border-0 cursor-pointer transition-all text-zinc-500 hover:bg-[rgba(255,71,87,0.1)] hover:text-[var(--color-danger)]"
+                        title={t.common.delete}
+                        >
+                        <Trash2 size={14} />
+                        </button>
+                    </div>
                   </td>
                 </tr>
+                )}
+                </React.Fragment>
               ))}
               {customCommands.length === 0 && !isAddingCommand && (
                 <tr>
