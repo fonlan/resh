@@ -1,4 +1,4 @@
-export type TransferStatus = "pending" | "transferring" | "completed" | "failed" | "cancelled";
+export type TransferStatus = "pending" | "queued" | "transferring" | "completed" | "failed" | "cancelled";
 
 export type ConflictResolution = "overwrite" | "skip" | "cancel";
 

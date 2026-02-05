@@ -69,15 +69,21 @@ export const TransferStatusPanel: React.FC = () => {
                                 </div>
                             )}
                             <div className="flex justify-between text-[10px] text-[var(--text-muted,#888)] mb-1">
-                                <span className="transfer-size">{formatBytes(task.transferred_bytes)} / {formatBytes(task.total_bytes)}</span>
-                                <span className="transfer-speed">
-                                    {formatSpeed(task.speed)} • {formatETA(task.eta)}
-                                </span>
+                                {task.status === 'queued' ? (
+                                    <span>{t.common?.queued || 'Queued'}</span>
+                                ) : (
+                                    <>
+                                        <span className="transfer-size">{formatBytes(task.transferred_bytes)} / {formatBytes(task.total_bytes)}</span>
+                                        <span className="transfer-speed">
+                                            {formatSpeed(task.speed)} • {formatETA(task.eta)}
+                                        </span>
+                                    </>
+                                )}
                             </div>
                             <div className="h-1 bg-[var(--bg-color-dim,#333)] rounded overflow-hidden">
                                 <div
                                     className={`h-full transition-all duration-300 ${getProgressBarClass(task.status)}`}
-                                    style={{ width: `${(task.transferred_bytes / task.total_bytes) * 100}%` }}
+                                    style={{ width: `${task.total_bytes > 0 ? (task.transferred_bytes / task.total_bytes) * 100 : 0}%` }}
                                 />
                             </div>
                         </div>

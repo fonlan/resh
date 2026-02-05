@@ -180,13 +180,29 @@ impl SftpManager {
         let pending_task = PendingTask {
             task_id: task_id.clone(),
             transfer_type: TransferType::Download,
-            session_id,
-            remote_path,
-            local_path,
-            app: Arc::new(app),
+            session_id: session_id.clone(),
+            remote_path: remote_path.clone(),
+            local_path: local_path.clone(),
+            app: Arc::new(app.clone()),
             db_manager,
             cancel_token,
         };
+
+        // Emit queued status
+        let _ = app.emit("transfer-progress", TransferProgress {
+            task_id: task_id.clone(),
+            type_: "download".to_string(),
+            session_id: session_id.clone(),
+            file_name: std::path::Path::new(&remote_path).file_name().unwrap_or_default().to_string_lossy().to_string(),
+            source: remote_path,
+            destination: local_path,
+            total_bytes: 0,
+            transferred_bytes: 0,
+            speed: 0.0,
+            eta: None,
+            status: "queued".to_string(),
+            error: None,
+        });
 
         {
             let mut queue = TASK_QUEUE.lock().await;
@@ -217,13 +233,29 @@ impl SftpManager {
         let pending_task = PendingTask {
             task_id: task_id.clone(),
             transfer_type: TransferType::Upload,
-            session_id,
-            remote_path,
-            local_path,
-            app: Arc::new(app),
+            session_id: session_id.clone(),
+            remote_path: remote_path.clone(),
+            local_path: local_path.clone(),
+            app: Arc::new(app.clone()),
             db_manager,
             cancel_token,
         };
+
+        // Emit queued status
+        let _ = app.emit("transfer-progress", TransferProgress {
+            task_id: task_id.clone(),
+            type_: "upload".to_string(),
+            session_id: session_id.clone(),
+            file_name: std::path::Path::new(&local_path).file_name().unwrap_or_default().to_string_lossy().to_string(),
+            source: local_path,
+            destination: remote_path,
+            total_bytes: 0,
+            transferred_bytes: 0,
+            speed: 0.0,
+            eta: None,
+            status: "queued".to_string(),
+            error: None,
+        });
 
         {
             let mut queue = TASK_QUEUE.lock().await;

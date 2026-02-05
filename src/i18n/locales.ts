@@ -75,6 +75,7 @@ export const locales = {
       optional: 'Optional',
       syncThisItem: 'Sync this item',
       enableSync: 'Enable Sync',
+      queued: 'Queued',
     },
     serverTab: {
       title: 'SSH Servers',
@@ -441,6 +442,7 @@ export const locales = {
       optional: '可选',
       syncThisItem: '同步此项',
       enableSync: '开启同步',
+      queued: '等待中',
     },
     serverTab: {
       title: 'SSH 服务器',
