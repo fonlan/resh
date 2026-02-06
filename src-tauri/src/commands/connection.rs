@@ -245,3 +245,11 @@ pub async fn select_save_path(default_name: String, initial_dir: Option<String>)
 
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }
+
+#[tauri::command]
+pub async fn update_terminal_selection(
+    session_id: String,
+    selection: String,
+) -> Result<(), String> {
+    SSHClient::update_terminal_selection(&session_id, selection).await
+}

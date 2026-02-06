@@ -86,6 +86,18 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                 }),
             },
         },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "get_selected_terminal_output".to_string(),
+                description: "Get the currently selected text in the terminal. Use this when the user asks to analyze or work with text they have highlighted/selected.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
+        },
     ];
 
     if is_agent_mode {
@@ -435,6 +447,22 @@ async fn execute_tools_and_save(
                     match SSHClient::get_terminal_output(ssh_id).await {
                         Ok(text) => {
                             String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
+                        }
+                        Err(e) => format!("Error: {}", e),
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            }
+            "get_selected_terminal_output" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    match SSHClient::get_selected_terminal_output(ssh_id).await {
+                        Ok(text) => {
+                            if text.is_empty() {
+                                "Error: No text is currently selected in the terminal.".to_string()
+                            } else {
+                                String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
+                            }
                         }
                         Err(e) => format!("Error: {}", e),
                     }
@@ -924,17 +952,17 @@ pub fn run_ai_turn(
         if let Some(calls) = &final_tool_calls {
             if !calls.is_empty() {
                 let auto_exec_calls: Vec<ToolCall> = calls.iter()
-                    .filter(|c| c.function.name == "get_terminal_output")
+                    .filter(|c| c.function.name == "get_terminal_output" || c.function.name == "get_selected_terminal_output")
                     .cloned()
                     .collect();
 
                 let confirm_calls: Vec<ToolCall> = calls.iter()
-                    .filter(|c| c.function.name != "get_terminal_output")
+                    .filter(|c| c.function.name != "get_terminal_output" && c.function.name != "get_selected_terminal_output")
                     .cloned()
                     .collect();
 
                 if !auto_exec_calls.is_empty() {
-                    tracing::info!("[AI] Auto-executing {} get_terminal_output tools", auto_exec_calls.len());
+                    tracing::info!("[AI] Auto-executing {} read-only tools (get_terminal_output/get_selected_terminal_output)", auto_exec_calls.len());
                     execute_tools_and_save(
                         window.app_handle().clone(),
                         &state,
@@ -952,7 +980,7 @@ pub fn run_ai_turn(
                             .map_err(|e| e.to_string())?;
                         return Ok(Some(confirm_calls));
                     } else {
-                        tracing::warn!("[AI] Ask mode cannot execute tools other than get_terminal_output, ignoring {} tool calls", confirm_calls.len());
+                        tracing::warn!("[AI] Ask mode cannot execute tools other than read-only tools (get_terminal_output/get_selected_terminal_output), ignoring {} tool calls", confirm_calls.len());
                     }
                 }
 

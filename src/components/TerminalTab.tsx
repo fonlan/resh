@@ -83,7 +83,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     }
   }, []);
 
-  const { terminal, isReady, write, focus, getBufferText } = useTerminal(containerId, memoizedSettings, theme, handleData, handleResize);
+  const { terminal, isReady, write, focus, getBufferText } = useTerminal(containerId, sessionIdRef, memoizedSettings, theme, handleData, handleResize);
 
   // Determine container background based on theme
   const containerBg = useMemo(() => {

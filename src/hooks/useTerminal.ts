@@ -5,9 +5,11 @@ import { WebglAddon } from 'xterm-addon-webgl';
 import 'xterm/css/xterm.css';
 import { TerminalSettings } from '../types';
 import { debounce } from '../utils/common';
+import { invoke } from '@tauri-apps/api/core';
 
 export const useTerminal = (
   containerId: string, 
+  sessionIdRef: React.RefObject<string | null>,
   settings?: TerminalSettings, 
   theme?: 'light' | 'dark' | 'orange' | 'green' | 'system',
   onData?: (data: string) => void,
@@ -77,6 +79,16 @@ export const useTerminal = (
                 navigator.clipboard.writeText(selection).catch(() => {
                     // Failed to copy
                 });
+                // Sync selection to backend for AI tools
+                const currentSessionId = sessionIdRef.current;
+                if (currentSessionId) {
+                    invoke('update_terminal_selection', {
+                        sessionId: currentSessionId,  // Tauri converts camelCase to snake_case
+                        selection
+                    }).catch((err) => {
+                        console.error('Failed to update backend selection:', err);
+                    });
+                }
             }
         }
     }, 500));

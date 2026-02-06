@@ -53,6 +53,7 @@ struct SessionData {
     cols: u32,
     rows: u32,
     terminal_buffer: String,
+    terminal_selection: String,
     command_recorder: Option<String>,
     last_output_len: usize,
     recording_prompt: Option<String>,
@@ -102,6 +103,7 @@ impl SSHClient {
                     cols: initial_cols,
                     rows: initial_rows,
                     terminal_buffer: String::new(),
+                    terminal_selection: String::new(),
                     command_recorder: None,
                     last_output_len: 0,
                     recording_prompt: None,
@@ -702,6 +704,27 @@ impl SSHClient {
         let sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get(session_id) {
             Ok(session_data.terminal_buffer.clone())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Get the current terminal selected text
+    pub async fn get_selected_terminal_output(session_id: &str) -> Result<String, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            Ok(session_data.terminal_selection.clone())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Update the terminal selection (called from frontend via Tauri command)
+    pub async fn update_terminal_selection(session_id: &str, selection: String) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            session_data.terminal_selection = selection;
+            Ok(())
         } else {
             Err("Session not found".to_string())
         }

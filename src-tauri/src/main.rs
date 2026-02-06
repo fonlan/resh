@@ -206,6 +206,7 @@ async fn main() {
             commands::connection::reconnect_session,
             commands::connection::export_terminal_log,
             commands::connection::select_save_path,
+            commands::connection::update_terminal_selection,
             commands::master_password::get_master_password_status,
             commands::master_password::set_master_password,
             commands::master_password::verify_master_password,
