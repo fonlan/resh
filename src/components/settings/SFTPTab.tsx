@@ -218,7 +218,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
             type="text"
             value={config.general.sftp.defaultDownloadPath}
             onChange={(e) => handleDownloadPathChange(e.target.value)}
-            placeholder="e.g. C:\Users\User\Downloads"
+            placeholder={t.sftp.settings.defaultDownloadPathPlaceholder}
             className="form-input flex-1"
           />
           <button

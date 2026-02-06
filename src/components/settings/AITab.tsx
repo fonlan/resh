@@ -378,13 +378,13 @@ id="ai-timeout"
              <div className="text-xs text-zinc-400 mb-2">
                  {t.ai.globalAdditionalPromptDesc}
              </div>
-             <textarea
-                 id="ai-additional-prompt"
-                 className="w-full h-32 py-2 px-3 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-sans resize-y min-h-[100px]"
-                 value={additionalPrompt || ''}
-                 onChange={(e) => onAdditionalPromptUpdate(e.target.value)}
-                 placeholder="e.g. Always answer in Chinese. Be concise."
-             />
+              <textarea
+                  id="ai-additional-prompt"
+                  className="w-full h-32 py-2 px-3 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-sans resize-y min-h-[100px]"
+                  value={additionalPrompt || ''}
+                  onChange={(e) => onAdditionalPromptUpdate(e.target.value)}
+                  placeholder={t.ai.globalAdditionalPromptPlaceholder}
+              />
           </div>
        </div>
 
@@ -522,7 +522,7 @@ id="ai-timeout"
             className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             value={channelFormData.name || ''}
             onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })}
-            placeholder="e.g. OpenAI Personal"
+            placeholder={t.ai.channelForm.namePlaceholder}
           />
         </div>
         <div className="flex flex-col gap-1.5 mb-4">
@@ -704,9 +704,9 @@ disabled={isAuthLoading}
                  ref={inputRef}
                  type="text"
                  className="w-full px-3 py-2 pr-8 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
-                 value={modelFormData.name || ''}
+                  value={modelFormData.name || ''}
                  onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
-                 placeholder="e.g. gpt-4, gpt-3.5-turbo"
+                 placeholder={t.ai.modelForm.namePlaceholder}
                  onFocus={() => {
                     handleFetchModels();
                     setShowModelSuggestions(true);

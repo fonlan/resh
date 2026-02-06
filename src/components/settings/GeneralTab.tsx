@@ -109,7 +109,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               value={general.terminal.fontFamily}
               onChange={(e) => handleTerminalUpdate('fontFamily', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-              placeholder="e.g., 'Courier New', monospace"
+              placeholder={t.fontFamilyPlaceholder}
             />
           </div>
 

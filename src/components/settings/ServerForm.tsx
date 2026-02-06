@@ -521,7 +521,7 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                           type="text"
                           value={cmd}
                           onChange={(e) => handleAutoExecCommandChange(index, e.target.value)}
-                          placeholder="e.g., cd /var/log"
+                          placeholder={t.serverForm.autoExecPlaceholder}
                           className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                         />
                         <button
@@ -564,14 +564,14 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
                  <div className="text-xs text-zinc-500 mb-2">
                     {t.ai.serverAdditionalPromptDesc}
                  </div>
-                  <textarea
-                    id="server-additional-prompt"
-                    value={formData.additionalPrompt || ''}
-                    onChange={(e) => handleChange('additionalPrompt', e.target.value)}
-                    className="w-full h-48 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
-                    placeholder="e.g. This server runs RHEL 8 with Podman. Prefer podman commands."
-                    style={{ resize: 'vertical' }}
-                  />
+                   <textarea
+                     id="server-additional-prompt"
+                     value={formData.additionalPrompt || ''}
+                     onChange={(e) => handleChange('additionalPrompt', e.target.value)}
+                     className="w-full h-48 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                     placeholder={t.ai.serverAdditionalPromptPlaceholder}
+                     style={{ resize: 'vertical' }}
+                   />
                </div>
              </div>
           )}
