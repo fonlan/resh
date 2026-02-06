@@ -59,7 +59,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const sessionIdRef = useRef<string | null>(null);
 
   // Define handleData before useTerminal
-  const handleData = useCallback((data: string) => {
+  const handleData = useCallback(async (data: string) => {
     const { newBuffer, commandExecuted } = processInputBuffer(data, inputBufferRef.current);
     
     inputBufferRef.current = newBuffer;
@@ -70,7 +70,19 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     }
 
     if (sessionIdRef.current) {
-      invoke('send_command', { params: { session_id: sessionIdRef.current, command: data } });
+      try {
+        await invoke('send_command', { params: { session_id: sessionIdRef.current, command: data } });
+      } catch (err) {
+        // Connection lost - send_input will auto-reconnect, but we need to update UI state
+        const errorStr = String(err);
+        if (errorStr.includes('Connection lost') || errorStr.includes('reconnect')) {
+          // Connection is being restored, keep isConnected true but show reconnecting status
+          setStatusText('Reconnecting...');
+        } else {
+          // Other errors
+          setIsConnected(false);
+        }
+      }
     }
   }, []);
 
@@ -282,6 +294,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
           updateStatus(t.terminalTab.connectionClosed);
           setIsConnected(false);
+          connectedRef.current = false;
         });
 
       } catch (err) {
