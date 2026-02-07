@@ -205,7 +205,7 @@ const ToolConfirmation = ({
   );
 };
 
-const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
+const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
   const { config } = useConfig();
   const [copied, setCopied] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
@@ -365,7 +365,9 @@ const MessageBubble = ({ msg, t, isPending, isLast, isLoading }: { msg: ChatMess
       </div>
     </div>
   );
-};
+})
+
+MessageBubble.displayName = 'MessageBubble'
 
 export const AISidebar: React.FC<AISidebarProps> = ({
   isOpen,
@@ -378,29 +380,27 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const { config, saveConfig } = useConfig();
-  const { 
-    sessions, 
-    activeSessionId, 
-    activeSessionIdByServer,
-    messages, 
-    isGenerating,
-    pendingToolCalls: pendingToolCallsMap,
-    loadSessions,
-    createSession,
-    selectSession,
-    addMessage,
-    newAssistantMessage,
-    appendResponse,
-    appendReasoning,
-    appendToolCalls,
-    setGenerating,
-    setPendingToolCalls: storeSetPendingToolCalls,
-    markSessionStopped,
-    clearSessionStopped,
-    deleteSession,
-    clearSessions,
-    addCompleteMessage
-  } = useAIStore();
+  const sessions = useAIStore(state => state.sessions)
+  const activeSessionId = useAIStore(state => state.activeSessionId)
+  const activeSessionIdByServer = useAIStore(state => state.activeSessionIdByServer)
+  const messages = useAIStore(state => state.messages)
+  const isGenerating = useAIStore(state => state.isGenerating)
+  const pendingToolCallsMap = useAIStore(state => state.pendingToolCalls)
+  const loadSessions = useAIStore(state => state.loadSessions)
+  const createSession = useAIStore(state => state.createSession)
+  const selectSession = useAIStore(state => state.selectSession)
+  const addMessage = useAIStore(state => state.addMessage)
+  const newAssistantMessage = useAIStore(state => state.newAssistantMessage)
+  const appendResponse = useAIStore(state => state.appendResponse)
+  const appendReasoning = useAIStore(state => state.appendReasoning)
+  const appendToolCalls = useAIStore(state => state.appendToolCalls)
+  const setGenerating = useAIStore(state => state.setGenerating)
+  const storeSetPendingToolCalls = useAIStore(state => state.setPendingToolCalls)
+  const markSessionStopped = useAIStore(state => state.markSessionStopped)
+  const clearSessionStopped = useAIStore(state => state.clearSessionStopped)
+  const deleteSession = useAIStore(state => state.deleteSession)
+  const clearSessions = useAIStore(state => state.clearSessions)
+  const addCompleteMessage = useAIStore(state => state.addCompleteMessage)
 
   const [width, setWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
@@ -423,6 +423,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isAtBottomRef = useRef(true);
+  const responseChunkBufferRef = useRef('')
+  const reasoningChunkBufferRef = useRef('')
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load mode & model from config, with fallback to default model
   useEffect(() => {
@@ -547,6 +550,26 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   useEffect(() => {
     if (!activeSessionId) return;
 
+    const flushStreamBuffers = () => {
+      if (responseChunkBufferRef.current) {
+        appendResponse(activeSessionId, responseChunkBufferRef.current)
+        responseChunkBufferRef.current = ''
+      }
+
+      if (reasoningChunkBufferRef.current) {
+        appendReasoning(activeSessionId, reasoningChunkBufferRef.current)
+        reasoningChunkBufferRef.current = ''
+      }
+    }
+
+    const scheduleStreamFlush = () => {
+      if (streamFlushTimerRef.current) return
+      streamFlushTimerRef.current = setTimeout(() => {
+        flushStreamBuffers()
+        streamFlushTimerRef.current = null
+      }, 33)
+    }
+
     const startedListener = listen<string>(`ai-started-${activeSessionId}`, () => {
       storeSetPendingToolCalls(activeSessionId, null);
       newAssistantMessage(activeSessionId, selectedModelId);
@@ -562,11 +585,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     });
 
     const responseListener = listen<string>(`ai-response-${activeSessionId}`, (event) => {
-      appendResponse(activeSessionId, event.payload);
+      responseChunkBufferRef.current += event.payload
+      scheduleStreamFlush()
     });
 
     const reasoningListener = listen<string>(`ai-reasoning-${activeSessionId}`, (event) => {
-      appendReasoning(activeSessionId, event.payload);
+      reasoningChunkBufferRef.current += event.payload
+      scheduleStreamFlush()
     });
 
     const toolCallListener = listen<ToolCall[]>(`ai-tool-call-${activeSessionId}`, (event) => {
@@ -610,12 +635,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     });
 
     const errorListener = listen<string>(`ai-error-${activeSessionId}`, () => {
+      flushStreamBuffers()
       setGenerating(activeSessionId, false);
       storeSetPendingToolCalls(activeSessionId, null);
       // TODO: Show error in UI
     });
 
     const doneListener = listen<string>(`ai-done-${activeSessionId}`, async () => {
+      flushStreamBuffers()
       setGenerating(activeSessionId, false);
 
       // Auto-generate title for new sessions after first response
@@ -638,6 +665,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     });
 
     return () => {
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current)
+        streamFlushTimerRef.current = null
+      }
+      flushStreamBuffers()
       startedListener.then(unlisten => unlisten());
       messageBatchListener.then(unlisten => unlisten());
       responseListener.then(unlisten => unlisten());

@@ -73,6 +73,16 @@ lazy_static! {
 pub struct SSHClient;
 
 impl SSHClient {
+    async fn get_session_route(
+        session_id: &str,
+    ) -> Result<(Arc<russh::client::Handle<ClientHandler>>, russh::ChannelId), String> {
+        let sessions = SESSIONS.lock().await;
+        sessions
+            .get(session_id)
+            .map(|session_data| (session_data.session.clone(), session_data.channel.id()))
+            .ok_or_else(|| "Session not found".to_string())
+    }
+
     pub async fn connect(
         params: ConnectParams,
         tx: mpsc::Sender<(String, Vec<u8>)>,
@@ -574,14 +584,10 @@ impl SSHClient {
     }
 
     pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
-        let result = {
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data.channel.data(data).await
-            } else {
-                return Err("Session not found".to_string());
-            }
-        };
+        let (session, channel_id) = Self::get_session_route(session_id).await?;
+        let result = session
+            .data(channel_id, russh::CryptoVec::from_slice(data))
+            .await;
 
         if result.is_err() {
             info!(
@@ -594,16 +600,14 @@ impl SSHClient {
             }
 
             // Retry sending
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data
-                    .channel
-                    .data(data)
-                    .await
-                    .map_err(|e| format!("Failed to send data after reconnect: {}", e))?;
-            } else {
-                return Err("Session lost during reconnect".to_string());
-            }
+            let (session, channel_id) = Self::get_session_route(session_id)
+                .await
+                .map_err(|_| "Session lost during reconnect".to_string())?;
+
+            session
+                .data(channel_id, russh::CryptoVec::from_slice(data))
+                .await
+                .map_err(|_| "Failed to send data after reconnect".to_string())?;
         }
 
         Ok(())
@@ -841,14 +845,10 @@ impl SSHClient {
 
     /// Send interrupt signal (Ctrl+C) to the terminal
     pub async fn send_interrupt(session_id: &str) -> Result<(), String> {
-        let result = {
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data.channel.data(&[3u8][..]).await // 3 = ETX (Ctrl+C)
-            } else {
-                return Err("Session not found".to_string());
-            }
-        };
+        let (session, channel_id) = Self::get_session_route(session_id).await?;
+        let result = session
+            .data(channel_id, russh::CryptoVec::from_slice(&[3u8][..]))
+            .await; // 3 = ETX (Ctrl+C)
 
         if result.is_err() {
             info!(
@@ -861,16 +861,14 @@ impl SSHClient {
             }
 
             // Retry sending
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data
-                    .channel
-                    .data(&[3u8][..])
-                    .await
-                    .map_err(|e| format!("Failed to send interrupt after reconnect: {}", e))?;
-            } else {
-                return Err("Session lost during reconnect".to_string());
-            }
+            let (session, channel_id) = Self::get_session_route(session_id)
+                .await
+                .map_err(|_| "Session lost during reconnect".to_string())?;
+
+            session
+                .data(channel_id, russh::CryptoVec::from_slice(&[3u8][..]))
+                .await
+                .map_err(|_| "Failed to send interrupt after reconnect".to_string())?;
         }
 
         Ok(())
@@ -878,14 +876,10 @@ impl SSHClient {
 
     /// Send arbitrary input (characters, escape sequences) to the terminal
     pub async fn send_terminal_input(session_id: &str, input: &str) -> Result<(), String> {
-        let result = {
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data.channel.data(input.as_bytes()).await
-            } else {
-                return Err("Session not found".to_string());
-            }
-        };
+        let (session, channel_id) = Self::get_session_route(session_id).await?;
+        let result = session
+            .data(channel_id, russh::CryptoVec::from_slice(input.as_bytes()))
+            .await;
 
         if result.is_err() {
             info!(
@@ -898,16 +892,14 @@ impl SSHClient {
             }
 
             // Retry sending
-            let mut sessions = SESSIONS.lock().await;
-            if let Some(session_data) = sessions.get_mut(session_id) {
-                session_data
-                    .channel
-                    .data(input.as_bytes())
-                    .await
-                    .map_err(|e| format!("Failed to send input after reconnect: {}", e))?;
-            } else {
-                return Err("Session lost during reconnect".to_string());
-            }
+            let (session, channel_id) = Self::get_session_route(session_id)
+                .await
+                .map_err(|_| "Session lost during reconnect".to_string())?;
+
+            session
+                .data(channel_id, russh::CryptoVec::from_slice(input.as_bytes()))
+                .await
+                .map_err(|_| "Failed to send input after reconnect".to_string())?;
         }
 
         Ok(())

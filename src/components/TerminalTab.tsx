@@ -42,12 +42,16 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const { config, saveConfig } = useConfig(); // Use config
   const containerId = `terminal-${tabId}`;
 
-  // Memoize settings to prevent re-creating terminal on reference change
+  // Memoize settings to prevent noisy updates from object identity changes
   const memoizedSettings = useMemo(() => {
-    if (!terminalSettings) return undefined;
-    return { ...terminalSettings };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [JSON.stringify(terminalSettings)]);
+    if (!terminalSettings) return undefined
+    return { ...terminalSettings }
+  }, [
+    terminalSettings?.fontSize,
+    terminalSettings?.fontFamily,
+    terminalSettings?.cursorStyle,
+    terminalSettings?.scrollback,
+  ])
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -120,6 +124,12 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const authenticationsRef = useRef(authentications);
   const serversRef = useRef(servers);
   const proxiesRef = useRef(proxies);
+  const serverRef = useRef(server)
+  const manualCredentialsRef = useRef(manualCredentials)
+  const configRef = useRef(config)
+  const saveConfigRef = useRef(saveConfig)
+  const onSessionChangeRef = useRef(onSessionChange)
+  const tRef = useRef(t)
 
   // Use refs for stable access inside the connect effect without triggering it
   const writeRef = useRef(write);
@@ -134,10 +144,55 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     proxiesRef.current = proxies;
   }, [authentications, servers, proxies]);
 
+  useEffect(() => {
+    serverRef.current = server
+  }, [server])
+
+  useEffect(() => {
+    manualCredentialsRef.current = manualCredentials
+  }, [manualCredentials])
+
+  useEffect(() => {
+    configRef.current = config
+  }, [config])
+
+  useEffect(() => {
+    saveConfigRef.current = saveConfig
+  }, [saveConfig])
+
+  useEffect(() => {
+    onSessionChangeRef.current = onSessionChange
+  }, [onSessionChange])
+
+  useEffect(() => {
+    tRef.current = t
+  }, [t])
+
+  const serverConnectionKey = useMemo(
+    () => [
+      server.id,
+      server.host,
+      server.port,
+      server.username || '',
+      server.authId || '',
+      server.proxyId || '',
+      server.jumphostId || '',
+    ].join('|'),
+    [
+      server.id,
+      server.host,
+      server.port,
+      server.username,
+      server.authId,
+      server.proxyId,
+      server.jumphostId,
+    ]
+  )
+
   // Reset cancellation when server config changes
   useEffect(() => {
     setIsCancelled(false);
-  }, [serverId, server.host, server.port, server.username, server.authId]);
+  }, [serverConnectionKey]);
 
   // Connection effect
   useEffect(() => {
@@ -154,28 +209,31 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
     const connect = async (manualCreds?: ManualAuthCredentials) => {
       try {
+        const currentServer = serverRef.current
+        const currentT = tRef.current
+
         connectedRef.current = true;
         // Reset input mode on new connection attempt
         isInputModeRef.current = false;
         inputBufferRef.current = '';
 
-        const connectingMsg = t.terminalTab.connecting.replace('{name}', server.name);
+        const connectingMsg = currentT.terminalTab.connecting.replace('{name}', currentServer.name);
         updateStatus(connectingMsg);
 
         let password = manualCreds?.password;
         let private_key = manualCreds?.privateKey;
         let passphrase = manualCreds?.passphrase;
-        let username = manualCreds?.username || server.username;
+        let username = manualCreds?.username || currentServer.username;
 
         // Check if manual auth is needed (missing username or auth)
-        if (!manualCreds && (!server.username || !server.authId)) {
+        if (!manualCreds && (!currentServer.username || !currentServer.authId)) {
           setShowManualAuth(true);
           connectedRef.current = false;
           return;
         }
 
         if (!manualCreds) {
-          const auth = authenticationsRef.current.find(a => a.id === server.authId);
+          const auth = authenticationsRef.current.find(a => a.id === currentServer.authId);
           if (auth?.type === 'password') {
             password = auth.password || undefined;
           } else if (auth?.type === 'key') {
@@ -194,20 +252,20 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         // Get proxy from jumphost if configured, otherwise from target server
         // When using jumphost, the proxy should follow the jumphost's configuration
         let proxy = null;
-        if (server.jumphostId) {
-          const jhServer = serversRef.current.find(s => s.id === server.jumphostId);
+        if (currentServer.jumphostId) {
+          const jhServer = serversRef.current.find(s => s.id === currentServer.jumphostId);
           if (jhServer) {
             proxy = proxiesRef.current.find(p => p.id === jhServer.proxyId);
           }
         }
         // Fallback to target server's proxy if no jumphost or jumphost has no proxy
         if (!proxy) {
-          proxy = proxiesRef.current.find(p => p.id === server.proxyId);
+          proxy = proxiesRef.current.find(p => p.id === currentServer.proxyId);
         }
 
         let jumphost = null;
-        if (server.jumphostId) {
-          const jhServer = serversRef.current.find(s => s.id === server.jumphostId);
+        if (currentServer.jumphostId) {
+          const jhServer = serversRef.current.find(s => s.id === currentServer.jumphostId);
           if (jhServer) {
             const jhAuth = authenticationsRef.current.find(a => a.id === jhServer.authId);
             let jhUsername = jhServer.username;
@@ -234,8 +292,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         const response = await invoke<{ session_id: string }>('connect_to_server',
           {
             params: {
-              host: server.host,
-              port: server.port,
+              host: currentServer.host,
+              port: currentServer.port,
               username,
               password: password || undefined,
               private_key: private_key || undefined,
@@ -248,18 +306,19 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         const sid = response.session_id;
         sessionIdRef.current = sid;
         setSessionId(sid);
-        onSessionChange?.(sid);
+        onSessionChangeRef.current?.(sid);
         setShowManualAuth(false);
         setIsConnected(true);
-        const connectedMsg = t.terminalTab.connected.replace('{id}', sid);
+        const connectedMsg = currentT.terminalTab.connected.replace('{id}', sid);
         updateStatus(connectedMsg);
 
         // Save credentials asynchronously if rememberMe is true
-        if (manualCreds?.rememberMe && config) {
+        const currentConfig = configRef.current
+        if (manualCreds?.rememberMe && currentConfig) {
           const authId = uuidv4();
           const newAuth: Authentication = {
             id: authId,
-            name: `${server.name} Auth`,
+            name: `${currentServer.name} Auth`,
             type: manualCreds.privateKey ? 'key' : 'password',
             keyContent: manualCreds.privateKey,
             passphrase: manualCreds.passphrase,
@@ -269,10 +328,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           };
 
           const updatedConfig = {
-            ...config,
-            authentications: [...config.authentications, newAuth],
-            servers: config.servers.map((s) =>
-              s.id === server.id ? { 
+            ...currentConfig,
+            authentications: [...currentConfig.authentications, newAuth],
+            servers: currentConfig.servers.map((s) =>
+              s.id === currentServer.id ? {
                 ...s, 
                 authId, 
                 username: manualCreds.username,
@@ -282,7 +341,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           };
 
           // Save credentials in background without blocking
-          saveConfig(updatedConfig).catch(() => {
+          saveConfigRef.current(updatedConfig).catch(() => {
             // Silently fail - credential saving is non-critical
           });
         }
@@ -292,14 +351,14 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         });
 
         closedUnlistener = await listen(`connection-closed:${sid}`, () => {
-          updateStatus(t.terminalTab.connectionClosed);
+          updateStatus(tRef.current.terminalTab.connectionClosed);
           setIsConnected(false);
           connectedRef.current = false;
         });
 
       } catch (err) {
         const errorStr = String(err);
-        const errorMsg = t.terminalTab.error.replace('{error}', errorStr);
+        const errorMsg = tRef.current.terminalTab.error.replace('{error}', errorStr);
         writeRef.current('\r\n' + errorMsg + '\r\n');
 
         // Check if authentication failed and password is required
@@ -307,7 +366,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           setManualCredentials(prev => ({ ...prev, password: '', privateKey: '', passphrase: '' }));
           setIsAuthRetry(true);
           setShowManualAuth(true);
-          updateStatus(t.manualAuth.title);
+          updateStatus(tRef.current.manualAuth.title);
           connectedRef.current = false;
           setIsConnected(false);
         } else {
@@ -319,7 +378,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
 
     if (connectTrigger > 0) {
-      connect(manualCredentials.password || manualCredentials.privateKey ? manualCredentials : undefined);
+      const currentManualCredentials = manualCredentialsRef.current
+      connect(currentManualCredentials.password || currentManualCredentials.privateKey ? currentManualCredentials : undefined);
     } else if (!showManualAuth && !isCancelled) {
       connect();
     }
@@ -332,10 +392,12 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         invoke('close_session', { session_id: currentSid }).catch(() => {
           // Failed to close session
         });
-        onSessionChange?.(null);
+        sessionIdRef.current = null
+        setSessionId(null)
+        onSessionChangeRef.current?.(null);
       }
     };
-  }, [serverId, server.name, server.host, server.port, server.username, server.authId, server.proxyId, server.jumphostId, server.id, t, showManualAuth, isCancelled, connectTrigger, manualCredentials, config, saveConfig, onSessionChange]);
+  }, [serverId, serverConnectionKey, showManualAuth, isCancelled, connectTrigger]);
 
   // Terminal focus effect
   useEffect(() => {

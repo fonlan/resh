@@ -7,11 +7,28 @@ use lazy_static::lazy_static;
 use std::collections::HashMap;
 use tokio::fs::File;
 use tokio::io::{BufWriter, AsyncWriteExt};
+use tokio::time::{Duration, MissedTickBehavior};
 
 use super::AppState;
 
 lazy_static! {
     static ref RECORDING_SESSIONS: Mutex<HashMap<String, (Arc<Mutex<BufWriter<File>>>, String)>> = Mutex::new(HashMap::new());
+}
+
+async fn flush_terminal_output(window: &Window, session_id: &str, pending_output: &mut String) {
+    if pending_output.is_empty() {
+        return;
+    }
+
+    let text = std::mem::take(pending_output);
+
+    if let Err(e) = SSHClient::update_terminal_buffer(session_id, &text).await {
+        tracing::error!("Failed to update terminal buffer: {}", e);
+    }
+
+    if let Err(e) = window.emit(&format!("terminal-output:{}", session_id), text) {
+        tracing::debug!("Failed to emit terminal event for {}: {}", session_id, e);
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -51,49 +68,60 @@ pub async fn connect_to_server(
     let state_clone = state.inner().clone();
     tokio::spawn(async move {
         let mut current_session_id = None;
-        while let Some((session_id, data)) = rx.recv().await {
-            if current_session_id.is_none() {
-                current_session_id = Some(session_id.clone());
-            }
-            // ... (keeping existing logic for brevity)
+        let mut pending_output = String::new();
+        let mut flush_interval = tokio::time::interval(Duration::from_millis(16));
+        flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-            // Handle recording if active
-            {
-                let sessions = RECORDING_SESSIONS.lock().await;
-                if let Some((writer_mutex, mode)) = sessions.get(&session_id) {
-                    let mut writer = writer_mutex.lock().await;
-                    
-                    let data_to_write = if mode == "text" {
-                        strip_ansi_escapes::strip(&data)
-                    } else {
-                        data.clone()
+        loop {
+            tokio::select! {
+                recv = rx.recv() => {
+                    let Some((session_id, data)) = recv else {
+                        break;
                     };
 
-                    if let Err(e) = writer.write_all(&data_to_write).await {
-                        tracing::error!("Failed to write to recording file for session {}: {}", session_id, e);
-                    } else if let Err(e) = writer.flush().await {
-                         tracing::error!("Failed to flush recording file for session {}: {}", session_id, e);
+                    if current_session_id.is_none() {
+                        current_session_id = Some(session_id.clone());
+                    }
+
+                    // Handle recording if active
+                    let recording_target = {
+                        let sessions = RECORDING_SESSIONS.lock().await;
+                        sessions
+                            .get(&session_id)
+                            .map(|(writer_mutex, mode)| (Arc::clone(writer_mutex), mode.clone()))
+                    };
+
+                    if let Some((writer_mutex, mode)) = recording_target {
+                        let mut writer = writer_mutex.lock().await;
+
+                        let data_to_write = if mode == "text" {
+                            strip_ansi_escapes::strip(&data)
+                        } else {
+                            data.clone()
+                        };
+
+                        if let Err(e) = writer.write_all(&data_to_write).await {
+                            tracing::error!("Failed to write to recording file for session {}: {}", session_id, e);
+                        }
+                    }
+
+                    let text = String::from_utf8_lossy(&data);
+                    pending_output.push_str(&text);
+
+                    if pending_output.len() >= 8192 {
+                        flush_terminal_output(&window_clone, &session_id, &mut pending_output).await;
+                    }
+                }
+                _ = flush_interval.tick() => {
+                    if let Some(session_id) = current_session_id.as_deref() {
+                        flush_terminal_output(&window_clone, session_id, &mut pending_output).await;
                     }
                 }
             }
+        }
 
-            // Convert bytes to string (lossy) for xterm.js
-            // Note: xterm.js handles UTF-8, so we send string.
-            // Ideally we'd send bytes, but Tauri event payload is JSON string usually.
-            // String::from_utf8_lossy is safe.
-            let text = String::from_utf8_lossy(&data).to_string();
-            
-            // Update terminal buffer for AI access
-            use crate::ssh_manager::ssh::SSHClient;
-            if let Err(e) = SSHClient::update_terminal_buffer(&session_id, &text).await {
-                tracing::error!("Failed to update terminal buffer: {}", e);
-            }
-            
-            if let Err(e) = window_clone.emit(&format!("terminal-output:{}", session_id), text) {
-                // If the window is closed, we expect emit to fail eventually.
-                // Log at debug level to avoid spamming info/error logs.
-                tracing::debug!("Failed to emit terminal event for {}: {}", session_id, e);
-            }
+        if let Some(session_id) = current_session_id.as_deref() {
+            flush_terminal_output(&window_clone, session_id, &mut pending_output).await;
         }
         
         // Notify frontend that connection is closed
