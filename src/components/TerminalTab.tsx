@@ -61,9 +61,69 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   const inputBufferRef = useRef<string>('');
   const isInputModeRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string | null>(null);
+  const queuedTerminalInputRef = useRef<string>('');
+  const inputFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFlushingQueuedInputRef = useRef<boolean>(false);
+
+  const applySendError = useCallback((err: unknown) => {
+    const errorStr = String(err);
+    if (errorStr.includes('Connection lost') || errorStr.includes('reconnect')) {
+      setStatusText('Reconnecting...');
+    } else {
+      setIsConnected(false);
+    }
+  }, []);
+
+  const flushQueuedInput = useCallback(async () => {
+    if (isFlushingQueuedInputRef.current || !sessionIdRef.current || !queuedTerminalInputRef.current) {
+      return;
+    }
+
+    if (inputFlushTimerRef.current) {
+      clearTimeout(inputFlushTimerRef.current);
+      inputFlushTimerRef.current = null;
+    }
+
+    isFlushingQueuedInputRef.current = true;
+    let payload = '';
+
+    try {
+      while (sessionIdRef.current && queuedTerminalInputRef.current) {
+        payload = queuedTerminalInputRef.current;
+        queuedTerminalInputRef.current = '';
+
+        await invoke('send_command', {
+          params: {
+            session_id: sessionIdRef.current,
+            command: payload,
+          },
+        });
+
+        payload = '';
+      }
+    } catch (err) {
+      if (payload) {
+        queuedTerminalInputRef.current = payload + queuedTerminalInputRef.current;
+      }
+      applySendError(err);
+    } finally {
+      isFlushingQueuedInputRef.current = false;
+    }
+  }, [applySendError]);
+
+  const scheduleQueuedInputFlush = useCallback(() => {
+    if (inputFlushTimerRef.current || isFlushingQueuedInputRef.current) {
+      return;
+    }
+
+    inputFlushTimerRef.current = setTimeout(() => {
+      inputFlushTimerRef.current = null;
+      void flushQueuedInput();
+    }, 12);
+  }, [flushQueuedInput]);
 
   // Define handleData before useTerminal
-  const handleData = useCallback(async (data: string) => {
+  const handleData = useCallback((data: string) => {
     const { newBuffer, commandExecuted } = processInputBuffer(data, inputBufferRef.current);
     
     inputBufferRef.current = newBuffer;
@@ -73,22 +133,24 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       setStatusText(commandExecuted);
     }
 
-    if (sessionIdRef.current) {
-      try {
-        await invoke('send_command', { params: { session_id: sessionIdRef.current, command: data } });
-      } catch (err) {
-        // Connection lost - send_input will auto-reconnect, but we need to update UI state
-        const errorStr = String(err);
-        if (errorStr.includes('Connection lost') || errorStr.includes('reconnect')) {
-          // Connection is being restored, keep isConnected true but show reconnecting status
-          setStatusText('Reconnecting...');
-        } else {
-          // Other errors
-          setIsConnected(false);
-        }
-      }
+    if (!sessionIdRef.current) {
+      return;
     }
-  }, []);
+
+    queuedTerminalInputRef.current += data;
+
+    const shouldFlushImmediately =
+      data.includes('\r') ||
+      data.includes('\n') ||
+      data.includes('\u0003') ||
+      data.includes('\u001b');
+
+    if (shouldFlushImmediately) {
+      void flushQueuedInput();
+    } else {
+      scheduleQueuedInputFlush();
+    }
+  }, [flushQueuedInput, scheduleQueuedInputFlush]);
 
   const handleResize = useCallback((cols: number, rows: number) => {
     if (sessionIdRef.current) {
@@ -429,6 +491,17 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       window.removeEventListener('paste-snippet', handlePasteSnippet as EventListener);
     };
   }, [isActive, focus]);
+
+  useEffect(() => {
+    return () => {
+      if (inputFlushTimerRef.current) {
+        clearTimeout(inputFlushTimerRef.current)
+        inputFlushTimerRef.current = null
+      }
+      queuedTerminalInputRef.current = ''
+      isFlushingQueuedInputRef.current = false
+    }
+  }, []);
 
   // Listen for export logs event
   useEffect(() => {
