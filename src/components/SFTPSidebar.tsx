@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../i18n';
 import { useConfig } from '../hooks/useConfig';
+import { quotePathForTerminalInput } from '../utils/terminalUtils';
 
 import { TransferStatusPanel } from './TransferStatusPanel';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -37,6 +38,8 @@ interface FileEntry {
   isLoading?: boolean;
 }
 
+const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path';
+
 const formatPermissions = (entry: FileEntry): string => {
   const mode = entry.permissions;
   if (mode === undefined) return '';
@@ -58,16 +61,19 @@ const FileTreeItem: React.FC<{
   depth: number;
   onToggle: (entry: FileEntry) => void;
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
+  onDragStart: (e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => void;
   clipboardSourcePath?: string;
-}> = ({ entry, depth, onToggle, onContextMenu, clipboardSourcePath }) => {
+}> = ({ entry, depth, onToggle, onContextMenu, onDragStart, clipboardSourcePath }) => {
   const isInClipboard = clipboardSourcePath === entry.path;
   return (
     <div>
       <button
         type="button"
+        draggable
         className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? 'opacity-50' : ''}`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
+        onDragStart={(e) => onDragStart(e, entry)}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         <div className="w-4 flex-shrink-0 flex items-center justify-center">
@@ -123,6 +129,7 @@ const FileTreeItem: React.FC<{
               depth={depth + 1}
               onToggle={onToggle}
               onContextMenu={onContextMenu}
+              onDragStart={onDragStart}
               clipboardSourcePath={clipboardSourcePath}
             />
           ))}
@@ -558,6 +565,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     setContextMenu({ x: e.clientX, y: e.clientY, entry });
   };
 
+  const handleTreeItemDragStart = useCallback((e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => {
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData(SFTP_PATH_MIME_TYPE, entry.path);
+    e.dataTransfer.setData('text/plain', entry.path);
+  }, []);
+
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null);
     setShowPathSubmenu(false);
@@ -943,7 +956,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleSendPath = () => {
     if (!contextMenu || !contextMenu.entry) return;
-    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: contextMenu.entry.path }));
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: quotePathForTerminalInput(contextMenu.entry.path) }));
     handleCloseContextMenu();
   };
 
@@ -1128,6 +1141,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                 depth={0}
                 onToggle={handleToggle}
                 onContextMenu={handleContextMenu}
+                onDragStart={handleTreeItemDragStart}
                 clipboardSourcePath={clipboard?.sourcePath}
               />
           ))}

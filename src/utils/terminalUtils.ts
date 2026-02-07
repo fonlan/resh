@@ -66,3 +66,11 @@ export function processInputBuffer(
 
   return { newBuffer: buffer, commandExecuted };
 }
+
+export function quotePathForTerminalInput(path: string): string {
+  if (!/\s/.test(path)) {
+    return path;
+  }
+
+  return `"${path.replace(/"/g, '\\"')}"`;
+}

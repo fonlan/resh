@@ -8,9 +8,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { useTranslation } from '../i18n';
 import { StatusBar } from './StatusBar';
 import { ManualAuthModal } from './ManualAuthModal';
-import { processInputBuffer } from '../utils/terminalUtils';
+import { processInputBuffer, quotePathForTerminalInput } from '../utils/terminalUtils';
 
 type UnlistenFn = () => void;
+
+const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path';
 
 interface TerminalTabProps {
   tabId: string;
@@ -58,6 +60,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   
   // Status Bar State
   const [statusText, setStatusText] = useState<string>('');
+  const [isDragOverTerminal, setIsDragOverTerminal] = useState(false);
   const inputBufferRef = useRef<string>('');
   const isInputModeRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -492,6 +495,43 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     };
   }, [isActive, focus]);
 
+  const handleTerminalDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isActive) {
+      return;
+    }
+
+    if (!e.dataTransfer.types.includes(SFTP_PATH_MIME_TYPE)) {
+      return;
+    }
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragOverTerminal(true);
+  }, [isActive]);
+
+  const handleTerminalDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDragOverTerminal(false);
+    }
+  }, []);
+
+  const handleTerminalDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isActive) {
+      return;
+    }
+
+    const sftpPath = e.dataTransfer.getData(SFTP_PATH_MIME_TYPE);
+    if (!sftpPath) {
+      return;
+    }
+
+    e.preventDefault();
+    setIsDragOverTerminal(false);
+
+    window.dispatchEvent(new CustomEvent('paste-snippet', { detail: quotePathForTerminalInput(sftpPath) }));
+    focus();
+  }, [isActive, focus]);
+
   useEffect(() => {
     return () => {
       if (inputFlushTimerRef.current) {
@@ -604,9 +644,15 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         theme={theme}
         connected={isConnected}
       />
-      <div className="relative flex-1" style={{ padding: '8px', minHeight: 0, overflow: 'hidden' }}>
+      <div
+        className={`relative flex-1 ${isDragOverTerminal ? 'ring-1 ring-[var(--accent-primary)]' : ''}`}
+        style={{ padding: '8px', minHeight: 0, overflow: 'hidden' }}
+      >
         <div
           id={containerId}
+          onDragOver={handleTerminalDragOver}
+          onDragLeave={handleTerminalDragLeave}
+          onDrop={handleTerminalDrop}
           style={{
             display: isActive ? 'block' : 'none',
             width: '100%',
