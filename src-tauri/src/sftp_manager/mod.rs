@@ -8,7 +8,7 @@ use futures::FutureExt;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use lazy_static::lazy_static;
 use crate::ssh_manager::ssh::SSHClient;
 use serde::Serialize;
@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::AsyncReadExt;
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
-use std::time::{Instant, Duration};
+use std::time::Instant;
 use crate::db::DatabaseManager;
 use tokio::sync::oneshot;
 
@@ -94,6 +94,8 @@ lazy_static! {
     static ref TASK_QUEUE: Mutex<VecDeque<PendingTask>> = Mutex::new(VecDeque::new());
     static ref ACTIVE_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(2);
+    static ref QUEUE_NOTIFY: Notify = Notify::new();
+    static ref SCHEDULER_RUNNING: AtomicBool = AtomicBool::new(false);
 }
 
 
@@ -103,36 +105,39 @@ impl SftpManager {
     pub async fn set_max_concurrent_transfers(max: u32) {
         let mut current = MAX_CONCURRENT_TRANSFERS.lock().await;
         *current = max;
+        QUEUE_NOTIFY.notify_one();
     }
 
     async fn process_queue() {
         loop {
-            let mut queue = TASK_QUEUE.lock().await;
-            let max_concurrent = *MAX_CONCURRENT_TRANSFERS.lock().await;
-            let mut active = ACTIVE_TASKS.lock().await;
+            let next_task = {
+                let max_concurrent = *MAX_CONCURRENT_TRANSFERS.lock().await;
+                let mut queue = TASK_QUEUE.lock().await;
+                let mut active = ACTIVE_TASKS.lock().await;
 
-            if queue.is_empty() || active.len() >= max_concurrent as usize {
-                drop(queue);
-                drop(active);
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            }
+                if active.len() < max_concurrent as usize {
+                    if let Some(task) = queue.pop_front() {
+                        let task_id = task.task_id.clone();
+                        let cancel_token = task.cancel_token.clone();
+                        active.insert(task_id, cancel_token);
+                        Some(task)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            };
 
-            if let Some(task) = queue.pop_front() {
-                let task_id = task.task_id.clone();
-                let cancel_token = task.cancel_token.clone();
-                active.insert(task_id.clone(), cancel_token.clone());
-
+            if let Some(task) = next_task {
                 let transfer_type = task.transfer_type.clone();
                 let app = Arc::clone(&task.app);
                 let db_manager = task.db_manager.clone();
                 let session_id = task.session_id.clone();
                 let remote_path = task.remote_path.clone();
                 let local_path = task.local_path.clone();
-                let task_id_for_log = task.task_id.clone();
-
-                drop(queue);
-                drop(active);
+                let task_id = task.task_id.clone();
+                let cancel_token = task.cancel_token.clone();
 
                 tokio::spawn(async move {
                     let _ = match transfer_type {
@@ -145,19 +150,43 @@ impl SftpManager {
                     };
 
                     let mut active = ACTIVE_TASKS.lock().await;
-                    active.remove(&task_id_for_log);
+                    active.remove(&task_id);
+                    QUEUE_NOTIFY.notify_one();
                 });
-            } else {
-                drop(queue);
-                drop(active);
-                tokio::time::sleep(Duration::from_millis(100)).await;
+
+                continue;
             }
+
+            let should_exit = {
+                let queue_empty = TASK_QUEUE.lock().await.is_empty();
+                let active_empty = ACTIVE_TASKS.lock().await.is_empty();
+                queue_empty && active_empty
+            };
+
+            if should_exit {
+                break;
+            }
+
+            QUEUE_NOTIFY.notified().await;
         }
     }
 
     fn spawn_scheduler() {
+        if SCHEDULER_RUNNING
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+
         tokio::spawn(async move {
             Self::process_queue().await;
+            SCHEDULER_RUNNING.store(false, Ordering::SeqCst);
+
+            if !TASK_QUEUE.lock().await.is_empty() {
+                Self::spawn_scheduler();
+                QUEUE_NOTIFY.notify_one();
+            }
         });
     }
 
@@ -210,6 +239,7 @@ impl SftpManager {
         }
 
         Self::spawn_scheduler();
+        QUEUE_NOTIFY.notify_one();
 
         Ok(task_id)
     }
@@ -263,6 +293,7 @@ impl SftpManager {
         }
 
         Self::spawn_scheduler();
+        QUEUE_NOTIFY.notify_one();
 
         Ok(task_id)
     }
