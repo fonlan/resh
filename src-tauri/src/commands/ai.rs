@@ -5,6 +5,7 @@ use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use rusqlite::params;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tauri::{Emitter, State, Window, Manager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -70,6 +71,27 @@ fn extract_command(arguments: &str) -> Option<String> {
         .get("command")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
+}
+
+const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
+const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;
+
+fn flush_response_buffer(window: &Window, response_event: &str, buffer: &mut String) -> Result<(), String> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+
+    let payload = std::mem::take(buffer);
+    window.emit(response_event, payload).map_err(|e| e.to_string())
+}
+
+fn flush_reasoning_buffer(window: &Window, reasoning_event: &str, buffer: &mut String) -> Result<(), String> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+
+    let payload = std::mem::take(buffer);
+    window.emit(reasoning_event, payload).map_err(|e| e.to_string())
 }
 
 pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
@@ -784,9 +806,22 @@ pub fn run_ai_turn(
         let mut final_tool_calls: Option<Vec<ToolCall>> = None;
         let mut accumulated_tool_calls: Vec<ToolCall> = Vec::new();
         let mut has_pending_reasoning = false;
+        let mut response_emit_buffer = String::new();
+        let mut reasoning_emit_buffer = String::new();
+        let mut last_emit_at = Instant::now();
+
+        let response_event = format!("ai-response-{}", session_id);
+        let reasoning_event = format!("ai-reasoning-{}", session_id);
+        let reasoning_end_event = format!("ai-reasoning-end-{}", session_id);
+        let error_event = format!("ai-error-{}", session_id);
 
         while let Some(event_result) = stream.next().await {
             if cancellation_token.is_cancelled() {
+                flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                if has_pending_reasoning {
+                    window.emit(&reasoning_end_event, "end").map_err(|e| e.to_string())?;
+                }
                 return Err("CANCELLED".to_string());
             }
             match event_result {
@@ -794,18 +829,35 @@ pub fn run_ai_turn(
                     match event {
                         ChatStreamEvent::Chunk(chunk) => {
                             if has_pending_reasoning {
-                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
+                                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                                window.emit(&reasoning_end_event, "end").map_err(|e| e.to_string())?;
                                 has_pending_reasoning = false;
+                                last_emit_at = Instant::now();
                             }
+
                             full_content.push_str(&chunk.content);
-                            window.emit(&format!("ai-response-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
+                            response_emit_buffer.push_str(&chunk.content);
+
+                            if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+                                flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                                last_emit_at = Instant::now();
+                            }
                         }
                         ChatStreamEvent::ReasoningChunk(chunk) => {
                             has_pending_reasoning = true;
                             full_reasoning.push_str(&chunk.content);
-                            window.emit(&format!("ai-reasoning-{}", session_id), chunk.content).map_err(|e| e.to_string())?;
+                            reasoning_emit_buffer.push_str(&chunk.content);
+
+                            if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+                                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                                last_emit_at = Instant::now();
+                            }
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
+                            flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                            flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                            last_emit_at = Instant::now();
+
                             tracing::debug!("[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
                                 chunk.tool_call.call_id, chunk.tool_call.fn_name, chunk.tool_call.fn_arguments);
 
@@ -917,18 +969,25 @@ pub fn run_ai_turn(
                     }
                 }
                 Err(e) => {
+                    flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                    flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+
                     if has_pending_reasoning {
-                        window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
+                        window.emit(&reasoning_end_event, "end").ok();
                     }
+
                     let err_msg = e.to_string();
-                    window.emit(&format!("ai-error-{}", session_id), err_msg.clone()).map_err(|e| e.to_string())?;
+                    window.emit(&error_event, err_msg.clone()).map_err(|e| e.to_string())?;
                     return Err(err_msg);
                 }
             }
         }
 
+        flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+        flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+
         if has_pending_reasoning {
-            window.emit(&format!("ai-reasoning-end-{}", session_id), "end").ok();
+            window.emit(&reasoning_end_event, "end").ok();
         }
 
         let ai_msg_id = Uuid::new_v4().to_string();
