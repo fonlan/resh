@@ -96,7 +96,9 @@ export const useAIStore = create<AIState>((set, get) => ({
         const lastMsg = msgs[msgs.length - 1];
         if (lastMsg.role === 'assistant' && lastMsg.tool_calls && lastMsg.tool_calls.length > 0) {
           const hasVisibleTools = lastMsg.tool_calls.some(tc => 
-            tc.function.name !== 'get_terminal_output'
+            tc.function.name !== 'get_terminal_output' &&
+            tc.function.name !== 'get_selected_terminal_output' &&
+            tc.function.name !== 'read_file'
           );
           if (hasVisibleTools) {
             pending = lastMsg.tool_calls;

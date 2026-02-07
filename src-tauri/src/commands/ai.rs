@@ -3,6 +3,7 @@ use crate::ai::validator::{validate_and_fix_messages, MessagePayload, ToolCallPa
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
+use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use rusqlite::params;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -75,6 +76,152 @@ fn extract_command(arguments: &str) -> Option<String> {
 
 const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;
+const READ_FILE_MAX_BYTES: usize = 128 * 1024;
+const MAX_TAGGED_FILES_PER_MESSAGE: usize = 8;
+
+fn is_path_trailing_punctuation(character: char) -> bool {
+    matches!(
+        character,
+        '.'
+            | ','
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+            | '>'
+            | '"'
+            | '\''
+    )
+}
+
+fn extract_tagged_file_paths(content: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    for token in content.split_whitespace() {
+        if let Some(raw_path) = token.strip_prefix("#/") {
+            let cleaned_path = raw_path.trim_end_matches(is_path_trailing_punctuation);
+            if cleaned_path.is_empty() {
+                continue;
+            }
+
+            let normalized_path = format!("/{}", cleaned_path);
+            if !paths.contains(&normalized_path) {
+                paths.push(normalized_path);
+            }
+        }
+    }
+
+    paths
+}
+
+async fn read_remote_file_via_sftp(
+    ssh_session_id: &str,
+    remote_path: &str,
+    max_bytes: usize,
+) -> Result<(String, bool), String> {
+    let metadata = crate::sftp_manager::SftpManager::metadata(ssh_session_id, remote_path).await?;
+    if metadata.attrs.is_dir() {
+        return Err(format!("'{}' is a directory, not a file.", remote_path));
+    }
+
+    let sftp = crate::sftp_manager::SftpManager::get_session(ssh_session_id).await?;
+    let handle = sftp
+        .open(remote_path, OpenFlags::READ, FileAttributes::default())
+        .await
+        .map_err(|e| e.to_string())?
+        .handle;
+
+    let mut offset = 0u64;
+    let mut content = Vec::new();
+    let mut truncated = false;
+
+    loop {
+        let remaining = max_bytes.saturating_sub(content.len());
+        if remaining == 0 {
+            truncated = true;
+            break;
+        }
+
+        let chunk_size = remaining.min(255 * 1024) as u32;
+        match sftp.read(&handle, offset, chunk_size).await {
+            Ok(data) => {
+                if data.data.is_empty() {
+                    break;
+                }
+                offset += data.data.len() as u64;
+                content.extend_from_slice(&data.data);
+            }
+            Err(russh_sftp::client::error::Error::Status(status))
+                if status.status_code == StatusCode::Eof =>
+            {
+                break;
+            }
+            Err(e) => {
+                let _ = sftp.close(handle).await;
+                return Err(e.to_string());
+            }
+        }
+    }
+
+    let _ = sftp.close(handle).await;
+    Ok((String::from_utf8_lossy(&content).to_string(), truncated))
+}
+
+async fn enrich_user_message_with_tagged_files(content: &str, ssh_session_id: Option<&str>) -> String {
+    let tagged_paths = extract_tagged_file_paths(content);
+    if tagged_paths.is_empty() {
+        return content.to_string();
+    }
+
+    let tagged_path_count = tagged_paths.len();
+
+    let mut enriched_content = content.to_string();
+    enriched_content.push_str("\n\n[Remote file context loaded via read_file]\n");
+
+    let paths_to_load: Vec<String> = tagged_paths
+        .into_iter()
+        .take(MAX_TAGGED_FILES_PER_MESSAGE)
+        .collect();
+
+    for path in &paths_to_load {
+        if let Some(ssh_id) = ssh_session_id {
+            match read_remote_file_via_sftp(ssh_id, path, READ_FILE_MAX_BYTES).await {
+                Ok((file_content, truncated)) => {
+                    enriched_content.push_str(&format!("\n[File: {}]\n", path));
+                    enriched_content.push_str(&file_content);
+                    if truncated {
+                        enriched_content
+                            .push_str(&format!("\n[Truncated to first {} bytes]", READ_FILE_MAX_BYTES));
+                    }
+                    enriched_content.push_str("\n[/File]\n");
+                }
+                Err(error) => {
+                    enriched_content.push_str(&format!(
+                        "\n[File: {}]\n[Read error: {}]\n[/File]\n",
+                        path, error
+                    ));
+                }
+            }
+        } else {
+            enriched_content.push_str(&format!(
+                "\n[File: {}]\n[Read error: No active terminal session linked to this chat.]\n[/File]\n",
+                path
+            ));
+        }
+    }
+
+    if paths_to_load.len() < tagged_path_count {
+        enriched_content.push_str(&format!(
+            "\n[Note: Only the first {} tagged files were loaded.]\n",
+            MAX_TAGGED_FILES_PER_MESSAGE
+        ));
+    }
+
+    enriched_content
+}
 
 fn flush_response_buffer(window: &Window, response_event: &str, buffer: &mut String) -> Result<(), String> {
     if buffer.is_empty() {
@@ -117,6 +264,23 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                     "type": "object",
                     "properties": {},
                     "required": []
+                }),
+            },
+        },
+        ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "read_file".to_string(),
+                description: "Read file content directly from the remote server over SFTP without using terminal commands. Useful for analyzing config/code/log files.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "remote_path": {
+                            "type": "string",
+                            "description": "Absolute path to the remote file (example: /etc/nginx/nginx.conf)"
+                        }
+                    },
+                    "required": ["remote_path"]
                 }),
             },
         },
@@ -487,6 +651,43 @@ async fn execute_tools_and_save(
                             }
                         }
                         Err(e) => format!("Error: {}", e),
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            }
+            "read_file" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
+                        let remote_path = args
+                            .get("remote_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string();
+
+                        if remote_path.is_empty() {
+                            "Error: Missing 'remote_path' argument".to_string()
+                        } else {
+                            match read_remote_file_via_sftp(ssh_id, &remote_path, READ_FILE_MAX_BYTES)
+                                .await
+                            {
+                                Ok((file_content, truncated)) => {
+                                    let mut response = format!("[File: {}]\n{}", remote_path, file_content);
+                                    if truncated {
+                                        response.push_str(&format!(
+                                            "\n[Truncated to first {} bytes]",
+                                            READ_FILE_MAX_BYTES
+                                        ));
+                                    }
+                                    response
+                                }
+                                Err(e) => format!("Error reading file '{}': {}", remote_path, e),
+                            }
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
                     }
                 } else {
                     "Error: No active terminal session linked to this chat.".to_string()
@@ -1011,17 +1212,28 @@ pub fn run_ai_turn(
         if let Some(calls) = &final_tool_calls {
             if !calls.is_empty() {
                 let auto_exec_calls: Vec<ToolCall> = calls.iter()
-                    .filter(|c| c.function.name == "get_terminal_output" || c.function.name == "get_selected_terminal_output")
+                    .filter(|c| {
+                        c.function.name == "get_terminal_output"
+                            || c.function.name == "get_selected_terminal_output"
+                            || c.function.name == "read_file"
+                    })
                     .cloned()
                     .collect();
 
                 let confirm_calls: Vec<ToolCall> = calls.iter()
-                    .filter(|c| c.function.name != "get_terminal_output" && c.function.name != "get_selected_terminal_output")
+                    .filter(|c| {
+                        c.function.name != "get_terminal_output"
+                            && c.function.name != "get_selected_terminal_output"
+                            && c.function.name != "read_file"
+                    })
                     .cloned()
                     .collect();
 
                 if !auto_exec_calls.is_empty() {
-                    tracing::info!("[AI] Auto-executing {} read-only tools (get_terminal_output/get_selected_terminal_output)", auto_exec_calls.len());
+                    tracing::info!(
+                        "[AI] Auto-executing {} read-only tools (get_terminal_output/get_selected_terminal_output/read_file)",
+                        auto_exec_calls.len()
+                    );
                     execute_tools_and_save(
                         window.app_handle().clone(),
                         &state,
@@ -1039,7 +1251,7 @@ pub fn run_ai_turn(
                             .map_err(|e| e.to_string())?;
                         return Ok(Some(confirm_calls));
                     } else {
-                        tracing::warn!("[AI] Ask mode cannot execute tools other than read-only tools (get_terminal_output/get_selected_terminal_output), ignoring {} tool calls", confirm_calls.len());
+                        tracing::warn!("[AI] Ask mode cannot execute tools other than read-only tools (get_terminal_output/get_selected_terminal_output/read_file), ignoring {} tool calls", confirm_calls.len());
                     }
                 }
 
@@ -1319,6 +1531,8 @@ pub async fn send_chat_message(
             existing_ssh_id
         }
     };
+
+    let content = enrich_user_message_with_tagged_files(&content, bound_ssh_session_id.as_deref()).await;
 
     let user_msg_id = Uuid::new_v4().to_string();
     {

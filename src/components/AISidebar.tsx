@@ -12,6 +12,14 @@ import { ConfirmationModal } from './ConfirmationModal';
 import { CustomSelect } from './CustomSelect';
 import { EmojiText } from './EmojiText';
 
+const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path'
+const SFTP_ENTRY_MIME_TYPE = 'application/x-resh-sftp-entry'
+
+interface SftpDragEntry {
+  path: string
+  isDir: boolean
+}
+
 interface AISidebarProps {
   isOpen: boolean;
   onClose: () => void;
@@ -265,7 +273,11 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
 
   const visibleToolCalls = useMemo(() => {
     if (!msg.tool_calls || isPending) return [];
-    return msg.tool_calls.filter(call => call.function.name !== 'get_terminal_output');
+    return msg.tool_calls.filter(call =>
+      call.function.name !== 'get_terminal_output' &&
+      call.function.name !== 'get_selected_terminal_output' &&
+      call.function.name !== 'read_file'
+    )
   }, [msg.tool_calls, isPending]);
 
   const hasContentToCopy = useMemo(() => {
@@ -405,6 +417,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [width, setWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [isInputDragOver, setIsInputDragOver] = useState(false)
   const [showHistory, setShowHistory] = useState(false);
   const [mode, setMode] = useState<'ask' | 'agent'>(config?.general.aiMode as 'ask' | 'agent' || 'ask');
   const [selectedModelId, setSelectedModelId] = useState<string>('');
@@ -600,8 +613,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       // Update store with tool calls so they appear in the message bubble
       appendToolCalls(activeSessionId, calls);
 
-      // Filter: if ALL calls are get_terminal_output, auto-execute immediately WITHOUT UI
-      const isAllSafe = calls.every(c => c.function.name === 'get_terminal_output');
+      // Filter: if ALL calls are read-only tools, auto-execute immediately WITHOUT UI
+      const isAllSafe = calls.every(
+        c =>
+          c.function.name === 'get_terminal_output' ||
+          c.function.name === 'get_selected_terminal_output' ||
+          c.function.name === 'read_file'
+      )
 
       if (isAllSafe) {
         // Ensure we are using valid IDs
@@ -626,7 +644,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         // Do NOT set pendingToolCalls
         setGenerating(activeSessionId, true); 
       } else {
-        // Here we have run_in_terminal calls. 
+        // Here we have tool calls that require confirmation.
         // We set pendingToolCalls to show the UI.
         // The UI (ToolConfirmation) handles the countdown for non-sensitive commands.
         setGenerating(activeSessionId, false);
@@ -718,6 +736,67 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       setShowHistory(false);
     }
   }, [currentServerId, selectSession]);
+
+  const appendPathToInput = useCallback((path: string, useReadFilePrefix: boolean) => {
+    const token = `${useReadFilePrefix ? '#' : ''}${path}`
+    setInputValue(prev => {
+      const normalized = prev.trimEnd()
+      const merged = normalized.length > 0 ? `${normalized} ${token}` : token
+      return `${merged} `
+    })
+
+    if (textareaRef.current) {
+      textareaRef.current.focus()
+    }
+  }, [])
+
+  const handleInputDragOver = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (
+      !e.dataTransfer.types.includes(SFTP_PATH_MIME_TYPE) &&
+      !e.dataTransfer.types.includes(SFTP_ENTRY_MIME_TYPE)
+    ) {
+      return
+    }
+
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+    setIsInputDragOver(true)
+  }, [])
+
+  const handleInputDragLeave = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsInputDragOver(false)
+    }
+  }, [])
+
+  const handleInputDrop = useCallback((e: React.DragEvent<HTMLTextAreaElement>) => {
+    const entryRaw = e.dataTransfer.getData(SFTP_ENTRY_MIME_TYPE)
+    const pathRaw = e.dataTransfer.getData(SFTP_PATH_MIME_TYPE)
+    const fallbackPath = e.dataTransfer.getData('text/plain')
+    const droppedPath = pathRaw || fallbackPath
+
+    if (!entryRaw && !droppedPath) {
+      return
+    }
+
+    e.preventDefault()
+    setIsInputDragOver(false)
+
+    if (entryRaw) {
+      try {
+        const entry = JSON.parse(entryRaw) as SftpDragEntry
+        if (entry.path) {
+          appendPathToInput(entry.path, !entry.isDir)
+          return
+        }
+      } catch {
+      }
+    }
+
+    if (droppedPath) {
+      appendPathToInput(droppedPath, false)
+    }
+  }, [appendPathToInput])
 
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading || !!pendingToolCalls) return;
@@ -1146,13 +1225,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
              </div>
              <div className="flex gap-2 items-end bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-[var(--radius-sm)] p-2 transition-colors duration-200 focus-within:border-[var(--accent-primary)]">
-               <textarea
-                 ref={textareaRef}
-                 className="flex-1 bg-transparent border-0 text-[var(--text-primary)] font-inherit text-[13px] leading-7 resize-none outline-none max-h-[150px] min-h-7 p-0 block"
+              <textarea
+                ref={textareaRef}
+                className={`flex-1 bg-transparent border-0 text-[var(--text-primary)] font-inherit text-[13px] leading-7 resize-none outline-none max-h-[150px] min-h-7 p-0 block ${isInputDragOver ? 'opacity-80' : ''}`}
                 placeholder={t.ai.typeMessage}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onDragOver={handleInputDragOver}
+                onDragLeave={handleInputDragLeave}
+                onDrop={handleInputDrop}
                 disabled={!!pendingToolCalls}
                 rows={1}
               />

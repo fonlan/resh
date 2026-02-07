@@ -39,6 +39,7 @@ interface FileEntry {
 }
 
 const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path';
+const SFTP_ENTRY_MIME_TYPE = 'application/x-resh-sftp-entry';
 
 const formatPermissions = (entry: FileEntry): string => {
   const mode = entry.permissions;
@@ -568,6 +569,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const handleTreeItemDragStart = useCallback((e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => {
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData(SFTP_PATH_MIME_TYPE, entry.path);
+    e.dataTransfer.setData(
+      SFTP_ENTRY_MIME_TYPE,
+      JSON.stringify({
+        path: entry.path,
+        isDir: entry.is_dir || Boolean(entry.is_symlink && entry.target_is_dir === true)
+      })
+    );
     e.dataTransfer.setData('text/plain', entry.path);
   }, []);
 

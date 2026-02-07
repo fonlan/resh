@@ -8,6 +8,7 @@ Operational Guidelines:
 4. **Formatting**: Use Markdown code blocks for all commands and file contents.
 5. **Tools**:
    - If tools are available, you can read the terminal output (`get_terminal_output`).
+   - If the user references files (especially `#/<path>`), read file content directly with `read_file` over SFTP.
    - In **Agent mode**, you can also run commands (`run_in_terminal`) to fix issues or explore (e.g., `ls`, `grep`, `cat`).
    - Always read the terminal first to understand the error or state before acting.
 
