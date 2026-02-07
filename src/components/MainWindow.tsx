@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, Suspense } from 'react';
+import React, { useState, useCallback, useEffect, Suspense, useMemo } from 'react';
 import { Settings, X, Code, Circle, MessageSquare, Folder } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -30,6 +30,10 @@ interface Tab {
   label: string;
   serverId: string;
 }
+
+const EMPTY_SERVERS: Config['servers'] = []
+const EMPTY_AUTHENTICATIONS: Config['authentications'] = []
+const EMPTY_PROXIES: Config['proxies'] = []
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig } = useConfig();
@@ -64,23 +68,6 @@ export const MainWindow: React.FC = () => {
       setIsSidebarsInitialized(true);
     }
   }, [config, isSidebarsInitialized]);
-
-  useEffect(() => {
-    if (!config?.servers) return;
-
-    setTabs(prevTabs => {
-      let hasChanges = false;
-      const newTabs = prevTabs.map(tab => {
-        const server = config.servers.find(s => s.id === tab.serverId);
-        if (server && server.name !== tab.label) {
-          hasChanges = true;
-          return { ...tab, label: server.name };
-        }
-        return tab;
-      });
-      return hasChanges ? newTabs : prevTabs;
-    });
-  }, [config?.servers]);
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -119,6 +106,56 @@ export const MainWindow: React.FC = () => {
   const [editServerId, setEditServerId] = useState<string | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId
+
+  const servers = config?.servers || EMPTY_SERVERS
+  const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
+  const proxies = config?.proxies || EMPTY_PROXIES
+
+  const serverById = useMemo(() => {
+    const map = new Map<string, Config['servers'][number]>()
+    servers.forEach(server => {
+      map.set(server.id, server)
+    })
+    return map
+  }, [servers])
+
+  const activeTab = useMemo(
+    () => tabs.find(tab => tab.id === activeTabId) || null,
+    [tabs, activeTabId]
+  )
+
+  const activeServerId = activeTab?.serverId
+
+  const handleTabSessionChange = useCallback((tabId: string, sessionId: string | null) => {
+    const normalizedSessionId = sessionId || ''
+    setTabSessions(prev => {
+      if (prev[tabId] === normalizedSessionId) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        [tabId]: normalizedSessionId,
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    if (servers.length === 0) return;
+
+    setTabs(prevTabs => {
+      let hasChanges = false;
+      const newTabs = prevTabs.map(tab => {
+        const server = serverById.get(tab.serverId)
+        if (server && server.name !== tab.label) {
+          hasChanges = true;
+          return { ...tab, label: server.name };
+        }
+        return tab;
+      });
+      return hasChanges ? newTabs : prevTabs;
+    });
+  }, [servers.length, serverById]);
 
   const {
     draggedIndex: draggedTabIndex,
@@ -348,15 +385,14 @@ export const MainWindow: React.FC = () => {
     import('./settings/SettingsModal');
   }, []);
 
-  const recentServers = config ? getRecentServers(config.general.recentServerIds, config.servers, config.general.maxRecentServers) : [];
+  const recentServers = config ? getRecentServers(config.general.recentServerIds, servers, config.general.maxRecentServers) : [];
 
-  const displayedSnippets = React.useMemo(() => {
+  const displayedSnippets = useMemo(() => {
     const globalSnippets = config?.snippets || [];
-    const activeTab = tabs.find(t => t.id === activeTabId);
-    const activeServer = activeTab ? config?.servers.find(s => s.id === activeTab.serverId) : null;
+    const activeServer = activeServerId ? serverById.get(activeServerId) || null : null
     const serverSnippets = activeServer?.snippets || [];
     return [...globalSnippets, ...serverSnippets];
-  }, [config?.snippets, config?.servers, tabs, activeTabId]);
+  }, [config?.snippets, activeServerId, serverById]);
 
   // Calculate z-index for sidebars based on lock state and open order
   // Rule: unlocked sidebars always appear above locked ones
@@ -516,7 +552,7 @@ export const MainWindow: React.FC = () => {
           />
         ) : (
           tabs.map((tab) => {
-            const server = config?.servers.find(s => s.id === tab.serverId);
+            const server = serverById.get(tab.serverId)
             if (!server) return null;
 
             return (
@@ -534,17 +570,12 @@ export const MainWindow: React.FC = () => {
                   isActive={activeTabId === tab.id}
                   onClose={handleCloseTab}
                   server={server}
-                  servers={config?.servers || []}
-                  authentications={config?.authentications || []}
-                  proxies={config?.proxies || []}
+                  servers={servers}
+                  authentications={authentications}
+                  proxies={proxies}
                   terminalSettings={config?.general.terminal}
                   theme={config?.general.theme}
-                  onSessionChange={(sessionId) => {
-                    setTabSessions(prev => ({
-                      ...prev,
-                      [tab.id]: sessionId || ''
-                    }));
-                  }}
+                  onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
                 />
               </div>
             );
@@ -556,7 +587,7 @@ export const MainWindow: React.FC = () => {
           onClose={() => setIsAIOpen(false)}
           isLocked={config?.general.aiSidebarLocked || false}
           onToggleLock={handleToggleAILock}
-          currentServerId={tabs.find(t => t.id === activeTabId)?.serverId}
+          currentServerId={activeServerId}
           currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
           zIndex={aiZIndex}
         />
