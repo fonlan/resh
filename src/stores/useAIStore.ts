@@ -6,6 +6,7 @@ interface AIState {
   sessions: AISession[];
   activeSessionId: string | null;
   activeSessionIdByServer: Record<string, string | null>;
+  activeSessionIdBySshSession: Record<string, string | null>;
   messages: Record<string, ChatMessage[]>;
   isLoading: boolean;
   isGenerating: Record<string, boolean>;
@@ -14,7 +15,7 @@ interface AIState {
   
   loadSessions: (serverId: string) => Promise<void>;
   createSession: (serverId: string, modelId?: string, sshSessionId?: string) => Promise<string>;
-  selectSession: (sessionId: string | null, serverId?: string) => Promise<void>;
+  selectSession: (sessionId: string | null, serverId?: string, sshSessionId?: string) => Promise<void>;
   addMessage: (sessionId: string, message: ChatMessage) => void;
   newAssistantMessage: (sessionId: string, modelId?: string) => void;
   appendResponse: (sessionId: string, content: string) => void;
@@ -34,6 +35,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   activeSessionIdByServer: {},
+  activeSessionIdBySshSession: {},
   messages: {},
   isLoading: false,
   isGenerating: {},
@@ -75,14 +77,15 @@ export const useAIStore = create<AIState>((set, get) => ({
   createSession: async (serverId, modelId, sshSessionId) => {
     const id = await aiService.createSession(serverId, modelId, sshSessionId);
     await get().loadSessions(serverId);
-    await get().selectSession(id, serverId);
+    await get().selectSession(id, serverId, sshSessionId);
     return id;
   },
 
-  selectSession: async (sessionId, serverId) => {
+  selectSession: async (sessionId, serverId, sshSessionId) => {
     set(state => ({ 
       activeSessionId: sessionId,
-      activeSessionIdByServer: serverId ? { ...state.activeSessionIdByServer, [serverId]: sessionId } : state.activeSessionIdByServer
+      activeSessionIdByServer: serverId ? { ...state.activeSessionIdByServer, [serverId]: sessionId } : state.activeSessionIdByServer,
+      activeSessionIdBySshSession: sshSessionId ? { ...state.activeSessionIdBySshSession, [sshSessionId]: sessionId } : state.activeSessionIdBySshSession
     }));
     if (sessionId) {
       const msgs = await aiService.getMessages(sessionId);
@@ -248,12 +251,18 @@ export const useAIStore = create<AIState>((set, get) => ({
       const isGenerating = { ...s.isGenerating };
       const pendingToolCalls = { ...s.pendingToolCalls };
       const messages = { ...s.messages };
+      const activeSessionIdBySshSession = { ...s.activeSessionIdBySshSession };
       const stoppedSessions = new Set(s.stoppedSessions);
       delete isGenerating[sessionId];
       delete pendingToolCalls[sessionId];
       delete messages[sessionId];
+      Object.keys(activeSessionIdBySshSession).forEach(sshSessionId => {
+        if (activeSessionIdBySshSession[sshSessionId] === sessionId) {
+          activeSessionIdBySshSession[sshSessionId] = null;
+        }
+      });
       stoppedSessions.delete(sessionId);
-      return { isGenerating, pendingToolCalls, messages, stoppedSessions };
+      return { isGenerating, pendingToolCalls, messages, activeSessionIdBySshSession, stoppedSessions };
     });
 
     await get().loadSessions(serverId);
@@ -262,6 +271,14 @@ export const useAIStore = create<AIState>((set, get) => ({
   clearSessions: async (serverId) => {
     await aiService.deleteAllSessions(serverId);
     set(state => ({ 
+      activeSessionIdBySshSession: Object.fromEntries(
+        Object.entries(state.activeSessionIdBySshSession).map(([sshSessionId, mappedSessionId]) => {
+          if (mappedSessionId && state.sessions.some(session => session.id === mappedSessionId)) {
+            return [sshSessionId, null]
+          }
+          return [sshSessionId, mappedSessionId]
+        })
+      ),
       activeSessionId: null, 
       sessions: [],
       activeSessionIdByServer: { ...state.activeSessionIdByServer, [serverId]: null },

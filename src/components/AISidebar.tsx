@@ -398,6 +398,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const sessions = useAIStore(state => state.sessions)
   const activeSessionId = useAIStore(state => state.activeSessionId)
   const activeSessionIdByServer = useAIStore(state => state.activeSessionIdByServer)
+  const activeSessionIdBySshSession = useAIStore(state => state.activeSessionIdBySshSession)
   const messages = useAIStore(state => state.messages)
   const isGenerating = useAIStore(state => state.isGenerating)
   const pendingToolCallsMap = useAIStore(state => state.pendingToolCalls)
@@ -469,41 +470,49 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [config?.general.aiMode, config?.general.aiModelId, config?.aiModels, config?.aiChannels, selectedModelId]);
 
-  // Load sessions and restore active session when server changes
+  // Load sessions when sidebar opens or server changes
   useEffect(() => {
     if (currentServerId && isOpen) {
-      loadSessions(currentServerId);
-      
-      const sid = activeSessionIdByServer[currentServerId] || null;
-      if (sid !== activeSessionId) {
-        selectSession(sid);
-      }
+      void loadSessions(currentServerId)
     } else if (!currentServerId) {
-      selectSession(null);
-      setShowHistory(false);
+      void selectSession(null)
+      setShowHistory(false)
     }
-  }, [currentServerId, isOpen, loadSessions, selectSession, activeSessionId, activeSessionIdByServer]);
+  }, [currentServerId, isOpen, loadSessions, selectSession])
 
-  // Keep active AI session isolated to the current SSH tab/session
+  // Keep AI sessions isolated by SSH tab/session and restore on tab switch
   useEffect(() => {
     if (!isOpen || !currentServerId) {
-      return;
+      return
     }
 
-    if (!activeSessionId) {
-      return;
-    }
+    const fallbackSessionId = activeSessionIdByServer[currentServerId] || null
+    const sessionIdFromCurrentTab = currentTabId
+      ? (
+          activeSessionIdBySshSession[currentTabId]
+          ?? sessions.find(session => session.sshSessionId === currentTabId)?.id
+          ?? null
+        )
+      : null
 
-    const activeSession = sessions.find(session => session.id === activeSessionId);
-    if (!activeSession?.sshSessionId) {
-      return;
+    const targetSessionId = currentTabId ? sessionIdFromCurrentTab : fallbackSessionId
+    if (targetSessionId !== activeSessionId) {
+      if (currentTabId) {
+        void selectSession(targetSessionId, targetSessionId ? currentServerId : undefined, currentTabId)
+      } else {
+        void selectSession(targetSessionId, currentServerId)
+      }
     }
-
-    const currentSshSessionId = currentTabId || null;
-    if (!currentSshSessionId || activeSession.sshSessionId !== currentSshSessionId) {
-      selectSession(null, currentServerId);
-    }
-  }, [isOpen, currentServerId, currentTabId, activeSessionId, sessions, selectSession]);
+  }, [
+    isOpen,
+    currentServerId,
+    currentTabId,
+    activeSessionId,
+    sessions,
+    activeSessionIdByServer,
+    activeSessionIdBySshSession,
+    selectSession,
+  ])
 
   const currentMessages = activeSessionId ? optimisticMessagesBySession[activeSessionId] || [] : [];
 
@@ -761,10 +770,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
   const handleCreateSession = useCallback(() => {
     if (currentServerId) {
-      selectSession(null, currentServerId);
-      setShowHistory(false);
+      if (currentTabId) {
+        void selectSession(null, undefined, currentTabId)
+      } else {
+        void selectSession(null, currentServerId)
+      }
+      setShowHistory(false)
     }
-  }, [currentServerId, selectSession]);
+  }, [currentServerId, currentTabId, selectSession])
 
   const appendPathToInput = useCallback((path: string, useReadFilePrefix: boolean) => {
     const token = `${useReadFilePrefix ? '#' : ''}${path}`
@@ -1120,7 +1133,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                    key={session.id}
                    className={`flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[var(--bg-elevated)] border border-transparent cursor-pointer transition-all duration-200 w-full text-left relative overflow-hidden hover:bg-[var(--bg-tertiary)] hover:border-[var(--glass-border)] ${activeSessionId === session.id ? 'bg-[var(--bg-tertiary)] border-[var(--accent-primary)] shadow-[0_2px_8px_rgba(0,0,0,0.1)]' : ''}`}
                    onClick={() => {
-                     selectSession(session.id, currentServerId);
+                     void selectSession(session.id, currentServerId, currentTabId);
                        setShowHistory(false);
                     }}
                   >

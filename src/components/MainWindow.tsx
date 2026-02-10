@@ -7,13 +7,19 @@ import { Config } from '../types';
 const SettingsModal = React.lazy(() => 
   import('./settings/SettingsModal').then(module => ({ default: module.SettingsModal }))
 );
+const AISidebar = React.lazy(() =>
+  import('./AISidebar').then(module => ({ default: module.AISidebar }))
+);
+const SFTPSidebar = React.lazy(() =>
+  import('./SFTPSidebar').then(module => ({ default: module.SFTPSidebar }))
+);
+const SnippetsSidebar = React.lazy(() =>
+  import('./SnippetsSidebar').then(module => ({ default: module.SnippetsSidebar }))
+);
 import { TerminalTab } from './TerminalTab';
 import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
-import { SnippetsSidebar } from './SnippetsSidebar';
-import { AISidebar } from './AISidebar';
-import { SFTPSidebar } from './SFTPSidebar';
 import { TabContextMenu } from './TabContextMenu';
 import { ServerContextMenu } from './ServerContextMenu';
 import { ToastContainer, ToastItem } from './Toast';
@@ -46,6 +52,9 @@ export const MainWindow: React.FC = () => {
   const [isSFTPOpen, setIsSFTPOpen] = useState(false);
   const [isAIOpen, setIsAIOpen] = useState(false);
   const [isSidebarsInitialized, setIsSidebarsInitialized] = useState(false);
+  const [hasLoadedSnippetsSidebar, setHasLoadedSnippetsSidebar] = useState(false);
+  const [hasLoadedSFTPSidebar, setHasLoadedSFTPSidebar] = useState(false);
+  const [hasLoadedAISidebar, setHasLoadedAISidebar] = useState(false);
 
   const initListener = useTransferStore(state => state.initListener);
 
@@ -62,9 +71,18 @@ export const MainWindow: React.FC = () => {
 
   useEffect(() => {
     if (config && !isSidebarsInitialized) {
-      if (config.general.sftpSidebarLocked) setIsSFTPOpen(true);
-      if (config.general.aiSidebarLocked) setIsAIOpen(true);
-      if (config.general.snippetsSidebarLocked) setIsSnippetsOpen(true);
+      if (config.general.sftpSidebarLocked) {
+        setHasLoadedSFTPSidebar(true);
+        setIsSFTPOpen(true);
+      }
+      if (config.general.aiSidebarLocked) {
+        setHasLoadedAISidebar(true);
+        setIsAIOpen(true);
+      }
+      if (config.general.snippetsSidebarLocked) {
+        setHasLoadedSnippetsSidebar(true);
+        setIsSnippetsOpen(true);
+      }
       setIsSidebarsInitialized(true);
     }
   }, [config, isSidebarsInitialized]);
@@ -379,6 +397,18 @@ export const MainWindow: React.FC = () => {
     import('./settings/SettingsModal');
   };
 
+  const prefetchSFTPSidebar = () => {
+    void import('./SFTPSidebar');
+  };
+
+  const prefetchAISidebar = () => {
+    void import('./AISidebar');
+  };
+
+  const prefetchSnippetsSidebar = () => {
+    void import('./SnippetsSidebar');
+  };
+
   const recentServers = config ? getRecentServers(config.general.recentServerIds, servers, config.general.maxRecentServers) : [];
 
   const globalSnippets = config?.snippets || [];
@@ -461,6 +491,7 @@ export const MainWindow: React.FC = () => {
             onMouseDown={(e) => {
               e.stopPropagation();
               if (!isSFTPOpen) {
+                setHasLoadedSFTPSidebar(true);
                 setIsSFTPOpen(true);
               } else if (config?.general.sftpSidebarLocked) {
                 handleToggleSFTPLock();
@@ -468,6 +499,8 @@ export const MainWindow: React.FC = () => {
                 setIsSFTPOpen(false);
               }
             }}
+            onMouseEnter={prefetchSFTPSidebar}
+            onFocus={prefetchSFTPSidebar}
             aria-label="SFTP"
             title="SFTP"
           >
@@ -479,6 +512,7 @@ export const MainWindow: React.FC = () => {
             onMouseDown={(e) => {
               e.stopPropagation();
               if (!isAIOpen) {
+                setHasLoadedAISidebar(true);
                 setIsAIOpen(true);
               } else if (config?.general.aiSidebarLocked) {
                 handleToggleAILock();
@@ -486,6 +520,8 @@ export const MainWindow: React.FC = () => {
                 setIsAIOpen(false);
               }
             }}
+            onMouseEnter={prefetchAISidebar}
+            onFocus={prefetchAISidebar}
             aria-label={t.mainWindow.aiAssistant}
             title={t.mainWindow.aiAssistant}
           >
@@ -497,6 +533,7 @@ export const MainWindow: React.FC = () => {
             onMouseDown={(e) => {
               e.stopPropagation();
               if (!isSnippetsOpen) {
+                setHasLoadedSnippetsSidebar(true);
                 setIsSnippetsOpen(true);
               } else if (config?.general.snippetsSidebarLocked) {
                 handleToggleSnippetsLock();
@@ -504,6 +541,8 @@ export const MainWindow: React.FC = () => {
                 setIsSnippetsOpen(false);
               }
             }}
+            onMouseEnter={prefetchSnippetsSidebar}
+            onFocus={prefetchSnippetsSidebar}
             aria-label={t.mainWindow.snippetsTooltip}
             title={t.mainWindow.snippetsTooltip}
           >
@@ -526,14 +565,18 @@ export const MainWindow: React.FC = () => {
 
       {/* Content Area */}
       <div className="flex-1 flex flex-col bg-[var(--bg-primary)] overflow-hidden relative min-h-0" style={{ position: 'relative', display: 'flex', flexDirection: 'row' }}>
-        <SFTPSidebar
-          isOpen={isSFTPOpen}
-          onClose={() => setIsSFTPOpen(false)}
-          isLocked={config?.general.sftpSidebarLocked || false}
-          onToggleLock={handleToggleSFTPLock}
-          sessionId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
-          zIndex={sftpZIndex}
-        />
+        <Suspense fallback={null}>
+          {hasLoadedSFTPSidebar && (
+            <SFTPSidebar
+              isOpen={isSFTPOpen}
+              onClose={() => setIsSFTPOpen(false)}
+              isLocked={config?.general.sftpSidebarLocked || false}
+              onToggleLock={handleToggleSFTPLock}
+              sessionId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
+              zIndex={sftpZIndex}
+            />
+          )}
+        </Suspense>
         <div className="flex-1 flex flex-col min-w-0 relative h-full">
         {tabs.length === 0 ? (
           <WelcomeScreen
@@ -574,24 +617,32 @@ export const MainWindow: React.FC = () => {
           })
         )}
         </div>
-        <AISidebar
-          isOpen={isAIOpen}
-          onClose={() => setIsAIOpen(false)}
-          isLocked={config?.general.aiSidebarLocked || false}
-          onToggleLock={handleToggleAILock}
-          currentServerId={activeServerId}
-          currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
-          zIndex={aiZIndex}
-        />
-        <SnippetsSidebar
-          isOpen={isSnippetsOpen}
-          onClose={() => setIsSnippetsOpen(false)}
-          snippets={displayedSnippets}
-          onOpenSettings={() => handleOpenSettings('snippets')}
-          isLocked={config?.general.snippetsSidebarLocked || false}
-          onToggleLock={handleToggleSnippetsLock}
-          zIndex={snippetsZIndex}
-        />
+        <Suspense fallback={null}>
+          {hasLoadedAISidebar && (
+            <AISidebar
+              isOpen={isAIOpen}
+              onClose={() => setIsAIOpen(false)}
+              isLocked={config?.general.aiSidebarLocked || false}
+              onToggleLock={handleToggleAILock}
+              currentServerId={activeServerId}
+              currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
+              zIndex={aiZIndex}
+            />
+          )}
+        </Suspense>
+        <Suspense fallback={null}>
+          {hasLoadedSnippetsSidebar && (
+            <SnippetsSidebar
+              isOpen={isSnippetsOpen}
+              onClose={() => setIsSnippetsOpen(false)}
+              snippets={displayedSnippets}
+              onOpenSettings={() => handleOpenSettings('snippets')}
+              isLocked={config?.general.snippetsSidebarLocked || false}
+              onToggleLock={handleToggleSnippetsLock}
+              zIndex={snippetsZIndex}
+            />
+          )}
+        </Suspense>
       </div>
 
       {/* Settings Modal */}
