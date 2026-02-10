@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Snippet } from '../types';
 import { X, Code, Play, ChevronRight, ChevronDown, Plus, Lock, LockOpen } from 'lucide-react';
 import { useTranslation } from '../i18n';
@@ -28,7 +28,7 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
   const sidebarRef = useRef<HTMLDivElement>(null);
   
   // Grouping logic
-  const groupedSnippets = useMemo(() => {
+  const groupedSnippets = (() => {
     const groups = snippets.reduce((acc, snippet) => {
       const groupName = snippet.group || t.snippetForm.defaultGroup;
       if (!acc[groupName]) {
@@ -43,16 +43,16 @@ export const SnippetsSidebar: React.FC<SnippetsSidebarProps> = ({
     });
 
     return groups;
-  }, [snippets, t.snippetForm.defaultGroup]);
+  })();
 
-  const groupNames = useMemo(() => {
+  const groupNames = (() => {
     const defaultGroup = t.snippetForm.defaultGroup;
     return Object.keys(groupedSnippets).sort((a, b) => {
       if (a === defaultGroup) return -1;
       if (b === defaultGroup) return 1;
       return a.localeCompare(b);
     });
-  }, [groupedSnippets, t.snippetForm.defaultGroup]);
+  })();
 
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 

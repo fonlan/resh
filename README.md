@@ -22,7 +22,8 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 ## Tech Stack
 
 **Frontend:**
-- React 18 with TypeScript
+- React 19 with TypeScript
+- React Compiler enabled in Vite build (babel-plugin-react-compiler)
 - xterm.js for terminal emulation
 - Vite for build tooling
 - Tailwind CSS v4 for styling

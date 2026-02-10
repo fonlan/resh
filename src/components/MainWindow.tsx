@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, Suspense, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, Suspense } from 'react';
 import { Settings, X, Code, Circle, MessageSquare, Folder } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -111,22 +111,16 @@ export const MainWindow: React.FC = () => {
   const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
   const proxies = config?.proxies || EMPTY_PROXIES
 
-  const serverById = useMemo(() => {
-    const map = new Map<string, Config['servers'][number]>()
-    servers.forEach(server => {
-      map.set(server.id, server)
-    })
-    return map
-  }, [servers])
+  const serverById = new Map<string, Config['servers'][number]>()
+  servers.forEach(server => {
+    serverById.set(server.id, server)
+  })
 
-  const activeTab = useMemo(
-    () => tabs.find(tab => tab.id === activeTabId) || null,
-    [tabs, activeTabId]
-  )
+  const activeTab = tabs.find(tab => tab.id === activeTabId) || null
 
   const activeServerId = activeTab?.serverId
 
-  const handleTabSessionChange = useCallback((tabId: string, sessionId: string | null) => {
+  const handleTabSessionChange = (tabId: string, sessionId: string | null) => {
     const normalizedSessionId = sessionId || ''
     setTabSessions(prev => {
       if (prev[tabId] === normalizedSessionId) {
@@ -138,7 +132,7 @@ export const MainWindow: React.FC = () => {
         [tabId]: normalizedSessionId,
       }
     })
-  }, [])
+  }
 
   useEffect(() => {
     if (servers.length === 0) return;
@@ -155,7 +149,7 @@ export const MainWindow: React.FC = () => {
       });
       return hasChanges ? newTabs : prevTabs;
     });
-  }, [servers.length, serverById]);
+  }, [servers.length, servers]);
 
   const {
     draggedIndex: draggedTabIndex,
@@ -166,7 +160,7 @@ export const MainWindow: React.FC = () => {
     handleDragEnd: handleTabDragEnd
   } = useTabDragDrop(tabs, setTabs);
 
-  const handleTabKeyDown = useCallback((e: React.KeyboardEvent, index: number) => {
+  const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
     if ((e.ctrlKey || e.metaKey)) {
         if (e.key === 'ArrowRight' && index < tabs.length - 1) {
             e.preventDefault();
@@ -180,7 +174,7 @@ export const MainWindow: React.FC = () => {
             setTabs(newTabs);
         }
     }
-  }, [tabs]);
+  };
 
   const handleCloseTab = useCallback((tabId: string) => {
     const newTabs = tabs.filter(t => t.id !== tabId);
@@ -242,10 +236,10 @@ export const MainWindow: React.FC = () => {
     setActiveTabId(tabId);
   }, [tabs]);
 
-  const handleExportLogs = useCallback((tabId: string) => {
+  const handleExportLogs = (tabId: string) => {
     const event = new CustomEvent(`export-terminal-logs:${tabId}`);
     window.dispatchEvent(event);
-  }, []);
+  };
 
   const handleStartRecording = useCallback(async (tabId: string) => {
     // Check if the tab corresponds to an active session
@@ -291,56 +285,56 @@ export const MainWindow: React.FC = () => {
     }
   }, [tabs, config]);
 
-  const handleStopRecording = useCallback((tabId: string) => {
+  const handleStopRecording = (tabId: string) => {
     window.dispatchEvent(new CustomEvent(`stop-recording:${tabId}`));
     setRecordingTabs(prev => {
       const next = new Set(prev);
       next.delete(tabId);
       return next;
     });
-  }, []);
+  };
 
-  const handleReconnect = useCallback((tabId: string) => {
+  const handleReconnect = (tabId: string) => {
     window.dispatchEvent(new CustomEvent(`reconnect:${tabId}`));
-  }, []);
+  };
 
-  const handleContextMenu = useCallback((e: React.MouseEvent, tabId: string) => {
+  const handleContextMenu = (e: React.MouseEvent, tabId: string) => {
     e.preventDefault();
     setContextMenu({
       x: e.clientX,
       y: e.clientY,
       tabId
     });
-  }, []);
+  };
 
-  const handleServerContextMenu = useCallback((e: React.MouseEvent, serverId: string) => {
+  const handleServerContextMenu = (e: React.MouseEvent, serverId: string) => {
     e.preventDefault();
     setServerContextMenu({
       x: e.clientX,
       y: e.clientY,
       serverId
     });
-  }, []);
+  };
 
-  const handleConnectServer = useCallback((serverId: string) => {
+  const handleConnectServer = (serverId: string) => {
     handleAddTab(serverId);
     setIsSettingsOpen(false);
     setEditServerId(null);
-  }, [handleAddTab]);
+  };
 
-  const handleOpenSettings = useCallback((tab: 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' = 'servers') => {
+  const handleOpenSettings = (tab: 'servers' | 'auth' | 'proxies' | 'snippets' | 'general' = 'servers') => {
     setSettingsInitialTab(tab);
     setIsSettingsOpen(true);
     if (tab !== 'servers') {
       setEditServerId(null);
     }
-  }, []);
+  };
 
-  const handleEditServerFromMenu = useCallback((serverId: string) => {
+  const handleEditServerFromMenu = (serverId: string) => {
     setEditServerId(serverId);
     handleOpenSettings('servers');
     setServerContextMenu(null);
-  }, [handleOpenSettings]);
+  };
 
   const handleToggleSnippetsLock = useCallback(async () => {
     if (!config) return;
@@ -381,18 +375,16 @@ export const MainWindow: React.FC = () => {
     await saveConfig(newConfig);
   }, [config, saveConfig]);
 
-  const prefetchSettings = useCallback(() => {
+  const prefetchSettings = () => {
     import('./settings/SettingsModal');
-  }, []);
+  };
 
   const recentServers = config ? getRecentServers(config.general.recentServerIds, servers, config.general.maxRecentServers) : [];
 
-  const displayedSnippets = useMemo(() => {
-    const globalSnippets = config?.snippets || [];
-    const activeServer = activeServerId ? serverById.get(activeServerId) || null : null
-    const serverSnippets = activeServer?.snippets || [];
-    return [...globalSnippets, ...serverSnippets];
-  }, [config?.snippets, activeServerId, serverById]);
+  const globalSnippets = config?.snippets || [];
+  const activeServer = activeServerId ? serverById.get(activeServerId) || null : null
+  const serverSnippets = activeServer?.snippets || [];
+  const displayedSnippets = [...globalSnippets, ...serverSnippets];
 
   // Calculate z-index for sidebars based on lock state and open order
   // Rule: unlocked sidebars always appear above locked ones

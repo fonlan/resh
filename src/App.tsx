@@ -9,9 +9,14 @@ function App() {
   useTheme(theme);
 
   return (
-    <div className="w-full h-screen flex flex-col">
-      <MainWindow />
-    </div>
+    <>
+      <title>Resh</title>
+      <meta name="application-name" content="Resh" />
+      <meta name="description" content="Resh SSH client with terminal, SFTP and AI copilot" />
+      <div className="w-full h-screen flex flex-col">
+        <MainWindow />
+      </div>
+    </>
   );
 }
 

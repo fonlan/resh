@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef, useRef } from 'react';
+import { Ref, useState, useImperativeHandle, useRef } from 'react';
 import { Authentication } from '../../types';
 import { validateRequired, validateUniqueName } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
@@ -8,6 +8,7 @@ interface AuthFormProps {
   auth?: Authentication;
   existingNames: string[];
   onSave: (auth: Authentication) => void;
+  ref?: Ref<AuthFormHandle>;
 }
 
 export interface AuthFormHandle {
@@ -16,8 +17,7 @@ export interface AuthFormHandle {
   setSynced: (synced: boolean) => void;
 }
 
-export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
-  ({ auth, existingNames, onSave }, ref) => {
+export const AuthForm = ({ auth, existingNames, onSave, ref }: AuthFormProps) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState<Authentication>(() => {
     if (auth) {
@@ -239,4 +239,4 @@ export const AuthForm = forwardRef<AuthFormHandle, AuthFormProps>(
       )}
     </div>
   );
-});
+};

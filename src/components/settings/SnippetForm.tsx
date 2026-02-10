@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef, useRef, useEffect, useMemo, useCallback } from 'react';
+import { Ref, useState, useImperativeHandle, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Snippet } from '../../types';
 import { validateRequired } from '../../utils/validation';
 import { useTranslation } from '../../i18n';
@@ -8,6 +8,7 @@ interface SnippetFormProps {
   snippet?: Snippet;
   existingGroups: string[];
   onSave: (snippet: Snippet) => void;
+  ref?: Ref<SnippetFormHandle>;
 }
 
 export interface SnippetFormHandle {
@@ -16,8 +17,7 @@ export interface SnippetFormHandle {
   setSynced: (synced: boolean) => void;
 }
 
-export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
-  ({ snippet, existingGroups, onSave }, ref) => {
+export const SnippetForm = ({ snippet, existingGroups, onSave, ref }: SnippetFormProps) => {
   const { t } = useTranslation();
   const [formData, setFormData] = useState<Snippet>(() => {
     if (snippet) {
@@ -204,4 +204,4 @@ export const SnippetForm = forwardRef<SnippetFormHandle, SnippetFormProps>(
        </div>
      </div>
    );
-});
+};

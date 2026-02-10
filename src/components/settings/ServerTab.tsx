@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Power } from 'lucide-react';
 import { Server, Authentication, ProxyConfig as ProxyType, Snippet } from '../../types';
 import { FormModal } from '../FormModal';
@@ -40,11 +40,11 @@ export const ServerTab: React.FC<ServerTabProps> = ({
     setIsFormOpen(true);
   };
 
-  const handleEditServer = useCallback((server: Server) => {
+  const handleEditServer = (server: Server) => {
     setEditingServer(server);
     setIsSynced(server.synced !== undefined ? server.synced : true);
     setIsFormOpen(true);
-  }, []);
+  };
 
   const handleDeleteServer = (serverId: string) => {
     const usingServers = servers.filter((s) => s.jumphostId === serverId);
@@ -93,7 +93,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         lastProcessedEditServerId.current = editServerId;
       }
     }
-  }, [editServerId, servers, handleEditServer]);
+  }, [editServerId, servers]);
 
   useEffect(() => {
     if (isFormOpen && formRef.current) {

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useCallback, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, use, useCallback, useEffect, useState, ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Config } from '../types';
@@ -103,7 +103,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 };
 
 export const useConfig = () => {
-  const context = useContext(ConfigContext);
+  const context = use(ConfigContext);
   if (context === undefined) {
     throw new Error('useConfig must be used within a ConfigProvider');
   }

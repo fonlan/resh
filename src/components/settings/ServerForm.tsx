@@ -1,4 +1,4 @@
-import { useState, useImperativeHandle, forwardRef } from 'react';
+import { Ref, useState, useImperativeHandle } from 'react';
 import { Settings, Network, Terminal, Code, Bot } from 'lucide-react';
 import { Server, Authentication, ProxyConfig, PortForward } from '../../types';
 import { validateRequired, validateUniqueName, validatePort } from '../../utils/validation';
@@ -14,6 +14,7 @@ interface ServerFormProps {
   availableServers: Server[]; // For jumphost selection
   globalSnippetGroups?: string[];
   onSave: (server: Server) => void;
+  ref?: Ref<ServerFormHandle>;
 }
 
 export interface ServerFormHandle {
@@ -24,7 +25,7 @@ export interface ServerFormHandle {
 
 type TabId = 'general' | 'routing' | 'advanced' | 'snippets' | 'ai';
 
-export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
+export const ServerForm = ({ 
   server,
   existingNames,
   availableAuths,
@@ -32,7 +33,8 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
   availableServers,
   globalSnippetGroups = [],
   onSave,
-}, ref) => {
+  ref
+}: ServerFormProps) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [formData, setFormData] = useState<Server>(() => {
@@ -579,4 +581,4 @@ export const ServerForm = forwardRef<ServerFormHandle, ServerFormProps>(({
       </div>
     </div>
   );
-});
+};

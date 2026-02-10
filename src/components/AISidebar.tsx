@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useOptimistic } from 'react';
 import { useAIStore } from '../stores/useAIStore';
 import { useConfig } from '../hooks/useConfig';
 import { aiService } from '../services/aiService';
@@ -30,15 +30,20 @@ interface AISidebarProps {
   zIndex?: number;
 }
 
+interface OptimisticMessageInput {
+  sessionId: string;
+  message: ChatMessage;
+}
+
 const CodeBlock = ({ children, className }: { children: React.ReactNode, className?: string }) => {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   
-  const codeContent = useMemo(() => {
+  const codeContent = (() => {
     if (typeof children === 'string') return children;
     if (Array.isArray(children)) return children.join('');
     return String(children);
-  }, [children]).replace(/\n$/, '');
+  })().replace(/\n$/, '');
 
   const language = className ? className.replace('language-', '') : 'text';
 
@@ -220,7 +225,7 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
   const reasoningContentRef = useRef<HTMLDivElement>(null);
   const prevReasoningLength = useRef(msg.reasoning_content?.length || 0);
 
-  const timeString = useMemo(() => {
+  const timeString = (() => {
     if (!msg.created_at) return '';
     try {
       // SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS"
@@ -237,13 +242,13 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
     } catch {
       return '';
     }
-  }, [msg.created_at]);
+  })();
 
-  const modelName = useMemo(() => {
+  const modelName = (() => {
     if (msg.role !== 'assistant' || !msg.model_id || !config?.aiModels) return null;
     const model = config.aiModels.find(m => m.id === msg.model_id);
     return model ? model.name : msg.model_id;
-  }, [msg.model_id, msg.role, config?.aiModels]);
+  })();
 
   useEffect(() => {
     if (showReasoning && reasoningContentRef.current) {
@@ -271,18 +276,16 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
     }
   };
 
-  const visibleToolCalls = useMemo(() => {
+  const visibleToolCalls = (() => {
     if (!msg.tool_calls || isPending) return [];
     return msg.tool_calls.filter(call =>
       call.function.name !== 'get_terminal_output' &&
       call.function.name !== 'get_selected_terminal_output' &&
       call.function.name !== 'read_file'
     )
-  }, [msg.tool_calls, isPending]);
+  })();
 
-  const hasContentToCopy = useMemo(() => {
-    return msg.content && msg.content.trim().length > 0;
-  }, [msg.content]);
+  const hasContentToCopy = !!(msg.content && msg.content.trim().length > 0)
 
   return (
     <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -424,12 +427,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
   const [isClearingHistory, setIsClearingHistory] = useState(false);
 
+  const [optimisticMessagesBySession, addOptimisticMessage] = useOptimistic(
+    messages,
+    (currentMessagesBySession, payload: OptimisticMessageInput) => {
+      const currentSessionMessages = currentMessagesBySession[payload.sessionId] || [];
+      return {
+        ...currentMessagesBySession,
+        [payload.sessionId]: [...currentSessionMessages, payload.message]
+      };
+    }
+  );
+
   const isLoading = activeSessionId ? isGenerating[activeSessionId] || false : false;
   const pendingToolCalls = activeSessionId ? pendingToolCallsMap[activeSessionId] || null : null;
-  const currentSession = useMemo(() => 
-    sessions.find(s => s.id === activeSessionId),
-    [sessions, activeSessionId]
-  );
+  const currentSession = sessions.find(s => s.id === activeSessionId);
   const boundSshSessionId = currentSession?.sshSessionId || currentTabId;
 
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -473,10 +484,28 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [currentServerId, isOpen, loadSessions, selectSession, activeSessionId, activeSessionIdByServer]);
 
-  const currentMessages = useMemo(() => 
-    activeSessionId ? messages[activeSessionId] || [] : [], 
-    [activeSessionId, messages]
-  );
+  // Keep active AI session isolated to the current SSH tab/session
+  useEffect(() => {
+    if (!isOpen || !currentServerId) {
+      return;
+    }
+
+    if (!activeSessionId) {
+      return;
+    }
+
+    const activeSession = sessions.find(session => session.id === activeSessionId);
+    if (!activeSession?.sshSessionId) {
+      return;
+    }
+
+    const currentSshSessionId = currentTabId || null;
+    if (!currentSshSessionId || activeSession.sshSessionId !== currentSshSessionId) {
+      selectSession(null, currentServerId);
+    }
+  }, [isOpen, currentServerId, currentTabId, activeSessionId, sessions, selectSession]);
+
+  const currentMessages = activeSessionId ? optimisticMessagesBySession[activeSessionId] || [] : [];
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     if (messagesContainerRef.current) {
@@ -497,7 +526,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, []);
 
-  const lastMessageContentLength = useMemo(() => {
+  const lastMessageContentLength = (() => {
     const lastMsg = currentMessages[currentMessages.length - 1];
     if (lastMsg?.role === 'assistant') {
       const contentLength = (lastMsg.content?.length || 0) + (lastMsg.reasoning_content?.length || 0);
@@ -506,7 +535,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       return contentLength + toolCallsCount;
     }
     return 0;
-  }, [currentMessages]);
+  })();
 
   useEffect(() => {
     const shouldScroll = isAtBottomRef.current || isLoading;
@@ -824,8 +853,18 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       textareaRef.current.focus();
     }
 
-    // Optimistic update
-    addMessage(sessionId, { role: 'user', content, created_at: new Date().toISOString() });
+    const optimisticUserMessage: ChatMessage = {
+      role: 'user',
+      content,
+      created_at: new Date().toISOString()
+    }
+
+    addOptimisticMessage({
+      sessionId,
+      message: optimisticUserMessage
+    })
+
+    addMessage(sessionId, optimisticUserMessage);
     setGenerating(sessionId, true);
 
     try {
