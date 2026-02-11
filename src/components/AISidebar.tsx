@@ -290,7 +290,7 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
   return (
     <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       <div className={`relative max-w-[90%] flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-        <div className={`p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto ${msg.role === 'user' ? 'bg-[var(--accent-primary)] text-white rounded-tr-sm' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm'}`}>
+        <div className={`p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto ${msg.role === 'user' ? 'ai-user-message-bubble bg-[var(--accent-primary)] text-white rounded-tr-sm selection:bg-white/55' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm'}`}>
           {msg.reasoning_content && (
             <div className="w-full mb-2">
               <button
@@ -756,6 +756,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (isResizing) {
       window.addEventListener('mousemove', resize);
       window.addEventListener('mouseup', stopResizing);
+      window.addEventListener('pointerup', stopResizing);
+      window.addEventListener('blur', stopResizing);
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     }
@@ -763,6 +765,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     return () => {
       window.removeEventListener('mousemove', resize);
       window.removeEventListener('mouseup', stopResizing);
+      window.removeEventListener('pointerup', stopResizing);
+      window.removeEventListener('blur', stopResizing);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };

@@ -254,6 +254,26 @@ html, body {
   color: var(--text-primary);
 }
 
+.ai-user-message-bubble,
+.ai-user-message-bubble * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.ai-user-message-bubble::selection,
+.ai-user-message-bubble *::selection {
+  background: rgba(255, 255, 255, 0.6);
+  color: #0f172a;
+  text-shadow: none;
+}
+
+.ai-user-message-bubble::-moz-selection,
+.ai-user-message-bubble *::-moz-selection {
+  background: rgba(255, 255, 255, 0.6);
+  color: #0f172a;
+  text-shadow: none;
+}
+
 /* Custom Checkbox & Radiobox Styling */
 input[type="checkbox"],
 .checkbox {
@@ -837,4 +857,3 @@ input[type="radio"]:disabled {
 .server-form-container {
   gap: 0;
 }
-
