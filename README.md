@@ -10,6 +10,7 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 - **Proxy & Jumphost Support** - Connect through HTTP/SOCKS5 proxies or SSH jumphosts
 - **Port Forwarding** - Easy local-to-remote port forwarding configuration per connection
 - **Frameless UI** - Modern frameless window with embedded controls and custom drag regions
+- **Single-Instance Mode** - Re-launching the app focuses the existing main window instead of opening another process
 - **Cross-Machine Sync** - WebDAV-based configuration sync with conflict resolution
 
 ### Advanced Features
