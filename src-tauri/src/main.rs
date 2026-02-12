@@ -12,6 +12,7 @@ use resh::sftp_manager::edit::SftpEditManager;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::image::Image;
+use tauri::Listener;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
@@ -138,8 +139,27 @@ async fn main() {
                 if ws.is_maximized {
                     let _ = window.maximize();
                 }
-                let _ = window.show();
             }
+
+            // Show window only after frontend reports ready to reduce white-screen time
+            let app_handle = app.handle().clone();
+            app.listen("resh-app-ready", move |_event| {
+                if let Some(window) = app_handle.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            });
+
+            // Fallback: ensure window is shown even if ready event is missed
+            let app_handle_for_fallback = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                if let Some(window) = app_handle_for_fallback.get_webview_window("main") {
+                    if !window.is_visible().unwrap_or(false) {
+                        let _ = window.show();
+                    }
+                }
+            });
 
             app.manage(state.clone());
 

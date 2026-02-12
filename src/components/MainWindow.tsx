@@ -16,7 +16,9 @@ const SFTPSidebar = React.lazy(() =>
 const SnippetsSidebar = React.lazy(() =>
   import('./SnippetsSidebar').then(module => ({ default: module.SnippetsSidebar }))
 );
-import { TerminalTab } from './TerminalTab';
+const TerminalTab = React.lazy(() =>
+  import('./TerminalTab').then(module => ({ default: module.TerminalTab }))
+)
 import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
@@ -599,19 +601,21 @@ export const MainWindow: React.FC = () => {
                   minHeight: 0,
                 }}
               >
-                <TerminalTab
-                  tabId={tab.id}
-                  serverId={tab.serverId}
-                  isActive={activeTabId === tab.id}
-                  onClose={handleCloseTab}
-                  server={server}
-                  servers={servers}
-                  authentications={authentications}
-                  proxies={proxies}
-                  terminalSettings={config?.general.terminal}
-                  theme={config?.general.theme}
-                  onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
-                />
+                <Suspense fallback={<div className="flex-1 bg-[var(--bg-primary)]" />}>
+                  <TerminalTab
+                    tabId={tab.id}
+                    serverId={tab.serverId}
+                    isActive={activeTabId === tab.id}
+                    onClose={handleCloseTab}
+                    server={server}
+                    servers={servers}
+                    authentications={authentications}
+                    proxies={proxies}
+                    terminalSettings={config?.general.terminal}
+                    theme={config?.general.theme}
+                    onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
+                  />
+                </Suspense>
               </div>
             );
           })

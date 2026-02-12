@@ -110,6 +110,12 @@ npm run tauri            # Direct access to Tauri CLI
 2. Frontend changes auto-reload via Vite
 3. Rust changes require restart (Cargo rebuilds automatically)
 
+### Startup Performance
+
+- Startup rendering uses a lightweight boot splash to avoid a white blank screen while the React app hydrates.
+- The main window is shown after frontend readiness signal, reducing visible white-screen time on cold launch.
+- Heavy UI modules (main workspace and terminal tab) are lazy-loaded to reduce initial bundle work.
+
 ### Adding New Features
 
 **Frontend:**
