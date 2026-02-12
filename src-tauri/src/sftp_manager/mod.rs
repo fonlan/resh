@@ -731,6 +731,7 @@ impl SftpManager {
                             let handle = sftp.open(&remote_path, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
                             let mut local_file = tokio::fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
                             let mut transferred = 0u64;
+                            let start_time = Instant::now();
                             let mut last_emit = Instant::now();
                             
                             let _ = app.emit("transfer-progress", TransferProgress {
@@ -750,6 +751,9 @@ impl SftpManager {
 
                             loop {
                                 if cancel_token.load(Ordering::SeqCst) {
+                                    let duration = start_time.elapsed().as_secs_f64();
+                                    let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
+
                                     let _ = sftp.close(handle).await;
                                     let _ = sftp.close(dir_handle).await;
                                     let _ = app.emit("transfer-progress", TransferProgress {
@@ -761,7 +765,7 @@ impl SftpManager {
                                         destination: local_path.clone(),
                                         total_bytes,
                                         transferred_bytes: transferred,
-                                        speed: 0.0,
+                                        speed,
                                         eta: None,
                                         status: "cancelled".to_string(),
                                         error: None,
@@ -775,6 +779,14 @@ impl SftpManager {
                                         transferred += data.data.len() as u64;
                                         
                                         if last_emit.elapsed().as_millis() > 500 {
+                                            let duration = start_time.elapsed().as_secs_f64();
+                                            let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
+                                            let eta = if speed > 0.0 {
+                                                Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
+                                            } else {
+                                                None
+                                            };
+
                                             let _ = app.emit("transfer-progress", TransferProgress {
                                                 task_id: task_id.to_string(),
                                                 type_: "download".to_string(),
@@ -784,8 +796,8 @@ impl SftpManager {
                                                 destination: local_path.clone(),
                                                 total_bytes,
                                                 transferred_bytes: transferred,
-                                                speed: 0.0,
-                                                eta: None,
+                                                speed,
+                                                eta,
                                                 status: "transferring".to_string(),
                                                 error: None,
                                             });
@@ -794,6 +806,9 @@ impl SftpManager {
                                     }
                                     Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => break,
                                     Err(e) => {
+                                        let duration = start_time.elapsed().as_secs_f64();
+                                        let speed = if duration > 0.0 { transferred as f64 / duration } else { 0.0 };
+
                                         let _ = app.emit("transfer-progress", TransferProgress {
                                             task_id: task_id.to_string(),
                                             type_: "download".to_string(),
@@ -803,7 +818,7 @@ impl SftpManager {
                                             destination: local_path.clone(),
                                             total_bytes,
                                             transferred_bytes: transferred,
-                                            speed: 0.0,
+                                            speed,
                                             eta: None,
                                             status: "failed".to_string(),
                                             error: Some(e.to_string()),
@@ -812,6 +827,10 @@ impl SftpManager {
                                     }
                                 }
                             }
+
+                            let duration = start_time.elapsed().as_secs_f64();
+                            let speed = if duration > 0.0 { total_bytes as f64 / duration } else { 0.0 };
+
                             let _ = app.emit("transfer-progress", TransferProgress {
                                 task_id: task_id.to_string(),
                                 type_: "download".to_string(),
@@ -821,7 +840,7 @@ impl SftpManager {
                                 destination: local_path.clone(),
                                 total_bytes,
                                 transferred_bytes: total_bytes,
-                                speed: 0.0,
+                                speed,
                                 eta: None,
                                 status: "completed".to_string(),
                                 error: None,
