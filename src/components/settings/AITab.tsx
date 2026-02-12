@@ -514,6 +514,18 @@ id="ai-timeout"
           </div>
         }
       >
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            type="checkbox"
+            id="channel-active"
+            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            checked={channelFormData.isActive ?? true}
+            onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
+            disabled={channelFormData.type === 'copilot' && !channelFormData.apiKey}
+          />
+          <label htmlFor="channel-active" className="text-sm cursor-pointer">{t.ai.channelForm.active}</label>
+        </div>
+
         <div className="flex flex-col gap-1.5 mb-4">
           <label htmlFor="channel-name" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.name}</label>
           <input
@@ -645,18 +657,6 @@ disabled={isAuthLoading}
             </div>
           </>
         )}
-
-        <div className="flex flex-col gap-1.5 mb-4 flex items-center gap-2 mt-4">
-          <input
-            type="checkbox"
-            id="channel-active"
-            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
-            checked={channelFormData.isActive ?? true}
-            onChange={(e) => setChannelFormData({ ...channelFormData, isActive: e.target.checked })}
-            disabled={channelFormData.type === 'copilot' && !channelFormData.apiKey}
-          />
-          <label htmlFor="channel-active" className="text-sm cursor-pointer">{t.ai.channelForm.active}</label>
-        </div>
 
         <div className="flex flex-col gap-1.5 mb-4 mt-4 pt-4 border-t border-zinc-700/50">
           <label htmlFor="channel-proxy" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.common.proxy}</label>
