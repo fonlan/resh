@@ -71,7 +71,7 @@ const FileTreeItem: React.FC<{
       <button
         type="button"
         draggable
-        className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent w-full text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? 'opacity-50' : ''}`}
+        className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent min-w-full w-max text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? 'opacity-50' : ''}`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         onDragStart={(e) => onDragStart(e, entry)}
@@ -105,7 +105,7 @@ const FileTreeItem: React.FC<{
           <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
 
-        <span className={`truncate ml-0.25 flex-1 ${isInClipboard ? 'line-through opacity-60' : ''}`}>
+        <span className={`ml-0.25 flex-1 whitespace-nowrap ${isInClipboard ? 'line-through opacity-60' : ''}`}>
           {entry.name}
           {entry.link_target && (
             <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
@@ -1141,7 +1141,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
          </div>
        </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden py-0 px-2">
+      <div className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2">
           {rootFiles.map(entry => (
               <FileTreeItem
                 key={entry.path}
