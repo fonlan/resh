@@ -16,20 +16,16 @@ const AppBootFallback = ({ message }: { message: string }) => (
   </div>
 )
 
-const AppReadySignal = () => {
-  useEffect(() => {
-    window.dispatchEvent(new Event('resh-app-ready'))
-    void emit('resh-app-ready').catch(() => {})
-  }, [])
-
-  return null
-}
-
 function App() {
   const { config, loading } = useConfig()
   const theme = config?.general.theme
 
   useTheme(theme)
+
+  useEffect(() => {
+    window.dispatchEvent(new Event('resh-app-ready'))
+    void emit('resh-app-ready').catch(() => {})
+  }, [])
 
   if (loading) {
     return <AppBootFallback message="Loading workspace..." />
@@ -37,7 +33,6 @@ function App() {
 
   return (
     <Suspense fallback={<AppBootFallback message="Loading interface..." />}>
-      <AppReadySignal />
       <div className="w-full h-screen flex flex-col">
         <MainWindow />
       </div>

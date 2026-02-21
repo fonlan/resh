@@ -114,7 +114,8 @@ npm run tauri            # Direct access to Tauri CLI
 ### Startup Performance
 
 - Startup rendering uses a lightweight boot splash to avoid a white blank screen while the React app hydrates.
-- The main window is shown after frontend readiness signal, reducing visible white-screen time on cold launch.
+- The frontend now emits the readiness signal as soon as the React shell mounts, so boot splash handoff happens earlier even when config/UI modules are still loading.
+- The main window is shown after the frontend readiness signal, reducing visible white-screen time on cold launch.
 - Heavy UI modules (main workspace and terminal tab) are lazy-loaded to reduce initial bundle work.
 
 ### Adding New Features
