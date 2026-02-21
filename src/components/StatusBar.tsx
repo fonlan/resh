@@ -5,11 +5,12 @@ interface StatusBarProps {
   leftText: string;
   rightText: string;
   rightCopyText?: string;
+  onRightCopySuccess?: () => void;
   theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   connected: boolean;
 }
 
-export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, rightCopyText, theme, connected }) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, rightCopyText, onRightCopySuccess, theme, connected }) => {
   // Determine colors based on theme
   const isDark = theme === 'dark' || theme === 'orange' || theme === 'green' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   
@@ -43,9 +44,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, right
         onClick={() => {
           const copyText = rightCopyText || rightText;
           if (copyText) {
-            navigator.clipboard.writeText(copyText).catch(() => {
-              // Failed to copy
-            });
+            navigator.clipboard.writeText(copyText)
+              .then(() => onRightCopySuccess?.())
+              .catch(() => {
+                // Failed to copy
+              });
           }
         }}
       >

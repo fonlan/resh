@@ -90,6 +90,10 @@ export const MainWindow: React.FC = () => {
   }, [config, isSidebarsInitialized]);
 
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const showToast = useCallback((message: string, type: ToastItem['type'] = 'info', duration?: number) => {
+    const id = generateId();
+    setToasts(prev => [...prev, { id, type, message, duration }]);
+  }, []);
 
   // Listen for sync failed events
   useEffect(() => {
@@ -97,8 +101,7 @@ export const MainWindow: React.FC = () => {
 
     const syncFailedListener = listen<string>('sync-failed', (event) => {
       if (isMounted) {
-        const id = generateId();
-        setToasts(prev => [...prev, { id, type: 'error', message: `同步失败: ${event.payload}` }]);
+        showToast(`同步失败: ${event.payload}`, 'error');
       }
     });
 
@@ -106,7 +109,7 @@ export const MainWindow: React.FC = () => {
       isMounted = false;
       syncFailedListener.then(unlisten => unlisten());
     };
-  }, []);
+  }, [showToast]);
 
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
@@ -616,6 +619,7 @@ export const MainWindow: React.FC = () => {
                     terminalSettings={config?.general.terminal}
                     theme={config?.general.theme}
                     onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
+                    onShowToast={showToast}
                   />
                 </Suspense>
               </div>

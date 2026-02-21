@@ -26,6 +26,7 @@ interface TerminalTabProps {
   terminalSettings?: TerminalSettings;
   theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   onSessionChange?: (sessionId: string | null) => void;
+  onShowToast?: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
 }
 
 export const TerminalTab = React.memo<TerminalTabProps>(({
@@ -39,6 +40,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   terminalSettings,
   theme,
   onSessionChange,
+  onShowToast,
 }) => {
   const { t } = useTranslation();
   const { config, saveConfig } = useConfig(); // Use config
@@ -642,6 +644,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
         leftText={statusText}
         rightText={server.username ? `${server.username}@${server.host}` : server.host}
         rightCopyText={server.host}
+        onRightCopySuccess={() => onShowToast?.(t.terminalTab.hostCopied, 'success')}
         theme={theme}
         connected={isConnected}
       />

@@ -225,6 +225,7 @@ export const locales = {
       connected: 'Connected! Session ID: {id}',
       connectionClosed: 'Connection closed.',
       error: 'Error: {error}',
+      hostCopied: 'Host copied to clipboard',
     },
     newTabButton: {
       connectTo: 'Connect to Server',
@@ -613,6 +614,7 @@ export const locales = {
       connected: '连接成功！会话 ID: {id}',
       connectionClosed: '连接已断开。',
       error: '错误: {error}',
+      hostCopied: '主机地址已复制到剪贴板',
     },
     newTabButton: {
       connectTo: '连接到服务器',
