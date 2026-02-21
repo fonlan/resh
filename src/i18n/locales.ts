@@ -226,6 +226,9 @@ export const locales = {
       connectionClosed: 'Connection closed.',
       error: 'Error: {error}',
       hostCopied: 'Host copied to clipboard',
+      contextMenuCopied: 'Copied to clipboard',
+      contextMenuCopy: 'Copy',
+      contextMenuPaste: 'Paste',
     },
     newTabButton: {
       connectTo: 'Connect to Server',
@@ -615,6 +618,9 @@ export const locales = {
       connectionClosed: '连接已断开。',
       error: '错误: {error}',
       hostCopied: '主机地址已复制到剪贴板',
+      contextMenuCopied: '已复制到剪贴板',
+      contextMenuCopy: '复制',
+      contextMenuPaste: '粘贴',
     },
     newTabButton: {
       connectTo: '连接到服务器',

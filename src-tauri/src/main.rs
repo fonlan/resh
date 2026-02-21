@@ -80,6 +80,7 @@ async fn main() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Set window icon
             if let Some(window) = app.get_webview_window("main") {

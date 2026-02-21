@@ -51,6 +51,7 @@ genai = "0.5.3"
 copilot-client = "0.1"
 notify = "6.1.1"
 open = "3.2.0"
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [features]
 default = ["custom-protocol"]

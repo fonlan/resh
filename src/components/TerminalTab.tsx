@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { readText, writeText } from '@tauri-apps/plugin-clipboard-manager';
 import { useTerminal } from '../hooks/useTerminal';
 import { useConfig } from '../hooks/useConfig'; // Import useConfig
 import { Server, Authentication, ProxyConfig, TerminalSettings, ManualAuthCredentials } from '../types';
@@ -27,6 +28,12 @@ interface TerminalTabProps {
   theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   onSessionChange?: (sessionId: string | null) => void;
   onShowToast?: (message: string, type?: 'success' | 'error' | 'info' | 'warning') => void;
+}
+
+interface TerminalContextMenuState {
+  x: number;
+  y: number;
+  canCopy: boolean;
 }
 
 export const TerminalTab = React.memo<TerminalTabProps>(({
@@ -63,6 +70,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   // Status Bar State
   const [statusText, setStatusText] = useState<string>('');
   const [isDragOverTerminal, setIsDragOverTerminal] = useState(false);
+  const [terminalContextMenu, setTerminalContextMenu] = useState<TerminalContextMenuState | null>(null);
+  const terminalContextMenuRef = useRef<HTMLDivElement | null>(null);
   const inputBufferRef = useRef<string>('');
   const isInputModeRef = useRef<boolean>(false);
   const sessionIdRef = useRef<string | null>(null);
@@ -477,6 +486,43 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     if (isActive && isReady) focus();
   }, [isActive, isReady, focus]);
 
+  useEffect(() => {
+    if (!isActive) {
+      setTerminalContextMenu(null);
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!terminalContextMenu) return;
+
+    const closeContextMenu = () => {
+      setTerminalContextMenu(null);
+    };
+
+    const handleMouseDown = (event: MouseEvent) => {
+      if (terminalContextMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      closeContextMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setTerminalContextMenu(null);
+      }
+    };
+
+    window.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('blur', closeContextMenu);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('blur', closeContextMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [terminalContextMenu]);
+
   // Listen for snippet paste event
   useEffect(() => {
     if (!isActive) return;
@@ -533,6 +579,55 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     window.dispatchEvent(new CustomEvent('paste-snippet', { detail: quotePathForTerminalInput(sftpPath) }));
     focus();
   }, [isActive, focus]);
+
+  const handleTerminalContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const menuWidth = 128;
+    const menuHeight = 76;
+    const edgePadding = 8;
+    const maxX = Math.max(edgePadding, window.innerWidth - menuWidth - edgePadding);
+    const maxY = Math.max(edgePadding, window.innerHeight - menuHeight - edgePadding);
+    const selection = terminal?.getSelection() || '';
+
+    setTerminalContextMenu({
+      x: Math.min(e.clientX, maxX),
+      y: Math.min(e.clientY, maxY),
+      canCopy: selection.length > 0,
+    });
+  }, [terminal]);
+
+  const handleTerminalContextCopy = useCallback(() => {
+    const selection = terminal?.getSelection() || '';
+    if (!selection) {
+      setTerminalContextMenu(null);
+      return;
+    }
+
+    writeText(selection)
+      .then(() => onShowToast?.(t.terminalTab.contextMenuCopied, 'success'))
+      .catch(() => {
+        // Failed to copy terminal selection
+      })
+      .finally(() => {
+        setTerminalContextMenu(null);
+      });
+  }, [terminal, onShowToast, t.terminalTab.contextMenuCopied]);
+
+  const handleTerminalContextPaste = useCallback(async () => {
+    try {
+      const clipboardText = await readText();
+      if (clipboardText) {
+        window.dispatchEvent(new CustomEvent('paste-snippet', { detail: clipboardText }));
+      }
+    } catch {
+      // Failed to read clipboard
+    } finally {
+      setTerminalContextMenu(null);
+      focus();
+    }
+  }, [focus]);
 
   useEffect(() => {
     return () => {
@@ -657,6 +752,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           onDragOver={handleTerminalDragOver}
           onDragLeave={handleTerminalDragLeave}
           onDrop={handleTerminalDrop}
+          onContextMenu={handleTerminalContextMenu}
           style={{
             display: isActive ? 'block' : 'none',
             width: '100%',
@@ -664,6 +760,31 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
             overflow: 'hidden',
           }}
         />
+
+        {terminalContextMenu && isActive && (
+          <div
+            ref={terminalContextMenuRef}
+            className="fixed min-w-[120px] py-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-md shadow-lg z-[200]"
+            style={{ left: terminalContextMenu.x, top: terminalContextMenu.y }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <button
+              type="button"
+              onClick={handleTerminalContextCopy}
+              disabled={!terminalContextMenu.canCopy}
+              className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] disabled:cursor-not-allowed"
+            >
+              {t.terminalTab.contextMenuCopy}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleTerminalContextPaste()}
+              className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)]"
+            >
+              {t.terminalTab.contextMenuPaste}
+            </button>
+          </div>
+        )}
         
         {showManualAuth && isActive && (
           <ManualAuthModal
