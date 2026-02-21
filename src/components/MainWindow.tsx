@@ -434,9 +434,9 @@ export const MainWindow: React.FC = () => {
         }
       `}</style>
       {/* Title Bar with drag region */}
-      <div className="flex bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
+      <div className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
         {/* Tab Bar */}
-        <div className="flex flex-none min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar" role="tablist">
+        <div className="flex flex-1 min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar" role="tablist">
           {tabs.map((tab, index) => (
             <div
               key={tab.id}
@@ -486,7 +486,7 @@ export const MainWindow: React.FC = () => {
         <div className="flex-1 min-w-[40px]" data-tauri-drag-region></div>
 
         {/* Right side: Settings button + Window controls */}
-        <div className="flex items-center">
+        <div className="flex items-center shrink-0">
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? 'bg-[var(--bg-tertiary)] text-[var(--accent-primary)]' : 'bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]'}`}
