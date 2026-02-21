@@ -715,6 +715,17 @@ disabled={isAuthLoading}
           </div>
         }
       >
+        <div className="flex items-center gap-2 mb-4">
+          <input
+            type="checkbox"
+            id="model-active"
+            className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            checked={modelFormData.enabled ?? true}
+            onChange={(e) => setModelFormData({ ...modelFormData, enabled: e.target.checked })}
+          />
+          <label htmlFor="model-active" className="text-sm cursor-pointer">{t.ai.modelForm.active}</label>
+        </div>
+
           <div className="flex flex-col gap-1.5 mb-4 relative">
             <label htmlFor="model-name" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.modelForm.name}</label>
              <div className="relative">
@@ -722,7 +733,7 @@ disabled={isAuthLoading}
                  id="model-name"
                  ref={inputRef}
                  type="text"
-                 className="w-full px-3 py-2 pr-8 text-sm text-zinc-100 bg-zinc-900 border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] placeholder:text-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-zinc-800"
+                 className="w-full px-3 py-2 pr-8 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
                   value={modelFormData.name || ''}
                  onChange={(e) => setModelFormData({ ...modelFormData, name: e.target.value })}
                  placeholder={t.ai.modelForm.namePlaceholder}
@@ -789,16 +800,6 @@ disabled={isAuthLoading}
           />
         </div>
 
-         <div className="flex flex-col gap-1.5 mb-4 flex items-center gap-2 mt-4">
-           <input
-             type="checkbox"
-             id="model-active"
-             className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-zinc-900 cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 hover:bg-zinc-800 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
-             checked={modelFormData.enabled ?? true}
-             onChange={(e) => setModelFormData({ ...modelFormData, enabled: e.target.checked })}
-           />
-           <label htmlFor="model-active" className="text-sm cursor-pointer">{t.ai.modelForm.active}</label>
-         </div>
       </FormModal>
 
       <ConfirmationModal
