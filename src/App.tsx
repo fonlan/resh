@@ -16,6 +16,37 @@ const AppBootFallback = ({ message }: { message: string }) => (
   </div>
 )
 
+const NON_TEXT_INPUT_TYPES = new Set([
+  'button',
+  'checkbox',
+  'color',
+  'file',
+  'hidden',
+  'image',
+  'radio',
+  'range',
+  'reset',
+  'submit',
+])
+
+const isNativeContextMenuAllowedTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof Element)) {
+    return false
+  }
+
+  const editableElement = target.closest('input, textarea')
+  if (editableElement instanceof HTMLTextAreaElement) {
+    return true
+  }
+
+  if (!(editableElement instanceof HTMLInputElement)) {
+    return false
+  }
+
+  const inputType = (editableElement.type || 'text').toLowerCase()
+  return !NON_TEXT_INPUT_TYPES.has(inputType)
+}
+
 function App() {
   const { config, loading } = useConfig()
   const theme = config?.general.theme
@@ -25,6 +56,21 @@ function App() {
   useEffect(() => {
     window.dispatchEvent(new Event('resh-app-ready'))
     void emit('resh-app-ready').catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const handleGlobalContextMenu = (event: MouseEvent) => {
+      if (isNativeContextMenuAllowedTarget(event.target)) {
+        return
+      }
+
+      event.preventDefault()
+    }
+
+    document.addEventListener('contextmenu', handleGlobalContextMenu, true)
+    return () => {
+      document.removeEventListener('contextmenu', handleGlobalContextMenu, true)
+    }
   }, [])
 
   if (loading) {
