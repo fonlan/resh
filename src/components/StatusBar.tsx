@@ -4,11 +4,12 @@ import { EmojiText } from './EmojiText';
 interface StatusBarProps {
   leftText: string;
   rightText: string;
+  rightCopyText?: string;
   theme?: 'light' | 'dark' | 'orange' | 'green' | 'system';
   connected: boolean;
 }
 
-export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme, connected }) => {
+export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, rightCopyText, theme, connected }) => {
   // Determine colors based on theme
   const isDark = theme === 'dark' || theme === 'orange' || theme === 'green' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   
@@ -35,7 +36,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({ leftText, rightText, theme
       >
         <EmojiText text={leftText} />
       </div>
-      <div className="flex-none max-w-[200px] text-right whitespace-nowrap overflow-hidden text-ellipsis flex items-center justify-end" title={rightText}>
+      {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+      <div
+        className="flex-none max-w-[200px] text-right whitespace-nowrap overflow-hidden text-ellipsis flex items-center justify-end cursor-pointer"
+        title={rightText}
+        onClick={() => {
+          const copyText = rightCopyText || rightText;
+          if (copyText) {
+            navigator.clipboard.writeText(copyText).catch(() => {
+              // Failed to copy
+            });
+          }
+        }}
+      >
         <span className={`w-2 h-2 rounded-full mr-2 inline-block shrink-0 transition-all duration-300 ${connected ? 'bg-[#4cd964] shadow-[0_0_6px_rgba(76,217,100,0.6)]' : 'bg-[#ff3b30] shadow-[0_0_6px_rgba(255,59,48,0.6)]'}`} />
         <EmojiText text={rightText} />
       </div>

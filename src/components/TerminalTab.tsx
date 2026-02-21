@@ -641,6 +641,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
       <StatusBar
         leftText={statusText}
         rightText={server.username ? `${server.username}@${server.host}` : server.host}
+        rightCopyText={server.host}
         theme={theme}
         connected={isConnected}
       />
