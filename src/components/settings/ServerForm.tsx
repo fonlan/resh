@@ -5,6 +5,7 @@ import { validateRequired, validateUniqueName, validatePort } from '../../utils/
 import { useTranslation } from '../../i18n';
 import { CustomSelect } from '../CustomSelect';
 import { SnippetsTab } from './SnippetsTab';
+import { EmojiText } from '../EmojiText';
 
 interface ServerFormProps {
   server?: Server;
@@ -78,6 +79,7 @@ export const ServerForm = ({
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [nameInputScrollLeft, setNameInputScrollLeft] = useState(0);
 
   // Port forward input state
   const [newPortForward, setNewPortForward] = useState({ local: '', remote: '' });
@@ -279,16 +281,33 @@ export const ServerForm = ({
                 <label htmlFor="server-name" className="block text-sm font-medium text-zinc-400 mb-1.5">
                   {t.serverForm.nameLabel}
                 </label>
-                <input
-                  id="server-name"
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => handleChange('name', e.target.value)}
-                  placeholder={t.serverForm.namePlaceholder}
-                  className={`w-full px-3 py-2 text-sm rounded-md border outline-none transition-all ${
+                <div
+                  className={`relative w-full rounded-md border transition-all bg-[var(--bg-primary)] ${
                     errors.name ? 'border-red-500' : 'border-zinc-700/50'
-                  } bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
-                />
+                  } focus-within:border-blue-500 focus-within:shadow-[0_0_20px_rgba(59,130,246,0.2)]`}
+                >
+                  <div className="pointer-events-none absolute inset-0 overflow-hidden px-3 py-2 text-sm">
+                    <div
+                      className="whitespace-pre text-[var(--text-primary)]"
+                      style={{ transform: `translateX(-${nameInputScrollLeft}px)` }}
+                    >
+                      {formData.name ? (
+                        <EmojiText text={formData.name} />
+                      ) : (
+                        <span className="text-[var(--text-muted)]">{t.serverForm.namePlaceholder}</span>
+                      )}
+                    </div>
+                  </div>
+                  <input
+                    id="server-name"
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => handleChange('name', e.target.value)}
+                    onScroll={(e) => setNameInputScrollLeft(e.currentTarget.scrollLeft)}
+                    placeholder={t.serverForm.namePlaceholder}
+                    className="relative z-10 w-full px-3 py-2 text-sm rounded-md border-none bg-transparent text-transparent caret-[var(--text-primary)] outline-none placeholder:text-transparent"
+                  />
+                </div>
                 {errors.name && <p className="text-red-400 text-xs mt-1">{errors.name}</p>}
               </div>
 
