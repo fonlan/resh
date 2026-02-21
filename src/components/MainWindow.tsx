@@ -475,12 +475,14 @@ export const MainWindow: React.FC = () => {
               </button>
             </div>
           ))}
+          <div className="shrink-0" role="presentation">
+            <NewTabButton
+              servers={config?.servers || []}
+              onServerSelect={handleAddTab}
+              onOpenSettings={() => handleOpenSettings('servers')}
+            />
+          </div>
         </div>
-        <NewTabButton
-          servers={config?.servers || []}
-          onServerSelect={handleAddTab}
-          onOpenSettings={() => handleOpenSettings('servers')}
-        />
 
         {/* Drag region spacer - empty area for dragging */}
         <div className="flex-1 min-w-[40px]" data-tauri-drag-region></div>
