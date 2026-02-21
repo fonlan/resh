@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Copy, Check, ExternalLink, Loader2, Eye, EyeOff } from 'lucide-react';
 import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from '../../types';
 import { generateId } from '../../utils/idGenerator';
 import { FormModal } from '../FormModal';
@@ -45,6 +45,7 @@ export const AITab: React.FC<AITabProps> = ({
   const [isChannelFormOpen, setIsChannelFormOpen] = useState(false);
   const [editingChannel, setEditingChannel] = useState<AIChannel | null>(null);
   const [channelFormData, setChannelFormData] = useState<Partial<AIChannel>>({});
+  const [isChannelApiKeyVisible, setIsChannelApiKeyVisible] = useState(false);
   const [channelToDelete, setChannelToDelete] = useState<string | null>(null);
 
   // Copilot Auth State
@@ -195,6 +196,7 @@ export const AITab: React.FC<AITabProps> = ({
     setCopilotAuthData(null);
     setIsPolling(false);
     setAuthError(null);
+    setIsChannelApiKeyVisible(false);
     setIsChannelFormOpen(true);
   };
 
@@ -204,6 +206,7 @@ export const AITab: React.FC<AITabProps> = ({
     setCopilotAuthData(null);
     setIsPolling(false);
     setAuthError(null);
+    setIsChannelApiKeyVisible(false);
     setIsChannelFormOpen(true);
   };
 
@@ -260,6 +263,7 @@ export const AITab: React.FC<AITabProps> = ({
       };
       onAIChannelsUpdate([...aiChannels, newChannel]);
     }
+    setIsChannelApiKeyVisible(false);
     setIsChannelFormOpen(false);
   };
 
@@ -497,7 +501,10 @@ id="ai-timeout"
       <FormModal
         isOpen={isChannelFormOpen}
         title={editingChannel ? t.ai.editChannel : t.ai.addChannel}
-        onClose={() => setIsChannelFormOpen(false)}
+        onClose={() => {
+          setIsChannelApiKeyVisible(false);
+          setIsChannelFormOpen(false);
+        }}
         onSubmit={handleSaveChannel}
         extraFooterContent={
           <div className="flex items-center gap-2 mr-auto">
@@ -550,6 +557,7 @@ id="ai-timeout"
                 apiKey: '', // Clear API key on type change
                 isActive: newType === 'copilot' ? false : (channelFormData.isActive ?? true)
               });
+              setIsChannelApiKeyVisible(false);
               // Reset auth state when switching types
               setCopilotAuthData(null);
               setIsPolling(false);
@@ -646,14 +654,25 @@ disabled={isAuthLoading}
             </div>
             <div className="flex flex-col gap-1.5 mb-4">
               <label htmlFor="channel-apikey" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.ai.channelForm.apiKey}</label>
-              <input
-                id="channel-apikey"
-                type="password"
-                className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-                value={channelFormData.apiKey || ''}
-                onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
-                placeholder="sk-..."
-              />
+              <div className="relative">
+                <input
+                  id="channel-apikey"
+                  type={isChannelApiKeyVisible ? 'text' : 'password'}
+                  className="w-full px-3 py-2 pr-10 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+                  value={channelFormData.apiKey || ''}
+                  onChange={(e) => setChannelFormData({ ...channelFormData, apiKey: e.target.value })}
+                  placeholder="sk-..."
+                />
+                <button
+                  type="button"
+                  onClick={() => setIsChannelApiKeyVisible((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-6 h-6 p-0 bg-transparent border-none text-zinc-400 cursor-pointer transition-colors hover:text-zinc-200"
+                  aria-label={isChannelApiKeyVisible ? 'Hide API key' : 'Show API key'}
+                  title={isChannelApiKeyVisible ? 'Hide API key' : 'Show API key'}
+                >
+                  {isChannelApiKeyVisible ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
             </div>
           </>
         )}
