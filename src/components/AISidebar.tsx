@@ -25,6 +25,7 @@ interface AISidebarProps {
   onClose: () => void;
   isLocked: boolean;
   onToggleLock: () => void;
+  onShowToast?: (message: string, type?: 'success' | 'error' | 'info' | 'warning', duration?: number) => void;
   currentServerId?: string;
   currentTabId?: string;
   zIndex?: number;
@@ -33,6 +34,22 @@ interface AISidebarProps {
 interface OptimisticMessageInput {
   sessionId: string;
   message: ChatMessage;
+}
+
+const normalizeAiErrorMessage = (error: unknown): string => {
+  const rawMessage =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : error === null || error === undefined
+          ? ''
+          : String(error)
+
+  return rawMessage
+    .replace(/^Error:\s*/i, '')
+    .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+    .trim()
 }
 
 const CodeBlock = ({ children, className }: { children: React.ReactNode, className?: string }) => {
@@ -389,6 +406,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   onClose,
   isLocked,
   onToggleLock,
+  onShowToast,
   currentServerId,
   currentTabId,
   zIndex
@@ -451,6 +469,26 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const responseChunkBufferRef = useRef('')
   const reasoningChunkBufferRef = useRef('')
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastErrorToastRef = useRef<{ message: string, at: number } | null>(null)
+
+  const showAiError = useCallback((error: unknown) => {
+    const normalizedError = normalizeAiErrorMessage(error)
+    const fallbackMessage = t.ai.unknownError || 'Unknown error'
+    const detailMessage = normalizedError || fallbackMessage
+    const template = t.ai.requestFailed || 'AI request failed: {error}'
+    const finalMessage = template.includes('{error}')
+      ? template.replace('{error}', detailMessage)
+      : `${template} ${detailMessage}`
+
+    const now = Date.now()
+    const previous = lastErrorToastRef.current
+    if (previous && previous.message === finalMessage && now - previous.at < 1500) {
+      return
+    }
+
+    lastErrorToastRef.current = { message: finalMessage, at: now }
+    onShowToast?.(finalMessage, 'error')
+  }, [onShowToast, t])
 
   // Load mode & model from config, with fallback to default model
   useEffect(() => {
@@ -675,8 +713,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           mode,
           boundSshSessionId,
           calls.map(c => c.id)
-        ).catch(() => {
-          // Failed to auto-execute safe tools
+        ).catch((err) => {
+          setGenerating(activeSessionId, false);
+          showAiError(err);
         });
         
         // Do NOT set pendingToolCalls
@@ -690,11 +729,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       }
     });
 
-    const errorListener = listen<string>(`ai-error-${activeSessionId}`, () => {
+    const errorListener = listen<string>(`ai-error-${activeSessionId}`, (event) => {
       flushStreamBuffers()
       setGenerating(activeSessionId, false);
       storeSetPendingToolCalls(activeSessionId, null);
-      // TODO: Show error in UI
+      showAiError(event.payload);
     });
 
     const doneListener = listen<string>(`ai-done-${activeSessionId}`, async () => {
@@ -734,7 +773,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       errorListener.then(unlisten => unlisten());
       doneListener.then(unlisten => unlisten());
     };
-  }, [activeSessionId, addCompleteMessage, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, boundSshSessionId, sessions, currentServerId, loadSessions]);
+  }, [activeSessionId, addCompleteMessage, appendResponse, appendReasoning, appendToolCalls, newAssistantMessage, setGenerating, storeSetPendingToolCalls, config, selectedModelId, mode, boundSshSessionId, sessions, currentServerId, loadSessions, showAiError]);
 
   // Resizing logic
   const startResizing = (e: React.MouseEvent) => {
@@ -854,6 +893,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       try {
         sessionId = await createSession(currentServerId, selectedModelId, currentTabId);
       } catch (err) {
+        showAiError(err);
         return;
       }
     }
@@ -902,8 +942,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       }
     } catch (err) {
       setGenerating(sessionId, false);
+      showAiError(err);
     }
-  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, boundSshSessionId, isLoading, pendingToolCalls, clearSessionStopped, loadSessions]);
+  }, [inputValue, activeSessionId, currentServerId, selectedModelId, createSession, addMessage, setGenerating, config, mode, currentTabId, boundSshSessionId, isLoading, pendingToolCalls, clearSessionStopped, loadSessions, showAiError]);
 
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return;
@@ -927,8 +968,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       );
     } catch (err) {
       setGenerating(activeSessionId, false);
+      showAiError(err);
     }
-  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, boundSshSessionId, setGenerating, storeSetPendingToolCalls, clearSessionStopped]);
+  }, [activeSessionId, pendingToolCalls, config, selectedModelId, mode, boundSshSessionId, setGenerating, storeSetPendingToolCalls, clearSessionStopped, showAiError]);
 
   const handleCancelTools = useCallback(() => {
     if (activeSessionId) {

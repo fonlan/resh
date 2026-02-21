@@ -634,6 +634,7 @@ export const MainWindow: React.FC = () => {
               onClose={() => setIsAIOpen(false)}
               isLocked={config?.general.aiSidebarLocked || false}
               onToggleLock={handleToggleAILock}
+              onShowToast={showToast}
               currentServerId={activeServerId}
               currentTabId={activeTabId ? (tabSessions[activeTabId] || undefined) : undefined}
               zIndex={aiZIndex}
