@@ -35,6 +35,18 @@ pub struct FileEntry {
     pub permissions: Option<u32>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum SftpSortType {
+    Name,
+    Modified,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SftpSortOrder {
+    Asc,
+    Desc,
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct TransferProgress {
     pub task_id: String,
@@ -102,6 +114,28 @@ lazy_static! {
 pub struct SftpManager;
 
 impl SftpManager {
+    fn sort_entries(files: &mut [FileEntry], sort_type: SftpSortType, sort_order: SftpSortOrder) {
+        files.sort_by(|a, b| {
+            let a_dir_like = a.is_dir || (a.is_symlink && a.target_is_dir.unwrap_or(false));
+            let b_dir_like = b.is_dir || (b.is_symlink && b.target_is_dir.unwrap_or(false));
+
+            if a_dir_like != b_dir_like {
+                return b_dir_like.cmp(&a_dir_like);
+            }
+
+            let mut comparison = match sort_type {
+                SftpSortType::Name => a.name.cmp(&b.name),
+                SftpSortType::Modified => a.modified.cmp(&b.modified).then_with(|| a.name.cmp(&b.name)),
+            };
+
+            if matches!(sort_order, SftpSortOrder::Desc) {
+                comparison = comparison.reverse();
+            }
+
+            comparison
+        });
+    }
+
     pub async fn set_max_concurrent_transfers(max: u32) {
         let mut current = MAX_CONCURRENT_TRANSFERS.lock().await;
         *current = max;
@@ -392,6 +426,15 @@ impl SftpManager {
     }
 
     pub async fn list_dir(session_id: &str, path: &str) -> Result<Vec<FileEntry>, String> {
+        Self::list_dir_with_sort(session_id, path, SftpSortType::Name, SftpSortOrder::Asc).await
+    }
+
+    pub async fn list_dir_with_sort(
+        session_id: &str,
+        path: &str,
+        sort_type: SftpSortType,
+        sort_order: SftpSortOrder,
+    ) -> Result<Vec<FileEntry>, String> {
         let sftp = Self::get_session(session_id).await?;
         let path = if path.is_empty() { "." } else { path };
         
@@ -453,13 +496,7 @@ impl SftpManager {
         
         let _ = sftp.close(handle).await;
 
-        files.sort_by(|a, b| {
-            if a.is_dir == b.is_dir {
-                a.name.cmp(&b.name)
-            } else {
-                b.is_dir.cmp(&a.is_dir)
-            }
-        });
+        Self::sort_entries(&mut files, sort_type, sort_order);
 
         Ok(files)
     }

@@ -148,6 +148,8 @@ interface SortState {
   order: SortOrder;
 }
 
+const DEFAULT_SORT_STATE: SortState = { type: 'name', order: 'asc' };
+
 interface ClipboardState {
   sourcePath: string;
   sourceName: string;
@@ -209,7 +211,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const rootFiles = currentSession?.rootFiles || [];
   const currentPath = currentSession?.currentPath || '/';
   const isLoading = currentSession?.isLoading || false;
-  const sortState = currentSession?.sortState || { type: 'name', order: 'asc' };
+  const sortState = currentSession?.sortState || DEFAULT_SORT_STATE;
 
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null);
 
@@ -242,7 +244,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const updateSession = useCallback((sid: string, updates: Partial<SessionState> | ((prev: SessionState) => Partial<SessionState>)) => {
       setSessions(prev => {
-          const current = prev[sid] || { rootFiles: [], currentPath: '/', sortState: { type: 'name', order: 'asc' }, isLoading: false };
+          const current = prev[sid] || { rootFiles: [], currentPath: '/', sortState: DEFAULT_SORT_STATE, isLoading: false };
           const newValues = typeof updates === 'function' ? updates(current) : updates;
           return {
               ...prev,
@@ -261,27 +263,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     return () => window.removeEventListener('click', handleClick);
   }, [showSortMenu]);
 
-  const sortFiles = useCallback((files: FileEntry[], sort: SortState) => {
-      return [...files].sort((a, b) => {
-          if (a.is_dir !== b.is_dir) {
-              return a.is_dir ? -1 : 1;
-          }
-          if (a.is_symlink && a.target_is_dir !== b.target_is_dir) {
-               if (a.target_is_dir) return -1;
-               if (b.target_is_dir) return 1;
-          }
-
-          let comparison = 0;
-          if (sort.type === 'name') {
-              comparison = a.name.localeCompare(b.name);
-          } else if (sort.type === 'modified') {
-              comparison = a.modified - b.modified;
-          }
-
-          return sort.order === 'asc' ? comparison : -comparison;
-      });
-  }, []);
-
   const getAllExpandedPaths = (nodes: FileEntry[]): Set<string> => {
     const paths = new Set<string>();
     const traverse = (list: FileEntry[]) => {
@@ -298,19 +279,29 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     return paths;
   };
 
-  const loadDirectory = useCallback(async (path: string, targetSessionId?: string, keepExpandedPaths?: Set<string>) => {
+  const loadDirectory = useCallback(async (
+    path: string,
+    targetSessionId?: string,
+    keepExpandedPaths?: Set<string>,
+    sortOverride?: SortState
+  ) => {
     const sid = targetSessionId || sessionId;
     if (!sid) return;
+    const requestedSort = sortOverride || DEFAULT_SORT_STATE;
 
     updateSession(sid, { isLoading: true });
     
     try {
-      const files = await invoke<FileEntry[]>('sftp_list_dir', { sessionId: sid, path });
+      const files = await invoke<FileEntry[]>('sftp_list_dir_sorted', {
+        sessionId: sid,
+        path,
+        sortType: requestedSort.type,
+        sortOrder: requestedSort.order
+      });
       
       setSessions(prev => {
           const session = prev[sid];
-          const currentSort = session?.sortState || { type: 'name', order: 'asc' };
-          const sortedFiles = sortFiles(files, currentSort);
+          const sortedFiles = files;
 
           // Apply expanded state if provided
           if (keepExpandedPaths) {
@@ -348,8 +339,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               [sid]: { 
                   ...session, 
                   rootFiles: newRootFiles,
-                  currentPath: (path === '/' || path === '.') ? path : session.currentPath,
-                  isLoading: false
+                  currentPath: (path === '/' || path === '.') ? path : session?.currentPath || '/',
+                  isLoading: false,
+                  sortState: requestedSort
               }
           };
       });
@@ -386,30 +378,39 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       updateSession(sid, { isLoading: false });
       return [];
     }
-  }, [sessionId, sortFiles, updateSession]);
+  }, [sessionId, updateSession]);
+
+  const refreshDirectoryTree = useCallback(async (
+    sid: string,
+    basePath: string,
+    expandedPaths: Set<string>,
+    sort: SortState
+  ) => {
+    // Load root/current path first so subtree updates have a stable parent.
+    await loadDirectory(basePath, sid, expandedPaths, sort);
+
+    if (expandedPaths.size === 0) {
+      return;
+    }
+
+    // Ensure parent directories are refreshed before children.
+    const sortedPaths = Array.from(expandedPaths).sort((a, b) => {
+      return a.split(/[\\/]/).length - b.split(/[\\/]/).length;
+    });
+
+    for (const expandedPath of sortedPaths) {
+      if (expandedPath !== '/' && expandedPath !== '.' && expandedPath !== basePath) {
+        await loadDirectory(expandedPath, sid, expandedPaths, sort);
+      }
+    }
+  }, [loadDirectory]);
 
   const handleRefresh = async () => {
     if (!sessionId) return;
     const currentSession = sessions[sessionId];
-    
     const expandedPaths = currentSession ? getAllExpandedPaths(currentSession.rootFiles) : new Set<string>();
-    
-    // Load root first
-    await loadDirectory(currentPath, sessionId, expandedPaths);
-
-    if (expandedPaths.size > 0) {
-        // Sort by path depth to ensure parents are loaded before children
-        const sortedPaths = Array.from(expandedPaths).sort((a, b) => {
-            return a.split(/[\\/]/).length - b.split(/[\\/]/).length;
-        });
-
-        for (const path of sortedPaths) {
-            // Skip root since we just loaded it
-            if (path !== '/' && path !== '.' && path !== currentPath) {
-                 await loadDirectory(path, sessionId, expandedPaths);
-            }
-        }
-    }
+    const currentSort = currentSession?.sortState || DEFAULT_SORT_STATE;
+    await refreshDirectoryTree(sessionId, currentPath, expandedPaths, currentSort);
   };
 
   useEffect(() => {
@@ -421,7 +422,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                   [sessionId]: { 
                       rootFiles: [], 
                       currentPath: '/', 
-                      sortState: { type: 'name', order: 'asc' }, 
+                      sortState: DEFAULT_SORT_STATE, 
                       isLoading: true 
                   }
               };
@@ -433,7 +434,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       const shouldLoad = !sessionState || (sessionState.rootFiles.length === 0 && !sessionState.isLoading);
       
       if (shouldLoad) {
-          loadDirectory('/', sessionId);
+          const initialSort = sessionState?.sortState || DEFAULT_SORT_STATE;
+          loadDirectory('/', sessionId, undefined, initialSort);
       }
     }
   }, [isOpen, sessionId, loadDirectory, sessions]);
@@ -479,19 +481,21 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
         });
 
         try {
-            const children = await invoke<FileEntry[]>('sftp_list_dir', { sessionId, path: entry.path });
+            const children = await invoke<FileEntry[]>('sftp_list_dir_sorted', {
+              sessionId,
+              path: entry.path,
+              sortType: sortState.type,
+              sortOrder: sortState.order
+            });
             
-            // We need current sort state
             setSessions(prev => {
                 const session = prev[sessionId];
                 if (!session) return prev;
-                
-                const sortedChildren = sortFiles(children, session.sortState);
-                
+
                 const updateChildren = (nodes: FileEntry[]): FileEntry[] => {
                     return nodes.map(node => {
                         if (node.path === entry.path) {
-                            return { ...node, isExpanded: true, isLoading: false, children: sortedChildren };
+                            return { ...node, isExpanded: true, isLoading: false, children };
                         }
                         if (node.children) {
                             return { ...node, children: updateChildren(node.children) };
@@ -527,36 +531,23 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleSort = (type: SortType) => {
       if (!sessionId) return;
-      
-      setSessions(prev => {
-          const session = prev[sessionId];
-          if (!session) return prev;
+      const session = sessions[sessionId];
+      if (!session) return;
 
-          const newOrder: SortOrder = session.sortState.type === type && session.sortState.order === 'asc' ? 'desc' : 'asc';
-          const newSortState: SortState = { type, order: newOrder };
+      const newOrder: SortOrder = session.sortState.type === type && session.sortState.order === 'asc' ? 'desc' : 'asc';
+      const newSortState: SortState = { type, order: newOrder };
+      const expandedPaths = getAllExpandedPaths(session.rootFiles);
 
-          // Re-sort the entire tree? Or just root?
-          // Recursively sorting the tree would be ideal but expensive. 
-          // For now let's sort root and rely on lazy load for children, 
-          // OR we should implement a recursive sort helper.
-          
-          const recursiveSort = (nodes: FileEntry[]): FileEntry[] => {
-              const sorted = sortFiles(nodes, newSortState);
-              return sorted.map(node => ({
-                  ...node,
-                  children: node.children ? recursiveSort(node.children) : undefined
-              }));
-          };
+      setSessions(prev => ({
+        ...prev,
+        [sessionId]: {
+          ...session,
+          ...prev[sessionId],
+          sortState: newSortState
+        }
+      }));
 
-          return {
-              ...prev,
-              [sessionId]: {
-                  ...session,
-                  sortState: newSortState,
-                  rootFiles: recursiveSort(session.rootFiles)
-              }
-          };
-      });
+      void refreshDirectoryTree(sessionId, currentPath, expandedPaths, newSortState);
       setShowSortMenu(false);
   };
 
@@ -833,9 +824,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     if (!sessionId) return;
     const parentPath = getParentPath(entry.path);
     if (parentPath === '/' || parentPath === '.') {
-      await loadDirectory('/');
+      await loadDirectory('/', sessionId, undefined, sortState);
     } else {
-      await loadDirectory(parentPath);
+      await loadDirectory(parentPath, sessionId, undefined, sortState);
     }
   };
 
@@ -882,7 +873,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     try {
       const fullPath = `${newFileModal.parentPath}/${newItemName.trim()}`;
       await invoke('sftp_create_file', { sessionId, path: fullPath });
-      await loadDirectory(newFileModal.parentPath);
+      await loadDirectory(newFileModal.parentPath, sessionId, undefined, sortState);
     } catch (e) {
       console.error('Create file failed', e);
     }
@@ -895,7 +886,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     try {
       const fullPath = `${newFolderModal.parentPath}/${newItemName.trim()}`;
       await invoke('sftp_create_folder', { sessionId, path: fullPath });
-      await loadDirectory(newFolderModal.parentPath);
+      await loadDirectory(newFolderModal.parentPath, sessionId, undefined, sortState);
     } catch (e) {
       console.error('Create folder failed', e);
     }
@@ -1034,9 +1025,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       const currentSessionState = sessions[sessionId];
       if (currentSessionState) {
         const expandedPaths = getAllExpandedPaths(currentSessionState.rootFiles);
-        await loadDirectory(targetPath, sessionId, expandedPaths);
+        await loadDirectory(targetPath, sessionId, expandedPaths, currentSessionState.sortState);
       } else {
-        await loadDirectory(targetPath);
+        await loadDirectory(targetPath, sessionId, undefined, sortState);
       }
     } catch (e) {
       console.error('Paste failed', e);

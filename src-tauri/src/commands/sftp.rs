@@ -1,4 +1,4 @@
-use crate::sftp_manager::{SftpManager, FileEntry};
+use crate::sftp_manager::{FileEntry, SftpManager, SftpSortOrder, SftpSortType};
 use tauri::{AppHandle, Manager};
 use std::sync::Arc;
 use crate::commands::AppState;
@@ -6,6 +6,28 @@ use crate::commands::AppState;
 #[tauri::command]
 pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileEntry>, String> {
     SftpManager::list_dir(&session_id, &path).await
+}
+
+#[tauri::command]
+pub async fn sftp_list_dir_sorted(
+    session_id: String,
+    path: String,
+    sort_type: String,
+    sort_order: String,
+) -> Result<Vec<FileEntry>, String> {
+    let parsed_sort_type = match sort_type.as_str() {
+        "name" => SftpSortType::Name,
+        "modified" => SftpSortType::Modified,
+        _ => return Err(format!("Invalid sort type: {}", sort_type)),
+    };
+
+    let parsed_sort_order = match sort_order.as_str() {
+        "asc" => SftpSortOrder::Asc,
+        "desc" => SftpSortOrder::Desc,
+        _ => return Err(format!("Invalid sort order: {}", sort_order)),
+    };
+
+    SftpManager::list_dir_with_sort(&session_id, &path, parsed_sort_type, parsed_sort_order).await
 }
 
 #[tauri::command]
