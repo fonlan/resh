@@ -244,6 +244,7 @@ async fn main() {
             commands::ai::get_ai_sessions,
             commands::ai::get_ai_messages,
             commands::ai::send_chat_message,
+            commands::ai::regenerate_ai_response,
             commands::ai::cancel_ai_chat,
             commands::ai::get_terminal_output,
             commands::ai::run_in_terminal,

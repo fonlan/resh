@@ -1596,6 +1596,111 @@ pub async fn send_chat_message(
 }
 
 #[tauri::command]
+pub async fn regenerate_ai_response(
+    window: Window,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+    model_id: String,
+    channel_id: String,
+    mode: Option<String>,
+    ssh_session_id: Option<String>,
+) -> Result<(), String> {
+    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
+
+    let bound_ssh_session_id = {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+
+        let existing_ssh_id: Option<String> = conn
+            .query_row(
+                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if existing_ssh_id
+            .as_ref()
+            .map(|id| id.is_empty())
+            .unwrap_or(true)
+        {
+            ssh_session_id.clone()
+        } else {
+            existing_ssh_id
+        }
+    };
+
+    {
+        let conn = state.db_manager.get_connection();
+        let conn = conn.lock().unwrap();
+
+        let (latest_msg_id, latest_role): (String, String) = conn
+            .query_row(
+                "SELECT id, role FROM ai_messages WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![session_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|_| "No history found".to_string())?;
+
+        if latest_role != "assistant" {
+            return Err("Latest message is not an assistant response".to_string());
+        }
+
+        conn.execute("DELETE FROM ai_messages WHERE id = ?1", params![latest_msg_id])
+            .map_err(|e| e.to_string())?;
+    }
+
+    let is_agent_mode = mode.as_deref() == Some("agent");
+    let is_ask_mode = mode.as_deref() == Some("ask");
+
+    let tools = if is_agent_mode || is_ask_mode {
+        Some(create_tools(is_agent_mode))
+    } else {
+        None
+    };
+
+    let token = CancellationToken::new();
+    state
+        .ai_cancellation_tokens
+        .insert(session_id.clone(), token.clone());
+
+    let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
+        window.clone(),
+        state.inner().clone(),
+        session_id.clone(),
+        model_id,
+        channel_id,
+        is_agent_mode,
+        tools,
+        token,
+        bound_ssh_session_id,
+    )
+    .await;
+
+    state.ai_cancellation_tokens.remove(&session_id);
+
+    match result {
+        Ok(tool_calls) => {
+            if let Some(calls) = tool_calls {
+                if !calls.is_empty() {
+                    let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
+                    return Ok(());
+                }
+            }
+            window
+                .emit(&format!("ai-done-{}", session_id), "DONE")
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("[AI] regenerate_ai_response error: {}", e);
+            window.emit(&format!("ai-error-{}", session_id), e.clone()).ok();
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
 pub async fn execute_agent_tools(
     window: Window,
     state: State<'_, Arc<AppState>>,

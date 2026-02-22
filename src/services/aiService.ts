@@ -28,6 +28,21 @@ export const aiService = {
       sshSessionId
     }),
 
+  regenerateResponse: (
+    sessionId: string,
+    modelId: string,
+    channelId: string,
+    mode?: string,
+    sshSessionId?: string
+  ) =>
+    invoke('regenerate_ai_response', {
+      sessionId,
+      modelId,
+      channelId,
+      mode,
+      sshSessionId
+    }),
+
   cancelMessage: (sessionId: string) =>
     invoke('cancel_ai_chat', { sessionId }),
 

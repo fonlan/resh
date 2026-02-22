@@ -29,6 +29,7 @@ interface AIState {
   deleteSession: (serverId: string, sessionId: string) => Promise<void>;
   clearSessions: (serverId: string) => Promise<void>;
   addCompleteMessage: (sessionId: string, message: ChatMessage) => void;
+  removeLatestAssistantMessage: (sessionId: string) => void;
 }
 
 export const useAIStore = create<AIState>((set, get) => ({
@@ -297,5 +298,30 @@ export const useAIStore = create<AIState>((set, get) => ({
         messages: { ...state.messages, [sessionId]: [...current, message] }
       };
     });
+  },
+
+  removeLatestAssistantMessage: (sessionId: string) => {
+    set(state => {
+      const current = state.messages[sessionId] || []
+      if (current.length === 0) {
+        return state
+      }
+
+      const removeIndex = [...current]
+        .map((msg, idx) => ({ msg, idx }))
+        .reverse()
+        .find(({ msg }) => msg.role === 'assistant')?.idx
+
+      if (removeIndex === undefined) {
+        return state
+      }
+
+      const next = [...current]
+      next.splice(removeIndex, 1)
+
+      return {
+        messages: { ...state.messages, [sessionId]: next }
+      }
+    })
   },
 }));

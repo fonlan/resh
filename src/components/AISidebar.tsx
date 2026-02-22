@@ -6,7 +6,7 @@ import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit, Square } from 'lucide-react';
+import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit, Square, RotateCcw } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
 import { ConfirmationModal } from './ConfirmationModal';
@@ -337,14 +337,18 @@ const MessageBubble = React.memo(({
   isPending,
   isLast,
   isStreaming,
-  modelName
+  modelName,
+  canRegenerate,
+  onRegenerate
 }: {
   msg: ChatMessage,
   t: any,
   isPending?: boolean,
   isLast?: boolean,
   isStreaming?: boolean,
-  modelName: string | null
+  modelName: string | null,
+  canRegenerate?: boolean,
+  onRegenerate?: () => void
 }) => {
   const [copied, setCopied] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
@@ -403,6 +407,8 @@ const MessageBubble = React.memo(({
 
   const hasContentToCopy = !!(msg.content && msg.content.trim().length > 0)
   const renderPlainStreamingContent = !!(isStreaming && msg.role === 'assistant')
+  const canTriggerRegenerate = msg.role === 'assistant' && !!canRegenerate
+  const sideOffsetClass = msg.role === 'user' ? '-left-8' : '-right-8'
 
   return (
     <div
@@ -474,15 +480,28 @@ const MessageBubble = React.memo(({
             {timeString && <span>{timeString}</span>}
           </div>
         </div>
-        <button
-          type="button"
-          disabled={!hasContentToCopy}
-          className={`absolute top-0 bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center z-10 shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : hasContentToCopy ? 'opacity-45 group-hover:opacity-100 hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]' : 'opacity-30'} ${msg.role === 'user' ? '-left-8' : '-right-8'} ${!hasContentToCopy ? 'disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]' : ''}`}
-          onClick={handleCopy}
-          title={t.ai.copyMessage}
-        >
-          {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-        </button>
+        <div className={`absolute top-0 bottom-0 flex flex-col justify-between z-10 ${sideOffsetClass}`}>
+          <button
+            type="button"
+            disabled={!hasContentToCopy}
+            className={`bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${copied ? 'opacity-100 text-[var(--accent-primary)]' : hasContentToCopy ? 'opacity-45 group-hover:opacity-100 hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]' : 'opacity-30'} ${!hasContentToCopy ? 'disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]' : ''}`}
+            onClick={handleCopy}
+            title={t.ai.copyMessage}
+          >
+            {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+          </button>
+          {msg.role === 'assistant' && (
+            <button
+              type="button"
+              disabled={!canTriggerRegenerate}
+              className={`bg-[var(--bg-secondary)] border border-[var(--glass-border)] text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center shadow-[0_2px_4px_rgba(0,0,0,0.1)] ${canTriggerRegenerate ? 'opacity-45 group-hover:opacity-100 hover:opacity-100 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]' : 'opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]'}`}
+              onClick={onRegenerate}
+              title={t.ai.regenerateMessage}
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -524,6 +543,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const deleteSession = useAIStore(state => state.deleteSession)
   const clearSessions = useAIStore(state => state.clearSessions)
   const addCompleteMessage = useAIStore(state => state.addCompleteMessage)
+  const removeLatestAssistantMessage = useAIStore(state => state.removeLatestAssistantMessage)
 
   const [width, setWidth] = useState(350);
   const [isResizing, setIsResizing] = useState(false);
@@ -698,6 +718,17 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     return nextMessages
   }, [currentMessages, modelNameById, pendingToolCallIdSet])
+  const latestAssistantMessageSourceIndex = useMemo(() => {
+    for (let i = renderableMessages.length - 1; i >= 0; i -= 1) {
+      const candidate = renderableMessages[i]
+      if (candidate.msg.role === 'assistant') {
+        return candidate.sourceIndex
+      }
+    }
+
+    return null
+  }, [renderableMessages])
+  const canRegenerateLatestAssistant = !!activeSessionId && !isLoading && !pendingToolCalls && latestAssistantMessageSourceIndex !== null
   const shouldUseVirtualizedMessages = renderableMessages.length > MESSAGE_VIRTUALIZATION_THRESHOLD
   const messageVirtualizer = useVirtualizer({
     enabled: shouldUseVirtualizedMessages,
@@ -1037,6 +1068,43 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       appendPathToInput(droppedPath, false)
     }
   }, [appendPathToInput])
+
+  const handleRegenerateResponse = useCallback(async () => {
+    if (!activeSessionId || isLoading || !!pendingToolCalls) return
+    if (latestAssistantMessageSourceIndex === null) return
+
+    clearSessionStopped(activeSessionId)
+    removeLatestAssistantMessage(activeSessionId)
+    setGenerating(activeSessionId, true)
+
+    try {
+      const model = config?.aiModels.find(m => m.id === selectedModelId)
+      const channelId = model?.channelId || ''
+
+      await aiService.regenerateResponse(
+        activeSessionId,
+        selectedModelId,
+        channelId,
+        mode,
+        boundSshSessionId
+      )
+
+      if (currentServerId) {
+        await loadSessions(currentServerId)
+      }
+    } catch (err) {
+      setGenerating(activeSessionId, false)
+      showAiError(err)
+      try {
+        if (currentTabId) {
+          await selectSession(activeSessionId, currentServerId, currentTabId)
+        } else {
+          await selectSession(activeSessionId, currentServerId)
+        }
+      } catch {
+      }
+    }
+  }, [activeSessionId, isLoading, pendingToolCalls, latestAssistantMessageSourceIndex, clearSessionStopped, removeLatestAssistantMessage, setGenerating, config, selectedModelId, mode, boundSshSessionId, currentServerId, currentTabId, loadSessions, showAiError, selectSession])
 
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading || !!pendingToolCalls) return;
@@ -1417,6 +1485,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                         isLast={isLastMessage}
                         isStreaming={isLoading && isLastMessage}
                         modelName={message.modelName}
+                        canRegenerate={canRegenerateLatestAssistant && message.sourceIndex === latestAssistantMessageSourceIndex}
+                        onRegenerate={handleRegenerateResponse}
                       />
                     </div>
                   )
@@ -1432,6 +1502,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                   isLast={idx === renderableMessages.length - 1}
                   isStreaming={isLoading && idx === renderableMessages.length - 1}
                   modelName={message.modelName}
+                  canRegenerate={canRegenerateLatestAssistant && message.sourceIndex === latestAssistantMessageSourceIndex}
+                  onRegenerate={handleRegenerateResponse}
                 />
               ))
             )}
