@@ -19,7 +19,9 @@ interface TerminalTabProps {
   tabId: string;
   serverId: string;
   isActive: boolean;
+  isVisible?: boolean;
   onClose: (tabId: string) => void;
+  onActivate?: () => void;
   server: Server;
   servers: Server[];
   authentications: Authentication[];
@@ -40,6 +42,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   tabId,
   serverId,
   isActive,
+  isVisible,
   server,
   servers,
   authentications,
@@ -48,10 +51,12 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   theme,
   onSessionChange,
   onShowToast,
+  onActivate,
 }) => {
   const { t } = useTranslation();
   const { config, saveConfig } = useConfig(); // Use config
   const containerId = `terminal-${tabId}`;
+  const terminalVisible = isVisible ?? isActive;
 
   // Memoize settings to prevent noisy updates from object identity changes
   const memoizedSettings = useMemo(() => {
@@ -478,13 +483,13 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   // Terminal focus effect
   useEffect(() => {
     if (!terminal || !isReady || !sessionId) return;
-    if (isActive) focus();
-  }, [terminal, isReady, sessionId, isActive, focus]);
+    if (isActive && terminalVisible) focus();
+  }, [terminal, isReady, sessionId, isActive, terminalVisible, focus]);
 
   // Focus on active change
   useEffect(() => {
-    if (isActive && isReady) focus();
-  }, [isActive, isReady, focus]);
+    if (isActive && terminalVisible && isReady) focus();
+  }, [isActive, terminalVisible, isReady, focus]);
 
   useEffect(() => {
     if (!isActive) {
@@ -734,7 +739,11 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
   }, [isConnected, terminal, sessionId]);
 
   return (
-    <div className="relative w-full h-full flex flex-col" style={{ backgroundColor: containerBg }}>
+    <div
+      className="relative w-full h-full flex flex-col"
+      style={{ backgroundColor: containerBg }}
+      onMouseDownCapture={() => onActivate?.()}
+    >
       <StatusBar
         leftText={statusText}
         rightText={server.username ? `${server.username}@${server.host}` : server.host}
@@ -754,7 +763,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
           onDrop={handleTerminalDrop}
           onContextMenu={handleTerminalContextMenu}
           style={{
-            display: isActive ? 'block' : 'none',
+            display: terminalVisible ? 'block' : 'none',
             width: '100%',
             height: '100%',
             overflow: 'hidden',

@@ -6,6 +6,7 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 
 ### Core Features
 - **Multi-Tab Interface** - Manage multiple simultaneous SSH sessions in a clean tabbed interface with drag-to-reorder support
+- **Split View Workspace** - Switch between left-right, top-bottom, and four-pane layouts without interrupting active terminal connections
 - **Comprehensive Configuration** - Full server, authentication, and proxy management with WebDAV sync
 - **Proxy & Jumphost Support** - Connect through HTTP/SOCKS5 proxies or SSH jumphosts
 - **Port Forwarding** - Easy local-to-remote port forwarding configuration per connection

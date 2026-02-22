@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, Suspense } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, Suspense } from 'react';
 import { Settings, X, Code, Circle, MessageSquare, Folder } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -22,6 +22,8 @@ const TerminalTab = React.lazy(() =>
 import { WindowControls } from './WindowControls';
 import { WelcomeScreen } from './WelcomeScreen';
 import { NewTabButton } from './NewTabButton';
+import { SplitViewButton, SplitLayout } from './SplitViewButton';
+import { SplitTabPickerModal } from './SplitTabPickerModal';
 import { TabContextMenu } from './TabContextMenu';
 import { ServerContextMenu } from './ServerContextMenu';
 import { ToastContainer, ToastItem } from './Toast';
@@ -39,9 +41,19 @@ interface Tab {
   serverId: string;
 }
 
+interface SplitViewState {
+  layout: SplitLayout;
+  tabIds: string[];
+}
+
 const EMPTY_SERVERS: Config['servers'] = []
 const EMPTY_AUTHENTICATIONS: Config['authentications'] = []
 const EMPTY_PROXIES: Config['proxies'] = []
+const SPLIT_LAYOUT_REQUIRED_TABS: Record<SplitLayout, number> = {
+  horizontal: 2,
+  vertical: 2,
+  grid: 4,
+}
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig } = useConfig();
@@ -129,6 +141,8 @@ export const MainWindow: React.FC = () => {
   const [editServerId, setEditServerId] = useState<string | null>(null);
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set());
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}); // tabId -> sessionId
+  const [splitView, setSplitView] = useState<SplitViewState | null>(null);
+  const [pendingSplitLayout, setPendingSplitLayout] = useState<SplitLayout | null>(null);
 
   const servers = config?.servers || EMPTY_SERVERS
   const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
@@ -156,6 +170,119 @@ export const MainWindow: React.FC = () => {
       }
     })
   }
+
+  const triggerTerminalResize = useCallback(() => {
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('resh-force-terminal-resize'));
+    }, 40);
+  }, []);
+
+  const handleExitSplitView = useCallback(() => {
+    setSplitView(null);
+    setPendingSplitLayout(null);
+    triggerTerminalResize();
+  }, [triggerTerminalResize]);
+
+  const handleStartSplitSelection = useCallback((layout: SplitLayout) => {
+    setPendingSplitLayout(layout);
+  }, []);
+
+  const handleConfirmSplitSelection = useCallback((selectedTabIds: string[]) => {
+    if (!pendingSplitLayout) {
+      return;
+    }
+
+    const requiredTabs = SPLIT_LAYOUT_REQUIRED_TABS[pendingSplitLayout];
+    if (selectedTabIds.length !== requiredTabs) {
+      return;
+    }
+
+    const nextActiveTabId = selectedTabIds.includes(activeTabId || '') && activeTabId
+      ? activeTabId
+      : selectedTabIds[0];
+
+    setSplitView({
+      layout: pendingSplitLayout,
+      tabIds: selectedTabIds,
+    });
+    setActiveTabId(nextActiveTabId);
+    setPendingSplitLayout(null);
+    triggerTerminalResize();
+  }, [pendingSplitLayout, activeTabId, triggerTerminalResize]);
+
+  const handleTabSelect = useCallback((tabId: string) => {
+    if (!splitView) {
+      setActiveTabId(tabId);
+      return;
+    }
+
+    if (splitView.tabIds.includes(tabId)) {
+      setActiveTabId(tabId);
+      return;
+    }
+
+    const nextSplitTabIds = [...splitView.tabIds];
+    const replaceIndex = activeTabId ? nextSplitTabIds.indexOf(activeTabId) : -1;
+
+    if (replaceIndex >= 0) {
+      nextSplitTabIds[replaceIndex] = tabId;
+    } else {
+      nextSplitTabIds[0] = tabId;
+    }
+
+    setSplitView({
+      ...splitView,
+      tabIds: nextSplitTabIds,
+    });
+    setActiveTabId(tabId);
+    triggerTerminalResize();
+  }, [splitView, activeTabId, triggerTerminalResize]);
+
+  useEffect(() => {
+    if (tabs.length === 0) {
+      if (splitView) {
+        setSplitView(null);
+      }
+      if (activeTabId !== null) {
+        setActiveTabId(null);
+      }
+      return;
+    }
+
+    const validTabIds = new Set(tabs.map(tab => tab.id));
+
+    if (activeTabId && !validTabIds.has(activeTabId)) {
+      setActiveTabId(tabs[0].id);
+    }
+
+    if (!splitView) {
+      return;
+    }
+
+    const filteredTabIds = splitView.tabIds.filter(tabId => validTabIds.has(tabId));
+    const requiredTabs = SPLIT_LAYOUT_REQUIRED_TABS[splitView.layout];
+
+    if (filteredTabIds.length < requiredTabs) {
+      setSplitView(null);
+      if (filteredTabIds.length > 0) {
+        setActiveTabId(filteredTabIds[0]);
+      }
+      triggerTerminalResize();
+      return;
+    }
+
+    const splitTabsChanged = filteredTabIds.join('|') !== splitView.tabIds.join('|');
+    if (splitTabsChanged) {
+      setSplitView({
+        ...splitView,
+        tabIds: filteredTabIds,
+      });
+    }
+
+    if (activeTabId && !filteredTabIds.includes(activeTabId)) {
+      setActiveTabId(filteredTabIds[0]);
+    }
+  }, [tabs, activeTabId, splitView, triggerTerminalResize]);
 
   useEffect(() => {
     if (servers.length === 0) return;
@@ -420,6 +547,43 @@ export const MainWindow: React.FC = () => {
   const activeServer = activeServerId ? serverById.get(activeServerId) || null : null
   const serverSnippets = activeServer?.snippets || [];
   const displayedSnippets = [...globalSnippets, ...serverSnippets];
+  const isSplitMode = splitView !== null;
+  const splitLayoutClassName = !splitView
+    ? 'flex-1 flex flex-col min-w-0 relative h-full'
+    : splitView.layout === 'horizontal'
+      ? 'flex-1 min-w-0 relative h-full grid grid-cols-2 gap-2 p-2'
+      : splitView.layout === 'vertical'
+        ? 'flex-1 min-w-0 relative h-full grid grid-rows-2 gap-2 p-2'
+        : 'flex-1 min-w-0 relative h-full grid grid-cols-2 grid-rows-2 gap-2 p-2';
+  const pendingSplitRequiredCount = pendingSplitLayout ? SPLIT_LAYOUT_REQUIRED_TABS[pendingSplitLayout] : 0;
+  const initialSplitSelectedTabIds = useMemo(() => {
+    if (!pendingSplitLayout) {
+      return [];
+    }
+
+    const requiredTabs = SPLIT_LAYOUT_REQUIRED_TABS[pendingSplitLayout];
+    const candidateIds: string[] = [];
+
+    if (activeTabId) {
+      candidateIds.push(activeTabId);
+    }
+
+    if (splitView?.layout === pendingSplitLayout) {
+      splitView.tabIds.forEach(id => {
+        if (!candidateIds.includes(id)) {
+          candidateIds.push(id);
+        }
+      });
+    }
+
+    tabs.forEach(tab => {
+      if (!candidateIds.includes(tab.id)) {
+        candidateIds.push(tab.id);
+      }
+    });
+
+    return candidateIds.slice(0, requiredTabs);
+  }, [pendingSplitLayout, splitView, tabs, activeTabId]);
 
   // Calculate z-index for sidebars based on lock state and open order
   // Rule: unlocked sidebars always appear above locked ones
@@ -456,7 +620,7 @@ export const MainWindow: React.FC = () => {
               className={`flex items-center gap-2 px-4 h-10 w-[200px] bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
                 draggedTabIndex === index ? 'opacity-40 cursor-grabbing' : ''
               } ${dropTargetIndex === index ? 'border-l-2 border-l-[var(--accent-primary)]' : ''}`}
-              onClick={() => setActiveTabId(tab.id)}
+              onClick={() => handleTabSelect(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
               {recordingTabs.has(tab.id) && (
@@ -555,6 +719,12 @@ export const MainWindow: React.FC = () => {
           >
             <Code size={18} />
           </button>
+          <SplitViewButton
+            tabCount={tabs.length}
+            isSplitActive={isSplitMode}
+            onSelectLayout={handleStartSplitSelection}
+            onExitSplit={handleExitSplitView}
+          />
           <button
             type="button"
             className="flex items-center justify-center w-10 h-10 bg-transparent border-none text-[var(--text-secondary)] cursor-pointer transition-all hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
@@ -584,48 +754,58 @@ export const MainWindow: React.FC = () => {
             />
           )}
         </Suspense>
-        <div className="flex-1 flex flex-col min-w-0 relative h-full">
-        {tabs.length === 0 ? (
-          <WelcomeScreen
-            servers={recentServers}
-            onServerClick={handleAddTab}
-            onOpenSettings={() => handleOpenSettings('servers')}
-            onServerContextMenu={handleServerContextMenu}
-          />
-        ) : (
-          tabs.map((tab) => {
-            const server = serverById.get(tab.serverId)
-            if (!server) return null;
+        <div className={splitLayoutClassName}>
+          {tabs.length === 0 ? (
+            <WelcomeScreen
+              servers={recentServers}
+              onServerClick={handleAddTab}
+              onOpenSettings={() => handleOpenSettings('servers')}
+              onServerContextMenu={handleServerContextMenu}
+            />
+          ) : (
+            tabs.map((tab) => {
+              const server = serverById.get(tab.serverId)
+              if (!server) return null;
 
-            return (
-              <div
-                key={tab.id}
-                style={{
-                  display: activeTabId === tab.id ? 'flex' : 'none',
-                  flex: 1,
-                  minHeight: 0,
-                }}
-              >
-                <Suspense fallback={<div className="flex-1 bg-[var(--bg-primary)]" />}>
-                  <TerminalTab
-                    tabId={tab.id}
-                    serverId={tab.serverId}
-                    isActive={activeTabId === tab.id}
-                    onClose={handleCloseTab}
-                    server={server}
-                    servers={servers}
-                    authentications={authentications}
-                    proxies={proxies}
-                    terminalSettings={config?.general.terminal}
-                    theme={config?.general.theme}
-                    onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
-                    onShowToast={showToast}
-                  />
-                </Suspense>
-              </div>
-            );
-          })
-        )}
+              const isVisibleInLayout = splitView ? splitView.tabIds.includes(tab.id) : activeTabId === tab.id;
+              const isFocusedTab = activeTabId === tab.id;
+
+              return (
+                <div
+                  key={tab.id}
+                  className={isSplitMode ? 'min-w-0 min-h-0 flex' : 'min-h-0 flex-1 flex'}
+                  style={{
+                    display: isVisibleInLayout ? 'flex' : 'none',
+                    minHeight: 0,
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    className={`w-full h-full min-w-0 min-h-0 overflow-hidden ${isSplitMode ? `rounded-[var(--radius-md)] border ${isFocusedTab ? 'border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)]/40' : 'border-[var(--glass-border)]'}` : ''}`}
+                  >
+                    <Suspense fallback={<div className="flex-1 bg-[var(--bg-primary)]" />}>
+                      <TerminalTab
+                        tabId={tab.id}
+                        serverId={tab.serverId}
+                        isActive={isFocusedTab}
+                        isVisible={isVisibleInLayout}
+                        onClose={handleCloseTab}
+                        onActivate={() => handleTabSelect(tab.id)}
+                        server={server}
+                        servers={servers}
+                        authentications={authentications}
+                        proxies={proxies}
+                        terminalSettings={config?.general.terminal}
+                        theme={config?.general.theme}
+                        onSessionChange={(sessionId) => handleTabSessionChange(tab.id, sessionId)}
+                        onShowToast={showToast}
+                      />
+                    </Suspense>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
         <Suspense fallback={null}>
           {hasLoadedAISidebar && (
@@ -655,6 +835,16 @@ export const MainWindow: React.FC = () => {
           )}
         </Suspense>
       </div>
+
+      <SplitTabPickerModal
+        isOpen={pendingSplitLayout !== null}
+        layout={pendingSplitLayout}
+        tabs={tabs.map(tab => ({ id: tab.id, label: tab.label }))}
+        requiredCount={pendingSplitRequiredCount}
+        initialSelectedTabIds={initialSplitSelectedTabIds}
+        onCancel={() => setPendingSplitLayout(null)}
+        onConfirm={handleConfirmSplitSelection}
+      />
 
       {/* Settings Modal */}
       <Suspense fallback={null}>
