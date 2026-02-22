@@ -259,6 +259,7 @@ async fn main() {
             commands::ai::fetch_ai_models,
             commands::sftp::sftp_list_dir,
             commands::sftp::sftp_list_dir_sorted,
+            commands::sftp::sftp_list_dirs_sorted,
             commands::sftp::sftp_download,
             commands::sftp::sftp_upload,
             commands::sftp::sftp_set_max_concurrent,

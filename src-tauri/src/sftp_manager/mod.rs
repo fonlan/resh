@@ -35,6 +35,13 @@ pub struct FileEntry {
     pub permissions: Option<u32>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct DirectoryListResult {
+    pub path: String,
+    pub files: Vec<FileEntry>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SftpSortType {
     Name,
@@ -499,6 +506,30 @@ impl SftpManager {
         Self::sort_entries(&mut files, sort_type, sort_order);
 
         Ok(files)
+    }
+
+    pub async fn list_dirs_with_sort(
+        session_id: &str,
+        paths: &[String],
+        sort_type: SftpSortType,
+        sort_order: SftpSortOrder,
+    ) -> Result<Vec<DirectoryListResult>, String> {
+        let mut results = Vec::with_capacity(paths.len());
+        for path in paths {
+            match Self::list_dir_with_sort(session_id, path, sort_type, sort_order).await {
+                Ok(files) => results.push(DirectoryListResult {
+                    path: path.clone(),
+                    files,
+                    error: None,
+                }),
+                Err(error) => results.push(DirectoryListResult {
+                    path: path.clone(),
+                    files: Vec::new(),
+                    error: Some(error),
+                }),
+            }
+        }
+        Ok(results)
     }
 
     pub async fn cancel_transfer(task_id: &str) -> Result<(), String> {

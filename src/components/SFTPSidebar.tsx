@@ -38,6 +38,12 @@ interface FileEntry {
   isLoading?: boolean;
 }
 
+interface DirectoryListResult {
+  path: string;
+  files: FileEntry[];
+  error: string | null;
+}
+
 const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path';
 const SFTP_ENTRY_MIME_TYPE = 'application/x-resh-sftp-entry';
 
@@ -397,11 +403,70 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     const sortedPaths = Array.from(expandedPaths).sort((a, b) => {
       return a.split(/[\\/]/).length - b.split(/[\\/]/).length;
     });
+    const childPathsToLoad = sortedPaths.filter(expandedPath => expandedPath !== '/' && expandedPath !== '.' && expandedPath !== basePath);
+    if (childPathsToLoad.length === 0) {
+      return;
+    }
 
-    for (const expandedPath of sortedPaths) {
-      if (expandedPath !== '/' && expandedPath !== '.' && expandedPath !== basePath) {
-        await loadDirectory(expandedPath, sid, expandedPaths, sort);
-      }
+    try {
+      const batchResults = await invoke<DirectoryListResult[]>('sftp_list_dirs_sorted', {
+        sessionId: sid,
+        paths: childPathsToLoad,
+        sortType: sort.type,
+        sortOrder: sort.order
+      });
+
+      setSessions(prev => {
+        const session = prev[sid];
+        if (!session) return prev;
+
+        const updateChildren = (nodes: FileEntry[], targetPath: string, children?: FileEntry[], resetLoadingOnly = false): FileEntry[] => {
+          return nodes.map(node => {
+            if (node.path.replace(/\\/g, '/') === targetPath) {
+              if (resetLoadingOnly) {
+                return { ...node, isLoading: false };
+              }
+              return { ...node, isExpanded: true, isLoading: false, children };
+            }
+            if (node.children) {
+              return { ...node, children: updateChildren(node.children, targetPath, children, resetLoadingOnly) };
+            }
+            return node;
+          });
+        };
+
+        let nextRootFiles = session.rootFiles;
+
+        for (const result of batchResults) {
+          const normalizedPath = result.path.replace(/\\/g, '/');
+          if (result.error) {
+            console.error(`Failed to refresh directory ${result.path}:`, result.error);
+            nextRootFiles = updateChildren(nextRootFiles, normalizedPath, undefined, true);
+            continue;
+          }
+
+          const children = result.files.map(file => {
+            if (!expandedPaths.has(file.path)) {
+              return file;
+            }
+            return { ...file, isExpanded: true, isLoading: true };
+          });
+
+          nextRootFiles = updateChildren(nextRootFiles, normalizedPath, children, false);
+        }
+
+        return {
+          ...prev,
+          [sid]: {
+            ...session,
+            rootFiles: nextRootFiles,
+            sortState: sort,
+            isLoading: false
+          }
+        };
+      });
+    } catch (error) {
+      console.error('Failed to refresh expanded directories in batch:', error);
     }
   }, [loadDirectory]);
 
