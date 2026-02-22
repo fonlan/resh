@@ -71,6 +71,58 @@ const MARKDOWN_COMPONENTS = {
         {children}
       </code>
     )
+  },
+  table({ className, children, ...props }: React.ComponentPropsWithoutRef<'table'>) {
+    return (
+      <div className="my-2 w-full overflow-x-auto">
+        <table
+          {...props}
+          className={`w-full min-w-max border-collapse border border-[var(--glass-border)] text-[12.5px] ${className ?? ''}`}
+        >
+          {children}
+        </table>
+      </div>
+    )
+  },
+  thead({ className, children, ...props }: React.ComponentPropsWithoutRef<'thead'>) {
+    return (
+      <thead
+        {...props}
+        className={`bg-black/20 ${className ?? ''}`}
+      >
+        {children}
+      </thead>
+    )
+  },
+  tr({ className, children, ...props }: React.ComponentPropsWithoutRef<'tr'>) {
+    return (
+      <tr
+        {...props}
+        className={`${className ?? ''}`}
+      >
+        {children}
+      </tr>
+    )
+  },
+  th({ className, children, ...props }: React.ComponentPropsWithoutRef<'th'>) {
+    return (
+      <th
+        {...props}
+        className={`border border-[var(--glass-border)] px-2.5 py-1.5 text-left align-top font-semibold ${className ?? ''}`}
+      >
+        {children}
+      </th>
+    )
+  },
+  td({ className, children, ...props }: React.ComponentPropsWithoutRef<'td'>) {
+    return (
+      <td
+        {...props}
+        className={`border border-[var(--glass-border)] px-2.5 py-1.5 align-top ${className ?? ''}`}
+      >
+        {children}
+      </td>
+    )
   }
 }
 
