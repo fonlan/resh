@@ -603,7 +603,7 @@ export const MainWindow: React.FC = () => {
       {/* Title Bar with drag region */}
       <div className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
         {/* Tab Bar */}
-        <div className="flex flex-1 min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar" role="tablist">
+        <div className="flex flex-[0_1_auto] min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar" role="tablist">
           {tabs.map((tab, index) => (
             <div
               key={tab.id}
@@ -652,7 +652,7 @@ export const MainWindow: React.FC = () => {
         </div>
 
         {/* Drag region spacer - empty area for dragging */}
-        <div className="flex-1 min-w-[40px]" data-tauri-drag-region></div>
+        <div className="flex-1 min-w-[40px] basis-0" data-tauri-drag-region></div>
 
         {/* Right side: Settings button + Window controls */}
         <div className="flex items-center shrink-0">
