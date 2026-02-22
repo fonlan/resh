@@ -143,7 +143,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
 
   // Define handleData before useTerminal
   const handleData = useCallback((data: string) => {
-    const { newBuffer, commandExecuted } = processInputBuffer(data, inputBufferRef.current);
+    const { newBuffer, commandExecuted, shouldFlushImmediately } = processInputBuffer(data, inputBufferRef.current);
     
     inputBufferRef.current = newBuffer;
     isInputModeRef.current = true;
@@ -157,12 +157,6 @@ export const TerminalTab = React.memo<TerminalTabProps>(({
     }
 
     queuedTerminalInputRef.current += data;
-
-    const shouldFlushImmediately =
-      data.includes('\r') ||
-      data.includes('\n') ||
-      data.includes('\u0003') ||
-      data.includes('\u001b');
 
     if (shouldFlushImmediately) {
       void flushQueuedInput();

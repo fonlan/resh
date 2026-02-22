@@ -36,6 +36,47 @@ interface OptimisticMessageInput {
   message: ChatMessage;
 }
 
+interface RenderableMessage {
+  msg: ChatMessage;
+  sourceIndex: number;
+  isPending: boolean;
+  modelName: string | null;
+}
+
+const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
+
+const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: '180px'
+}
+
+const MARKDOWN_COMPONENTS = {
+  pre({ children }: { children?: React.ReactNode }) {
+    return <>{children}</>
+  },
+  code({ className, children }: { className?: string, children?: React.ReactNode }) {
+    if (className && className.startsWith('language-')) {
+      return (
+        <CodeBlock className={className}>
+          {children}
+        </CodeBlock>
+      )
+    }
+
+    return (
+      <code className="bg-transparent text-[var(--text-primary)] font-inherit text-inherit p-0 px-1 italic opacity-90 rounded border border-[var(--glass-border)]">
+        {children}
+      </code>
+    )
+  }
+}
+
+const HIDDEN_TOOL_CALL_NAMES = new Set([
+  'get_terminal_output',
+  'get_selected_terminal_output',
+  'read_file'
+])
+
 const normalizeAiErrorMessage = (error: unknown): string => {
   const rawMessage =
     typeof error === 'string'
@@ -235,14 +276,27 @@ const ToolConfirmation = ({
   );
 };
 
-const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { msg: ChatMessage, t: any, isPending?: boolean, isLast?: boolean, isLoading?: boolean }) => {
-  const { config } = useConfig();
+const MessageBubble = React.memo(({
+  msg,
+  t,
+  isPending,
+  isLast,
+  isStreaming,
+  modelName
+}: {
+  msg: ChatMessage,
+  t: any,
+  isPending?: boolean,
+  isLast?: boolean,
+  isStreaming?: boolean,
+  modelName: string | null
+}) => {
   const [copied, setCopied] = useState(false);
   const [showReasoning, setShowReasoning] = useState(true);
   const reasoningContentRef = useRef<HTMLDivElement>(null);
   const prevReasoningLength = useRef(msg.reasoning_content?.length || 0);
 
-  const timeString = (() => {
+  const timeString = useMemo(() => {
     if (!msg.created_at) return '';
     try {
       // SQLite CURRENT_TIMESTAMP is UTC "YYYY-MM-DD HH:MM:SS"
@@ -259,13 +313,7 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
     } catch {
       return '';
     }
-  })();
-
-  const modelName = (() => {
-    if (msg.role !== 'assistant' || !msg.model_id || !config?.aiModels) return null;
-    const model = config.aiModels.find(m => m.id === msg.model_id);
-    return model ? model.name : msg.model_id;
-  })();
+  }, [msg.created_at]);
 
   useEffect(() => {
     if (showReasoning && reasoningContentRef.current) {
@@ -293,19 +341,19 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
     }
   };
 
-  const visibleToolCalls = (() => {
+  const visibleToolCalls = useMemo(() => {
     if (!msg.tool_calls || isPending) return [];
-    return msg.tool_calls.filter(call =>
-      call.function.name !== 'get_terminal_output' &&
-      call.function.name !== 'get_selected_terminal_output' &&
-      call.function.name !== 'read_file'
-    )
-  })();
+    return msg.tool_calls.filter(call => !HIDDEN_TOOL_CALL_NAMES.has(call.function.name))
+  }, [isPending, msg.tool_calls]);
 
   const hasContentToCopy = !!(msg.content && msg.content.trim().length > 0)
+  const renderPlainStreamingContent = !!(isStreaming && msg.role === 'assistant')
 
   return (
-    <div className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+    <div
+      className={`flex flex-col gap-1 max-w-full ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+      style={MESSAGE_BUBBLE_PERF_STYLE}
+    >
       <div className={`relative max-w-[90%] flex flex-col group ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
         <div className={`p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto ${msg.role === 'user' ? 'ai-user-message-bubble bg-[var(--accent-primary)] text-white rounded-tr-sm selection:bg-white/55' : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm'}`}>
           {msg.reasoning_content && (
@@ -322,7 +370,7 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
               {showReasoning && (
                 <div className="leading-[1.6] max-h-[400px] overflow-y-auto font-serif italic bg-black/15 border-l-3 border-[var(--accent-primary)] rounded px-3.5 py-2.5 mt-1.5 text-[var(--text-muted)] text-[12.5px] shadow-inset relative whitespace-pre-wrap" ref={reasoningContentRef}>
                   {msg.reasoning_content}
-                  {isLast && isLoading && !msg.content && <span className="inline-block w-[2px] ml-0.5 text-[var(--accent-primary)] animate-cursor-blink vertical-align-middle font-bold">|</span>}
+                  {isLast && isStreaming && !msg.content && <span className="inline-block w-[2px] ml-0.5 text-[var(--accent-primary)] animate-cursor-blink vertical-align-middle font-bold">|</span>}
                 </div>
               )}
             </div>
@@ -355,30 +403,16 @@ const MessageBubble = React.memo(({ msg, t, isPending, isLast, isLoading }: { ms
             </div>
           ) : null}
           {msg.content && (
-            <ReactMarkdown 
-              remarkPlugins={[remarkGfm]}
-              components={{
-                pre({children}) {
-                  return <>{children}</>;
-                },
-                code({className, children}: any) {
-                  if (className && className.startsWith('language-')) {
-                    return (
-                      <CodeBlock className={className}>
-                        {children}
-                      </CodeBlock>
-                    );
-                  }
-                  return (
-                    <code className="bg-transparent text-[var(--text-primary)] font-inherit text-inherit p-0 px-1 italic opacity-90 rounded border border-[var(--glass-border)]">
-                      {children}
-                    </code>
-                  );
-                }
-              }}
-            >
-              {msg.content}
-            </ReactMarkdown>
+            renderPlainStreamingContent ? (
+              <div className="whitespace-pre-wrap break-words">{msg.content}</div>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                components={MARKDOWN_COMPONENTS}
+              >
+                {msg.content}
+              </ReactMarkdown>
+            )
           )}
           <div className={`flex items-center gap-2 mt-1 text-[10px] select-none ${msg.role === 'user' ? 'text-white/60 justify-end' : 'text-[var(--text-muted)] justify-between'}`}>
             {modelName && <span>{modelName}</span>}
@@ -553,6 +587,62 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   ])
 
   const currentMessages = activeSessionId ? optimisticMessagesBySession[activeSessionId] || [] : [];
+  const modelNameById = useMemo(() => {
+    if (!config?.aiModels?.length) {
+      return {} as Record<string, string>
+    }
+
+    return config.aiModels.reduce((acc, model) => {
+      acc[model.id] = model.name
+      return acc
+    }, {} as Record<string, string>)
+  }, [config?.aiModels])
+
+  const pendingToolCallIdSet = useMemo(() => {
+    if (!pendingToolCalls?.length) {
+      return new Set<string>()
+    }
+
+    return new Set(pendingToolCalls.map(call => call.id))
+  }, [pendingToolCalls])
+
+  const renderableMessages = useMemo<RenderableMessage[]>(() => {
+    if (currentMessages.length === 0) {
+      return []
+    }
+
+    const nextMessages: RenderableMessage[] = []
+
+    currentMessages.forEach((msg, sourceIndex) => {
+      if (msg.role === 'assistant') {
+        const hasContent = !!(msg.content && msg.content.trim().length > 0)
+        const hasReasoning = !!(msg.reasoning_content && msg.reasoning_content.trim().length > 0)
+        const hasVisibleTools = !!msg.tool_calls?.some(tc => !HIDDEN_TOOL_CALL_NAMES.has(tc.function.name))
+
+        if (!hasContent && !hasVisibleTools && !hasReasoning) {
+          return
+        }
+      }
+
+      const isPending = !!(
+        pendingToolCallIdSet.size &&
+        msg.tool_calls?.some(tc => pendingToolCallIdSet.has(tc.id))
+      )
+
+      const modelName = msg.role === 'assistant' && msg.model_id
+        ? (modelNameById[msg.model_id] || msg.model_id)
+        : null
+
+      nextMessages.push({
+        msg,
+        sourceIndex,
+        isPending,
+        modelName
+      })
+    })
+
+    return nextMessages
+  }, [currentMessages, modelNameById, pendingToolCallIdSet])
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     if (messagesContainerRef.current) {
@@ -573,7 +663,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, []);
 
-  const lastMessageContentLength = (() => {
+  const lastMessageContentLength = useMemo(() => {
     const lastMsg = currentMessages[currentMessages.length - 1];
     if (lastMsg?.role === 'assistant') {
       const contentLength = (lastMsg.content?.length || 0) + (lastMsg.reasoning_content?.length || 0);
@@ -582,7 +672,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       return contentLength + toolCallsCount;
     }
     return 0;
-  })();
+  }, [currentMessages]);
 
   useEffect(() => {
     const shouldScroll = isAtBottomRef.current || isLoading;
@@ -1231,32 +1321,17 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
             )}
             
-            {currentMessages.map((msg, idx) => {
-              const isPending = !!(pendingToolCalls && msg.tool_calls && pendingToolCalls.length > 0 && 
-                  msg.tool_calls.some(tc => pendingToolCalls.some(ptc => ptc.id === tc.id)));
-              
-              if (msg.role === 'assistant') {
-                const hasContent = msg.content && msg.content.trim().length > 0;
-                const hasReasoning = msg.reasoning_content && msg.reasoning_content.trim().length > 0;
-                const hasVisibleTools = msg.tool_calls && msg.tool_calls.some(tc => 
-                  tc.function.name !== 'get_terminal_output'
-                );
-                
-                // Keep the message if it has content, tools, or reasoning process
-                if (!hasContent && !hasVisibleTools && !hasReasoning) {
-                  return null;
-                }
-              }
-
-              return <MessageBubble 
-                key={`${activeSessionId}-${idx}`} 
-                msg={msg} 
-                t={t} 
-                isPending={isPending} 
-                isLast={idx === currentMessages.length - 1}
-                isLoading={isLoading}
-              />;
-            })}
+            {renderableMessages.map((message, idx) => (
+              <MessageBubble
+                key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || 'no-date'}`}
+                msg={message.msg}
+                t={t}
+                isPending={message.isPending}
+                isLast={idx === renderableMessages.length - 1}
+                isStreaming={isLoading && idx === renderableMessages.length - 1}
+                modelName={message.modelName}
+              />
+            ))}
             
             {pendingToolCalls && (
               <div className="ai-message assistant">

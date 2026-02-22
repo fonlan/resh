@@ -1,16 +1,53 @@
 export function processInputBuffer(
   data: string,
   currentBuffer: string
-): { newBuffer: string; commandExecuted: string | null } {
+): { newBuffer: string; commandExecuted: string | null; shouldFlushImmediately: boolean } {
   let buffer = currentBuffer;
   let commandExecuted: string | null = null;
+  let shouldFlushImmediately = false;
+
+  // Fast path for the common case: a single printable character.
+  if (data.length === 1) {
+    const code = data.charCodeAt(0);
+    const char = data[0];
+
+    if (char === '\r' || char === '\n') {
+      shouldFlushImmediately = true;
+      if (buffer.trim().length > 0) {
+        commandExecuted = buffer;
+      }
+      return { newBuffer: '', commandExecuted, shouldFlushImmediately };
+    }
+
+    if (code === 127) {
+      return { newBuffer: buffer.slice(0, -1), commandExecuted, shouldFlushImmediately };
+    }
+
+    if (code === 0x03 || code === 0x1b) {
+      shouldFlushImmediately = true;
+      return { newBuffer: buffer, commandExecuted, shouldFlushImmediately };
+    }
+
+    if (code >= 32) {
+      return { newBuffer: buffer + char, commandExecuted, shouldFlushImmediately };
+    }
+
+    return { newBuffer: buffer, commandExecuted, shouldFlushImmediately };
+  }
 
   let i = 0;
   while (i < data.length) {
     const code = data.charCodeAt(i);
 
+    if (code === 0x03) {
+      shouldFlushImmediately = true;
+      i++;
+      continue;
+    }
+
     // Handle ANSI Escape Sequences
     if (code === 0x1b) {
+      shouldFlushImmediately = true;
       i++; // Consume ESC
       if (i >= data.length) break;
 
@@ -50,6 +87,7 @@ export function processInputBuffer(
     const char = data[i];
 
     if (char === '\r' || char === '\n') {
+      shouldFlushImmediately = true;
       if (buffer.trim().length > 0) {
         commandExecuted = buffer;
       }
@@ -64,7 +102,7 @@ export function processInputBuffer(
     i++;
   }
 
-  return { newBuffer: buffer, commandExecuted };
+  return { newBuffer: buffer, commandExecuted, shouldFlushImmediately };
 }
 
 export function quotePathForTerminalInput(path: string): string {
