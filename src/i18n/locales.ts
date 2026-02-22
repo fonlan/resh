@@ -47,6 +47,13 @@ export const locales = {
     confirmExitApp: 'Confirm before exiting application',
     debugEnabled: 'Enable debug logs',
     maxRecentServers: 'Max recent connections (Welcome page)',
+    tabWidthMode: 'Tab Width Mode',
+    tabWidthModes: {
+      adaptive: 'Adaptive (by title)',
+      fixed: 'Fixed',
+    },
+    fixedTabWidth: 'Fixed Tab Width (px)',
+    fixedTabWidthHint: 'Range: {min}-{max} px',
     saveStatus: {
       saving: 'Saving...',
       saved: 'Saved',
@@ -449,6 +456,13 @@ export const locales = {
     confirmExitApp: '退出应用前确认',
     debugEnabled: '启用调试日志',
     maxRecentServers: '最近连接显示数量 (欢迎页)',
+    tabWidthMode: '标签页宽度模式',
+    tabWidthModes: {
+      adaptive: '自适应 (按标题)',
+      fixed: '固定宽度',
+    },
+    fixedTabWidth: '固定标签页宽度 (px)',
+    fixedTabWidthHint: '可设置范围：{min}-{max} px',
     saveStatus: {
       saving: '正在保存...',
       saved: '已保存',

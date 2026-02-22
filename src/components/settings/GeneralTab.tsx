@@ -3,6 +3,10 @@ import { GeneralSettings } from '../../types';
 import { useTranslation } from '../../i18n';
 import { CustomSelect } from '../CustomSelect';
 
+const MIN_FIXED_TAB_WIDTH = 120;
+const MAX_FIXED_TAB_WIDTH = 400;
+const DEFAULT_FIXED_TAB_WIDTH = 200;
+
 export interface GeneralTabProps {
   general: GeneralSettings;
   onGeneralUpdate: (general: GeneralSettings) => void;
@@ -21,6 +25,15 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
 
   const handleRecordingModeChange = (recordingMode: 'raw' | 'text') => {
     onGeneralUpdate({ ...general, recordingMode });
+  };
+
+  const handleTabWidthModeChange = (tabWidthMode: 'adaptive' | 'fixed') => {
+    onGeneralUpdate({ ...general, tabWidthMode });
+  };
+
+  const handleFixedTabWidthChange = (tabFixedWidth: number) => {
+    const normalizedWidth = Number.isFinite(tabFixedWidth) ? tabFixedWidth : DEFAULT_FIXED_TAB_WIDTH;
+    onGeneralUpdate({ ...general, tabFixedWidth: normalizedWidth });
   };
 
   const handleTerminalUpdate = (field: keyof typeof general.terminal, value: string | number) => {
@@ -94,6 +107,43 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({ general, onGeneralUpdate
               className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             />
           </div>
+
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label htmlFor="tab-width-mode-select" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.tabWidthMode}</label>
+            <CustomSelect
+              id="tab-width-mode-select"
+              value={general.tabWidthMode || 'fixed'}
+              onChange={(val) => handleTabWidthModeChange(val as 'adaptive' | 'fixed')}
+              options={[
+                { value: 'adaptive', label: t.tabWidthModes.adaptive },
+                { value: 'fixed', label: t.tabWidthModes.fixed }
+              ]}
+            />
+          </div>
+
+          {(general.tabWidthMode || 'fixed') === 'fixed' && (
+            <div className="flex flex-col gap-1.5 mb-4">
+              <label htmlFor="fixed-tab-width" className="block text-sm font-medium text-zinc-400 mb-1.5 ">{t.fixedTabWidth}</label>
+              <input
+                id="fixed-tab-width"
+                type="number"
+                value={general.tabFixedWidth || DEFAULT_FIXED_TAB_WIDTH}
+                onChange={(e) => handleFixedTabWidthChange(parseInt(e.target.value, 10) || DEFAULT_FIXED_TAB_WIDTH)}
+                onBlur={() => handleFixedTabWidthChange(
+                  Math.max(
+                    MIN_FIXED_TAB_WIDTH,
+                    Math.min(MAX_FIXED_TAB_WIDTH, general.tabFixedWidth || DEFAULT_FIXED_TAB_WIDTH)
+                  )
+                )}
+                min={MIN_FIXED_TAB_WIDTH}
+                max={MAX_FIXED_TAB_WIDTH}
+                className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              />
+              <span className="text-xs text-[var(--text-muted)]">
+                {t.fixedTabWidthHint.replace('{min}', MIN_FIXED_TAB_WIDTH.toString()).replace('{max}', MAX_FIXED_TAB_WIDTH.toString())}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

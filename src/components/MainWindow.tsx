@@ -54,6 +54,9 @@ const SPLIT_LAYOUT_REQUIRED_TABS: Record<SplitLayout, number> = {
   vertical: 2,
   grid: 4,
 }
+const MIN_FIXED_TAB_WIDTH = 120
+const MAX_FIXED_TAB_WIDTH = 400
+const DEFAULT_FIXED_TAB_WIDTH = 200
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig } = useConfig();
@@ -542,6 +545,11 @@ export const MainWindow: React.FC = () => {
   };
 
   const recentServers = config ? getRecentServers(config.general.recentServerIds, servers, config.general.maxRecentServers) : [];
+  const tabWidthMode = config?.general.tabWidthMode === 'adaptive' ? 'adaptive' : 'fixed'
+  const tabFixedWidthRaw = config?.general.tabFixedWidth
+  const tabFixedWidth = typeof tabFixedWidthRaw === 'number' && Number.isFinite(tabFixedWidthRaw)
+    ? Math.max(MIN_FIXED_TAB_WIDTH, Math.min(MAX_FIXED_TAB_WIDTH, tabFixedWidthRaw))
+    : DEFAULT_FIXED_TAB_WIDTH
 
   const globalSnippets = config?.snippets || [];
   const activeServer = activeServerId ? serverById.get(activeServerId) || null : null
@@ -617,9 +625,10 @@ export const MainWindow: React.FC = () => {
               tabIndex={activeTabId === tab.id ? 0 : -1}
               aria-selected={activeTabId === tab.id}
               aria-label={t.mainWindow.tabAriaLabel.replace('{index}', (index + 1).toString()).replace('{total}', tabs.length.toString())}
-              className={`flex items-center gap-2 px-4 h-10 w-[200px] bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
+              className={`flex items-center gap-2 px-4 h-10 ${tabWidthMode === 'adaptive' ? 'w-auto min-w-[120px] max-w-[320px]' : 'w-auto'} bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ''} ${
                 draggedTabIndex === index ? 'opacity-40 cursor-grabbing' : ''
               } ${dropTargetIndex === index ? 'border-l-2 border-l-[var(--accent-primary)]' : ''}`}
+              style={tabWidthMode === 'fixed' ? { width: `${tabFixedWidth}px` } : undefined}
               onClick={() => handleTabSelect(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >

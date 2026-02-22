@@ -38,6 +38,7 @@ export type Theme = 'light' | 'dark' | 'orange' | 'green' | 'system';
 export type Language = 'en' | 'zh-CN';
 export type AIMode = 'ask' | 'agent';
 export type RecordingMode = 'raw' | 'text';
+export type TabWidthMode = 'adaptive' | 'fixed';
 
 export interface GeneralSettings {
   theme: Theme;
@@ -57,5 +58,7 @@ export interface GeneralSettings {
   maxRecentServers: number;
   recentServerIds: string[];
   recordingMode: RecordingMode;
+  tabWidthMode: TabWidthMode;
+  tabFixedWidth: number;
   aiModelId?: string;
 }

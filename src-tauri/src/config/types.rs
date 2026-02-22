@@ -246,6 +246,12 @@ pub struct GeneralSettings {
     #[serde(default = "default_recording_mode")]
     #[serde(alias = "recordingMode", alias = "recording_mode")]
     pub recording_mode: String,
+    #[serde(default = "default_tab_width_mode")]
+    #[serde(alias = "tabWidthMode", alias = "tab_width_mode")]
+    pub tab_width_mode: String,
+    #[serde(default = "default_tab_fixed_width")]
+    #[serde(alias = "tabFixedWidth", alias = "tab_fixed_width")]
+    pub tab_fixed_width: u32,
     #[serde(default)]
     #[serde(alias = "aiModelId", alias = "ai_model_id")]
     pub ai_model_id: Option<String>,
@@ -253,6 +259,14 @@ pub struct GeneralSettings {
 
 fn default_recording_mode() -> String {
     "raw".to_string()
+}
+
+fn default_tab_width_mode() -> String {
+    "fixed".to_string()
+}
+
+fn default_tab_fixed_width() -> u32 {
+    200
 }
 
 fn default_ai_mode() -> String {
@@ -398,6 +412,8 @@ impl Config {
                 recent_server_ids: vec![],
                 window_state: default_window_state(),
                 recording_mode: default_recording_mode(),
+                tab_width_mode: default_tab_width_mode(),
+                tab_fixed_width: default_tab_fixed_width(),
                 ai_model_id: None,
             },
         }
