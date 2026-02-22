@@ -5,6 +5,7 @@ import { aiService } from '../services/aiService';
 import { useTranslation } from '../i18n';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { X, Send, Lock, LockOpen, Plus, History, Bot, Copy, Terminal, Check, AlertTriangle, Clock, Sliders, Sparkles, MessageSquare, Trash2, ChevronDown, ChevronRight, BrainCircuit, Square } from 'lucide-react';
 import { listen } from '@tauri-apps/api/event';
 import { ToolCall, ChatMessage } from '../types/ai';
@@ -44,6 +45,8 @@ interface RenderableMessage {
 }
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
+const VIRTUAL_MESSAGE_GAP_PX = 16
+const MESSAGE_VIRTUALIZATION_THRESHOLD = 40
 
 const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   contentVisibility: 'auto',
@@ -643,6 +646,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     return nextMessages
   }, [currentMessages, modelNameById, pendingToolCallIdSet])
+  const shouldUseVirtualizedMessages = renderableMessages.length > MESSAGE_VIRTUALIZATION_THRESHOLD
+  const messageVirtualizer = useVirtualizer({
+    enabled: shouldUseVirtualizedMessages,
+    count: renderableMessages.length,
+    getScrollElement: () => messagesContainerRef.current,
+    estimateSize: () => 188,
+    overscan: 8
+  })
+  const virtualMessageItems = messageVirtualizer.getVirtualItems()
+  const virtualizedTotalHeight = messageVirtualizer.getTotalSize()
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     if (messagesContainerRef.current) {
@@ -1321,17 +1334,55 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
             )}
             
-            {renderableMessages.map((message, idx) => (
-              <MessageBubble
-                key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || 'no-date'}`}
-                msg={message.msg}
-                t={t}
-                isPending={message.isPending}
-                isLast={idx === renderableMessages.length - 1}
-                isStreaming={isLoading && idx === renderableMessages.length - 1}
-                modelName={message.modelName}
-              />
-            ))}
+            {shouldUseVirtualizedMessages ? (
+              <div
+                className="relative w-full"
+                style={{ height: `${virtualizedTotalHeight}px` }}
+              >
+                {virtualMessageItems.map(virtualItem => {
+                  const message = renderableMessages[virtualItem.index]
+                  if (!message) {
+                    return null
+                  }
+
+                  const isLastMessage = virtualItem.index === renderableMessages.length - 1
+
+                  return (
+                    <div
+                      key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || 'no-date'}`}
+                      data-index={virtualItem.index}
+                      ref={messageVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform: `translateY(${virtualItem.start}px)`,
+                        paddingBottom: `${VIRTUAL_MESSAGE_GAP_PX}px`
+                      }}
+                    >
+                      <MessageBubble
+                        msg={message.msg}
+                        t={t}
+                        isPending={message.isPending}
+                        isLast={isLastMessage}
+                        isStreaming={isLoading && isLastMessage}
+                        modelName={message.modelName}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              renderableMessages.map((message, idx) => (
+                <MessageBubble
+                  key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || 'no-date'}`}
+                  msg={message.msg}
+                  t={t}
+                  isPending={message.isPending}
+                  isLast={idx === renderableMessages.length - 1}
+                  isStreaming={isLoading && idx === renderableMessages.length - 1}
+                  modelName={message.modelName}
+                />
+              ))
+            )}
             
             {pendingToolCalls && (
               <div className="ai-message assistant">

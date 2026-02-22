@@ -11,6 +11,7 @@
     "tauri-build": "tauri build"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "^3.13.18",
     "@tauri-apps/api": "2.10.1",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "lucide-react": "^0.563.0",
