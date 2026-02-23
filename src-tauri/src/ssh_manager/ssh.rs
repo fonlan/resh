@@ -183,7 +183,15 @@ impl SSHClient {
 
         let mut jh_handle_to_store = None;
 
-        let mut session = if let Some(p) = &params.proxy {
+        // If jumphost is configured, connection must go through jumphost branch.
+        // Proxy is still used there for connecting to jumphost itself.
+        let proxy_for_direct_target = if params.jumphost.is_some() {
+            None
+        } else {
+            params.proxy.as_ref()
+        };
+
+        let mut session = if let Some(p) = proxy_for_direct_target {
             info!("[SSH] Using {} proxy: {}:{}", p.proxy_type, p.host, p.port);
             let _ = tx
                 .send((
@@ -961,7 +969,15 @@ impl SSHClient {
         let config = Arc::new(config);
         let handler = ClientHandler::new();
 
-        let mut session = if let Some(p) = &params.proxy {
+        // Keep route selection consistent with establish_connection:
+        // with jumphost configured, never try direct proxy-to-target first.
+        let proxy_for_direct_target = if params.jumphost.is_some() {
+            None
+        } else {
+            params.proxy.as_ref()
+        };
+
+        let mut session = if let Some(p) = proxy_for_direct_target {
             if p.proxy_type == "socks5" {
                 use tokio_socks::tcp::Socks5Stream;
                 let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
