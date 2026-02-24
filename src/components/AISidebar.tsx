@@ -767,9 +767,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     const fallbackSessionId = activeSessionIdByServer[currentServerId] || null
     const sessionIdFromCurrentTab = currentTabId
       ? (
-          activeSessionIdBySshSession[currentTabId]
-          ?? sessions.find(session => session.sshSessionId === currentTabId)?.id
-          ?? null
+          Object.prototype.hasOwnProperty.call(activeSessionIdBySshSession, currentTabId)
+            ? (activeSessionIdBySshSession[currentTabId] ?? null)
+            : (sessions.find(session => session.sshSessionId === currentTabId)?.id ?? null)
         )
       : null
 
