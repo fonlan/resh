@@ -29,6 +29,9 @@ pub struct Server {
     #[serde(default)]
     pub auto_exec_commands: Vec<String>,
     #[serde(default)]
+    #[serde(alias = "codeSnippets", alias = "code_snippets")]
+    pub snippets: Vec<Snippet>,
+    #[serde(default)]
     #[serde(alias = "aiModels", alias = "ai_models")]
     pub ai_models: Vec<AiModel>,
     #[serde(default)]
