@@ -1,5 +1,5 @@
 import React, { useActionState } from 'react';
-import { useFormStatus } from 'react-dom';
+import { createPortal, useFormStatus } from 'react-dom';
 import { useTranslation } from '../i18n';
 
 interface FormModalProps {
@@ -87,8 +87,7 @@ export const FormModal: React.FC<FormModalProps> = ({
   }
 
   const effectiveSubmitText = submitText || t.common.save;
-
-  return (
+  const modalContent = (
     <div
       className="fixed inset-0 flex items-center justify-center z-[1100] animate-in fade-in duration-300"
       style={{
@@ -135,4 +134,10 @@ export const FormModal: React.FC<FormModalProps> = ({
       </div>
     </div>
   );
+
+  if (typeof document === 'undefined') {
+    return modalContent;
+  }
+
+  return createPortal(modalContent, document.body);
 };
