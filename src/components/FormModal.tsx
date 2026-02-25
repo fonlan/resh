@@ -69,6 +69,9 @@ export const FormModal: React.FC<FormModalProps> = ({
   noPadding = false,
 }) => {
   const { t } = useTranslation();
+  const stopParentOverlayClose = (e: React.MouseEvent) => {
+    e.stopPropagation();
+  };
 
   const [submitError, submitAction] = useActionState<string | null, FormData>(
     async (_previous, _formData) => {
@@ -94,6 +97,9 @@ export const FormModal: React.FC<FormModalProps> = ({
         background: 'rgba(2, 6, 23, 0.6)',
         backdropFilter: 'blur(10px) saturate(150%)'
       }}
+      onMouseDown={stopParentOverlayClose}
+      onMouseUp={stopParentOverlayClose}
+      onClick={stopParentOverlayClose}
     >
       <div
         className="relative bg-[var(--bg-secondary)] rounded-lg max-w-[700px] w-[calc(100%-32px)] overflow-hidden animate-in slide-in-from-bottom-2 duration-400"
