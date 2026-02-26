@@ -439,11 +439,11 @@ const ToolConfirmation = ({
              } catch {}
           }
           return (
-            <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10 overflow-hidden">
+            <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
               <span className="font-mono text-xs opacity-70">
                 {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
               </span>
-              <code className="block mt-1 text-sm bg-black/20 p-1 rounded">{displayArgs}</code>
+              <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
             </div>
           );
         })}
@@ -583,11 +583,11 @@ const MessageBubble = React.memo(({
                      } catch {}
                   }
                    return (
-                     <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10 overflow-hidden">
+                     <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
                        <span className="font-mono text-xs opacity-70 block">
                         {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
                       </span>
-                      <code className="block mt-1 text-sm bg-black/20 p-1 rounded break-all">{displayArgs}</code>
+                      <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
                     </div>
                   );
                 })}
