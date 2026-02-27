@@ -44,13 +44,41 @@ interface RenderableMessage {
   modelName: string | null;
 }
 
+interface RunInTerminalArgs {
+  command?: unknown
+  timeoutSeconds?: unknown
+}
+
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
 const VIRTUAL_MESSAGE_GAP_PX = 16
 const MESSAGE_VIRTUALIZATION_THRESHOLD = 40
+const DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS = 30
 
 const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   contentVisibility: 'auto',
   containIntrinsicSize: '180px'
+}
+
+const parseRunInTerminalToolArgs = (rawArguments: string) => {
+  let displayCommand = rawArguments
+  let timeoutSeconds = DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS
+
+  try {
+    const args = JSON.parse(rawArguments) as RunInTerminalArgs
+
+    if (typeof args.command === 'string' && args.command.length > 0) {
+      displayCommand = args.command
+    }
+
+    if (typeof args.timeoutSeconds === 'number' && Number.isFinite(args.timeoutSeconds) && args.timeoutSeconds > 0) {
+      timeoutSeconds = Math.floor(args.timeoutSeconds)
+    }
+  } catch {}
+
+  return {
+    displayCommand,
+    timeoutSeconds
+  }
 }
 
 const MARKDOWN_COMPONENTS: Components = {
@@ -363,30 +391,24 @@ const ToolConfirmation = ({
 
     toolCalls.forEach(call => {
       if (call.function.name === 'run_in_terminal') {
-        try {
-          const args = JSON.parse(call.function.arguments);
-          if (args.command) {
-            const originalCommand = args.command;
-            
-            // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
-            let cleanCommand = originalCommand.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, ' ');
-            cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, ' ');
-            
-            // Check for always dangerous commands
-            if (alwaysDangerous.test(cleanCommand)) {
-              sensitive = true;
-            } 
-            // Check for potentially dangerous commands
-            else if (potentiallyDangerous.test(cleanCommand)) {
-              sensitive = true;
-            }
-            // Check for curl/wget piped to shell
-            else if (dangerousWhenPiped.test(cleanCommand)) {
-              sensitive = true;
-            }
+        const { displayCommand: originalCommand } = parseRunInTerminalToolArgs(call.function.arguments)
+        if (originalCommand) {
+          // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
+          let cleanCommand = originalCommand.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, ' ');
+          cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, ' ');
+          
+          // Check for always dangerous commands
+          if (alwaysDangerous.test(cleanCommand)) {
+            sensitive = true;
+          } 
+          // Check for potentially dangerous commands
+          else if (potentiallyDangerous.test(cleanCommand)) {
+            sensitive = true;
           }
-        } catch (e) {
-          sensitive = true;
+          // Check for curl/wget piped to shell
+          else if (dangerousWhenPiped.test(cleanCommand)) {
+            sensitive = true;
+          }
         }
       }
     });
@@ -432,11 +454,11 @@ const ToolConfirmation = ({
       <div className="flex flex-col gap-2">
         {toolCalls.map(call => {
           let displayArgs = call.function.arguments;
+          let timeoutSeconds: number | null = null;
           if (call.function.name === 'run_in_terminal') {
-             try {
-               const args = JSON.parse(call.function.arguments);
-               displayArgs = args.command || displayArgs;
-             } catch {}
+             const parsedArgs = parseRunInTerminalToolArgs(call.function.arguments)
+             displayArgs = parsedArgs.displayCommand
+             timeoutSeconds = parsedArgs.timeoutSeconds
           }
           return (
             <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
@@ -444,6 +466,11 @@ const ToolConfirmation = ({
                 {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
               </span>
               <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
+              {timeoutSeconds !== null && (
+                <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                  {t.ai.tool.timeoutSeconds.replace('{seconds}', String(timeoutSeconds))}
+                </span>
+              )}
             </div>
           );
         })}
@@ -576,11 +603,11 @@ const MessageBubble = React.memo(({
               <div className="flex flex-col gap-2">
                 {visibleToolCalls.map((call: ToolCall) => {
                   let displayArgs = call.function.arguments;
+                  let timeoutSeconds: number | null = null;
                   if (call.function.name === 'run_in_terminal') {
-                     try {
-                       const args = JSON.parse(call.function.arguments);
-                       displayArgs = args.command || displayArgs;
-                     } catch {}
+                    const parsedArgs = parseRunInTerminalToolArgs(call.function.arguments)
+                    displayArgs = parsedArgs.displayCommand
+                    timeoutSeconds = parsedArgs.timeoutSeconds
                   }
                    return (
                      <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
@@ -588,6 +615,11 @@ const MessageBubble = React.memo(({
                         {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
                       </span>
                       <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
+                      {timeoutSeconds !== null && (
+                        <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                          {t.ai.tool.timeoutSeconds.replace('{seconds}', String(timeoutSeconds))}
+                        </span>
+                      )}
                     </div>
                   );
                 })}

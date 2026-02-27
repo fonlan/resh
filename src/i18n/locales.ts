@@ -312,7 +312,8 @@ export const locales = {
         codeCopied: 'Code copied',
         copyCode: 'Copy code',
         insertToTerminal: 'Insert to terminal',
-        executeCommand: 'Execute Command'
+        executeCommand: 'Execute Command',
+        timeoutSeconds: 'Timeout: {seconds}s'
       }
     },
     sftp: {
@@ -726,7 +727,8 @@ export const locales = {
           codeCopied: '代码已复制',
           copyCode: '复制代码',
           insertToTerminal: '插入终端',
-          executeCommand: '执行命令'
+          executeCommand: '执行命令',
+          timeoutSeconds: '超时时间: {seconds}秒'
         }
       },
     sftp: {
