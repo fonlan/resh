@@ -1506,6 +1506,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     >
       <input
         type="text"
+        autoFocus
         value={newItemName}
         onChange={(e) => setNewItemName(e.target.value)}
         placeholder={t.sftp.modals.itemNameLabel}
@@ -1529,6 +1530,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     >
       <input
         type="text"
+        autoFocus
         value={newItemName}
         onChange={(e) => setNewItemName(e.target.value)}
         placeholder={t.sftp.modals.itemNameLabel}
