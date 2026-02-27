@@ -46,6 +46,15 @@ interface DirectoryListResult {
 
 const SFTP_PATH_MIME_TYPE = 'application/x-resh-sftp-path';
 const SFTP_ENTRY_MIME_TYPE = 'application/x-resh-sftp-entry';
+const COPY_DATA_UNSUPPORTED_ERROR = 'SFTP_COPY_DATA_UNSUPPORTED';
+
+interface CopyFallbackModalState {
+  isOpen: boolean;
+  sessionId: string;
+  sourcePath: string;
+  destPath: string;
+  targetPath: string;
+}
 
 const formatPermissions = (entry: FileEntry): string => {
   const mode = entry.permissions;
@@ -231,6 +240,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, entry: FileEntry | null } | null>(null);
 
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
+  const [copyFallbackModal, setCopyFallbackModal] = useState<CopyFallbackModalState>({
+    isOpen: false,
+    sessionId: '',
+    sourcePath: '',
+    destPath: '',
+    targetPath: ''
+  });
   const [newFileModal, setNewFileModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
   const [newFolderModal, setNewFolderModal] = useState<{ isOpen: boolean, parentPath: string }>({ isOpen: false, parentPath: '' });
   const [renameModal, setRenameModal] = useState<{ isOpen: boolean, entry: FileEntry | null }>({ isOpen: false, entry: null });
@@ -905,6 +921,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     return `${normalizedParentPath}/${normalizedItemName}`;
   };
 
+  const quoteForShell = (input: string): string => {
+    return `'${input.replace(/'/g, `'\"'\"'`)}'`;
+  };
+
   const remapExpandedPathsAfterRename = (
     expandedPaths: Set<string>,
     oldPath: string,
@@ -947,6 +967,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const isDirectory = (entry: FileEntry): boolean => {
     return entry.is_dir || Boolean(entry.is_symlink && entry.target_is_dir === true);
+  };
+
+  const refreshPasteTarget = async (sid: string, targetPath: string) => {
+    const currentSessionState = sessions[sid];
+    if (currentSessionState) {
+      const expandedPaths = getAllExpandedPaths(currentSessionState.rootFiles);
+      await loadDirectory(targetPath, sid, expandedPaths, currentSessionState.sortState);
+    } else {
+      await loadDirectory(targetPath, sid, undefined, sortState);
+    }
   };
 
   const reloadParentDirectory = async (entry: FileEntry) => {
@@ -1164,22 +1194,31 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           newPath: destPath
         });
       } else {
-        const taskId = uuidv4();
-        await invoke('sftp_copy', {
-          sessionId,
-          sourcePath: clipboard.sourcePath,
-          destPath,
-          taskId
-        });
+        try {
+          await invoke('sftp_copy', {
+            sessionId,
+            sourcePath: clipboard.sourcePath,
+            destPath
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes(COPY_DATA_UNSUPPORTED_ERROR)) {
+            setCopyFallbackModal({
+              isOpen: true,
+              sessionId,
+              sourcePath: clipboard.sourcePath,
+              destPath,
+              targetPath
+            });
+            handleCloseContextMenu();
+            return;
+          }
+
+          throw error;
+        }
       }
 
-      const currentSessionState = sessions[sessionId];
-      if (currentSessionState) {
-        const expandedPaths = getAllExpandedPaths(currentSessionState.rootFiles);
-        await loadDirectory(targetPath, sessionId, expandedPaths, currentSessionState.sortState);
-      } else {
-        await loadDirectory(targetPath, sessionId, undefined, sortState);
-      }
+      await refreshPasteTarget(sessionId, targetPath);
     } catch (e) {
       console.error('Paste failed', e);
     }
@@ -1191,6 +1230,58 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const handleClearClipboard = () => {
     setClipboard(null);
     handleCloseContextMenu();
+  };
+
+  const closeCopyFallbackModal = () => {
+    setCopyFallbackModal({
+      isOpen: false,
+      sessionId: '',
+      sourcePath: '',
+      destPath: '',
+      targetPath: ''
+    });
+  };
+
+  const handleUseTerminalCpFallback = async () => {
+    if (!copyFallbackModal.isOpen || !copyFallbackModal.sessionId) return;
+
+    const cpCommand = `cp -a -- ${quoteForShell(copyFallbackModal.sourcePath)} ${quoteForShell(copyFallbackModal.destPath)}`;
+    try {
+      await invoke('send_command', {
+        params: {
+          session_id: copyFallbackModal.sessionId,
+          command: `${cpCommand}\r`
+        }
+      });
+    } catch (error) {
+      console.error('Failed to execute terminal cp fallback', error);
+    } finally {
+      closeCopyFallbackModal();
+      setClipboard(null);
+      handleCloseContextMenu();
+    }
+  };
+
+  const handleUseStreamingFallback = async () => {
+    if (!copyFallbackModal.isOpen || !copyFallbackModal.sessionId) return;
+
+    const { sessionId: fallbackSessionId, sourcePath, destPath, targetPath } = copyFallbackModal;
+    const taskId = uuidv4();
+    try {
+      await invoke('sftp_copy_streaming', {
+        sessionId: fallbackSessionId,
+        sourcePath,
+        destPath,
+        taskId
+      });
+      await refreshPasteTarget(fallbackSessionId, targetPath);
+    } catch (error) {
+      console.error('Streaming fallback copy failed', error);
+    } finally {
+      closeCopyFallbackModal();
+      setClipboard(null);
+      handleCloseContextMenu();
+    }
   };
 
   const handleResolveConflict = async (conflict: FileConflict, resolution: ConflictResolution | "overwrite-all") => {
@@ -1494,6 +1585,17 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             )}
         </div>
       )}
+
+    <ConfirmationModal
+      isOpen={copyFallbackModal.isOpen}
+      title={t.sftp.modals.copyFallbackTitle}
+      message={t.sftp.modals.copyFallbackMessage}
+      confirmText={t.sftp.modals.copyFallbackUseCp}
+      cancelText={t.sftp.modals.copyFallbackUseStreaming}
+      onConfirm={handleUseTerminalCpFallback}
+      onCancel={handleUseStreamingFallback}
+      type="warning"
+    />
 
     <ConfirmationModal
       isOpen={deleteModal.isOpen}

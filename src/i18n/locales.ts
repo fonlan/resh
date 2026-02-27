@@ -359,6 +359,10 @@ export const locales = {
       modals: {
         deleteConfirmTitle: 'Delete Confirmation',
         deleteConfirmMessage: 'Are you sure you want to delete this item? This action cannot be undone.',
+        copyFallbackTitle: 'Use Terminal Copy?',
+        copyFallbackMessage: 'Server-side copy is not supported. Use cp in the associated terminal? If not, we will fallback to client streaming copy.',
+        copyFallbackUseCp: 'Use cp Command',
+        copyFallbackUseStreaming: 'Use Streaming Copy',
         newFileTitle: 'New File',
         newFolderTitle: 'New Folder',
         renameTitle: 'Rename Item',
@@ -769,6 +773,10 @@ export const locales = {
       modals: {
         deleteConfirmTitle: '删除确认',
         deleteConfirmMessage: '确定要删除此项吗？此操作无法撤销。',
+        copyFallbackTitle: '使用终端复制？',
+        copyFallbackMessage: '服务器不支持服务端复制。是否在关联终端中使用 cp 命令复制？如果不同意，将回退到客户端流式复制。',
+        copyFallbackUseCp: '使用 cp 命令',
+        copyFallbackUseStreaming: '使用流式复制',
         newFileTitle: '新建文件',
         newFolderTitle: '新建文件夹',
         renameTitle: '重命名',

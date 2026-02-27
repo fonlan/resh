@@ -111,6 +111,7 @@ pub struct PendingTask {
 const COPY_DATA_EXTENSION_NAME: &str = "copy-data";
 const COPY_DATA_EXTENSION_VERSION: &str = "1";
 const COPY_TRANSFER_TYPE: &str = "copy";
+const COPY_DATA_UNSUPPORTED_ERROR: &str = "SFTP_COPY_DATA_UNSUPPORTED";
 
 #[derive(Serialize)]
 struct CopyDataExtension {
@@ -124,6 +125,12 @@ struct CopyDataExtension {
 enum ServerSideCopyError {
     Unsupported,
     Other(String),
+}
+
+#[derive(Clone, Copy)]
+enum CopyMode {
+    ServerSideOnly,
+    StreamingOnly,
 }
 
 struct CopyProgressContext<'a> {
@@ -1494,10 +1501,53 @@ impl SftpManager {
         dest_path: &str,
         task_id: Option<String>,
     ) -> Result<(), String> {
+        Self::copy_item_with_mode(
+            app,
+            session_id,
+            source_path,
+            dest_path,
+            task_id,
+            CopyMode::ServerSideOnly,
+        )
+        .await
+    }
+
+    pub async fn copy_item_streaming(
+        app: AppHandle,
+        session_id: &str,
+        source_path: &str,
+        dest_path: &str,
+        task_id: Option<String>,
+    ) -> Result<(), String> {
+        Self::copy_item_with_mode(
+            app,
+            session_id,
+            source_path,
+            dest_path,
+            task_id,
+            CopyMode::StreamingOnly,
+        )
+        .await
+    }
+
+    async fn copy_item_with_mode(
+        app: AppHandle,
+        session_id: &str,
+        source_path: &str,
+        dest_path: &str,
+        task_id: Option<String>,
+        copy_mode: CopyMode,
+    ) -> Result<(), String> {
         let sftp = Self::get_session(session_id).await?;
         let metadata = sftp.stat(source_path).await.map_err(|e| e.to_string())?.attrs;
         let is_dir = metadata.is_dir();
         let total_bytes = if is_dir { 0 } else { metadata.size.unwrap_or(0) };
+        if matches!(copy_mode, CopyMode::ServerSideOnly)
+            && !Self::session_supports_copy_data(session_id).await
+        {
+            return Err(COPY_DATA_UNSUPPORTED_ERROR.to_string());
+        }
+
         let copy_task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let file_name = Path::new(source_path)
             .file_name()
@@ -1514,46 +1564,65 @@ impl SftpManager {
             destination: dest_path,
         };
 
-        Self::emit_copy_progress(&progress_context, total_bytes, 0, 0.0, None, "queued", None);
-        Self::emit_copy_progress(
-            &progress_context,
-            total_bytes,
-            0,
-            0.0,
-            None,
-            "transferring",
-            None,
-        );
+        let should_emit_progress = matches!(copy_mode, CopyMode::StreamingOnly);
+        if should_emit_progress {
+            Self::emit_copy_progress(&progress_context, total_bytes, 0, 0.0, None, "queued", None);
+            Self::emit_copy_progress(
+                &progress_context,
+                total_bytes,
+                0,
+                0.0,
+                None,
+                "transferring",
+                None,
+            );
+        }
 
         let result = if is_dir {
-            Self::copy_dir_recursive(session_id, &sftp, source_path, dest_path).await
+            Self::copy_dir_recursive(session_id, &sftp, source_path, dest_path, copy_mode).await
         } else {
-            Self::copy_file(session_id, &sftp, source_path, dest_path, Some(&progress_context)).await
+            Self::copy_file(
+                session_id,
+                &sftp,
+                source_path,
+                dest_path,
+                if should_emit_progress {
+                    Some(&progress_context)
+                } else {
+                    None
+                },
+                copy_mode,
+            )
+            .await
         };
 
         match result {
             Ok(()) => {
-                Self::emit_copy_progress(
-                    &progress_context,
-                    total_bytes,
-                    total_bytes,
-                    0.0,
-                    Some(0),
-                    "completed",
-                    None,
-                );
+                if should_emit_progress {
+                    Self::emit_copy_progress(
+                        &progress_context,
+                        total_bytes,
+                        total_bytes,
+                        0.0,
+                        Some(0),
+                        "completed",
+                        None,
+                    );
+                }
                 Ok(())
             }
             Err(error) => {
-                Self::emit_copy_progress(
-                    &progress_context,
-                    total_bytes,
-                    0,
-                    0.0,
-                    None,
-                    "failed",
-                    Some(error.clone()),
-                );
+                if should_emit_progress {
+                    Self::emit_copy_progress(
+                        &progress_context,
+                        total_bytes,
+                        0,
+                        0.0,
+                        None,
+                        "failed",
+                        Some(error.clone()),
+                    );
+                }
                 Err(error)
             }
         }
@@ -1618,15 +1687,28 @@ impl SftpManager {
         source: &str,
         dest: &str,
         progress_context: Option<&CopyProgressContext<'_>>,
+        copy_mode: CopyMode,
     ) -> Result<(), String> {
-        if Self::session_supports_copy_data(session_id).await {
+        let supports_copy_data = Self::session_supports_copy_data(session_id).await;
+        if matches!(copy_mode, CopyMode::ServerSideOnly) && !supports_copy_data {
+            return Err(COPY_DATA_UNSUPPORTED_ERROR.to_string());
+        }
+
+        if supports_copy_data && !matches!(copy_mode, CopyMode::StreamingOnly) {
             match Self::copy_file_server_side(sftp, source, dest).await {
                 Ok(()) => return Ok(()),
                 Err(ServerSideCopyError::Unsupported) => {
                     Self::mark_copy_data_unsupported(session_id).await;
+                    if matches!(copy_mode, CopyMode::ServerSideOnly) {
+                        return Err(COPY_DATA_UNSUPPORTED_ERROR.to_string());
+                    }
                 }
                 Err(ServerSideCopyError::Other(error)) => return Err(error),
             }
+        }
+
+        if matches!(copy_mode, CopyMode::ServerSideOnly) {
+            return Err(COPY_DATA_UNSUPPORTED_ERROR.to_string());
         }
 
         Self::copy_file_streaming(sftp, source, dest, progress_context).await
@@ -1694,6 +1776,9 @@ impl SftpManager {
 
         let _ = sftp.close(handle).await;
         let _ = sftp.close(dest_handle).await;
+        if matches!(result, Err(ServerSideCopyError::Unsupported)) {
+            let _ = sftp.remove(dest).await;
+        }
 
         result
     }
@@ -1792,7 +1877,13 @@ impl SftpManager {
         Ok(())
     }
 
-    async fn copy_dir_recursive(session_id: &str, sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+    async fn copy_dir_recursive(
+        session_id: &str,
+        sftp: &Arc<RawSftpSession>,
+        source: &str,
+        dest: &str,
+        copy_mode: CopyMode,
+    ) -> Result<(), String> {
         sftp.mkdir(dest, FileAttributes::default()).await.map_err(|e| e.to_string())?;
 
         let handle = sftp.opendir(source).await.map_err(|e| e.to_string())?.handle;
@@ -1809,10 +1900,10 @@ impl SftpManager {
                         let is_dir = entry.attrs.is_dir();
 
                         if is_dir {
-                            Box::pin(Self::copy_dir_recursive(session_id, sftp, &source_path, &dest_path)).await?;
+                            Box::pin(Self::copy_dir_recursive(session_id, sftp, &source_path, &dest_path, copy_mode)).await?;
                         } else {
                             Box::pin(async {
-                                Self::copy_file(session_id, sftp, &source_path, &dest_path, None).await
+                                Self::copy_file(session_id, sftp, &source_path, &dest_path, None, copy_mode).await
                             }).await?;
                         }
                     }

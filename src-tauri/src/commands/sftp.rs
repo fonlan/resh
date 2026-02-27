@@ -131,3 +131,14 @@ pub async fn sftp_copy(
 ) -> Result<(), String> {
     SftpManager::copy_item(app, &session_id, &source_path, &dest_path, task_id).await
 }
+
+#[tauri::command]
+pub async fn sftp_copy_streaming(
+    app: AppHandle,
+    session_id: String,
+    source_path: String,
+    dest_path: String,
+    task_id: Option<String>,
+) -> Result<(), String> {
+    SftpManager::copy_item_streaming(app, &session_id, &source_path, &dest_path, task_id).await
+}
