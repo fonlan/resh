@@ -126,15 +126,10 @@ impl AiManager {
             
             let auth = AuthData::Key(session_token);
             let endpoint = Endpoint::from_owned("https://api.githubcopilot.com/");
-            
-            let is_claude = model.name.to_lowercase().contains("claude");
-            let adapter_kind = if is_claude {
-                AdapterKind::Anthropic
-            } else {
-                AdapterKind::OpenAI
-            };
 
-            (endpoint, auth, adapter_kind)
+            // Copilot chat APIs are OpenAI-compatible regardless of model family.
+            // Using Anthropic adapter here sends Anthropic-style routes and can 404.
+            (endpoint, auth, AdapterKind::OpenAI)
         } else {
             let api_key = channel.api_key.as_deref().unwrap_or_default();
             let auth = AuthData::Key(api_key.to_string());

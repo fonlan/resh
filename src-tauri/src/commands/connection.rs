@@ -23,7 +23,14 @@ async fn flush_terminal_output(window: &Window, session_id: &str, pending_output
     let text = std::mem::take(pending_output);
 
     if let Err(e) = SSHClient::update_terminal_buffer(session_id, &text).await {
-        tracing::error!("Failed to update terminal buffer: {}", e);
+        if e == "Session not found" {
+            tracing::debug!(
+                "Skipping terminal buffer update for {} before session registration",
+                session_id
+            );
+        } else {
+            tracing::error!("Failed to update terminal buffer: {}", e);
+        }
     }
 
     if let Err(e) = window.emit(&format!("terminal-output:{}", session_id), text) {
