@@ -80,6 +80,7 @@ interface RenderableMessage {
 interface CommandExecutionToolArgs {
   command?: unknown
   timeoutSeconds?: unknown
+  wait_finish?: unknown
 }
 
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
@@ -92,9 +93,16 @@ const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   containIntrinsicSize: "180px",
 }
 
-const parseCommandExecutionToolArgs = (rawArguments: string) => {
+const parseCommandExecutionToolArgs = (
+  rawArguments: string,
+  toolName: string,
+) => {
   let displayCommand = rawArguments
-  let timeoutSeconds = DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS
+  let timeoutSeconds: number | null =
+    toolName === "run_in_terminal" || toolName === "run_in_background"
+      ? DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS
+      : null
+  let waitFinish: boolean | null = toolName === "run_in_terminal" ? true : null
 
   try {
     const args = JSON.parse(rawArguments) as CommandExecutionToolArgs
@@ -104,17 +112,30 @@ const parseCommandExecutionToolArgs = (rawArguments: string) => {
     }
 
     if (
+      timeoutSeconds !== null &&
       typeof args.timeoutSeconds === "number" &&
       Number.isFinite(args.timeoutSeconds) &&
       args.timeoutSeconds > 0
     ) {
       timeoutSeconds = Math.floor(args.timeoutSeconds)
     }
+
+    if (
+      toolName === "run_in_terminal" &&
+      typeof args.wait_finish === "boolean"
+    ) {
+      waitFinish = args.wait_finish
+    }
   } catch {}
+
+  if (toolName === "run_in_terminal" && waitFinish === false) {
+    timeoutSeconds = null
+  }
 
   return {
     displayCommand,
     timeoutSeconds,
+    waitFinish,
   }
 }
 
@@ -452,7 +473,10 @@ const ToolConfirmation = ({
     toolCalls.forEach((call) => {
       if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
         const { displayCommand: originalCommand } =
-          parseCommandExecutionToolArgs(call.function.arguments)
+          parseCommandExecutionToolArgs(
+            call.function.arguments,
+            call.function.name,
+          )
         if (originalCommand) {
           // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
           let cleanCommand = originalCommand.replace(
@@ -527,12 +551,15 @@ const ToolConfirmation = ({
         {toolCalls.map((call) => {
           let displayArgs = call.function.arguments
           let timeoutSeconds: number | null = null
+          let waitFinish: boolean | null = null
           if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
             const parsedArgs = parseCommandExecutionToolArgs(
               call.function.arguments,
+              call.function.name,
             )
             displayArgs = parsedArgs.displayCommand
             timeoutSeconds = parsedArgs.timeoutSeconds
+            waitFinish = parsedArgs.waitFinish
           }
           return (
             <div
@@ -550,6 +577,16 @@ const ToolConfirmation = ({
                   {t.ai.tool.timeoutSeconds.replace(
                     "{seconds}",
                     String(timeoutSeconds),
+                  )}
+                </span>
+              )}
+              {waitFinish !== null && (
+                <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                  {t.ai.tool.waitFinish.replace(
+                    "{value}",
+                    waitFinish
+                      ? t.ai.tool.waitFinishOn
+                      : t.ai.tool.waitFinishOff,
                   )}
                 </span>
               )}
@@ -716,12 +753,15 @@ const MessageBubble = React.memo(
                   {visibleToolCalls.map((call: ToolCall) => {
                     let displayArgs = call.function.arguments
                     let timeoutSeconds: number | null = null
+                    let waitFinish: boolean | null = null
                     if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
                       const parsedArgs = parseCommandExecutionToolArgs(
                         call.function.arguments,
+                        call.function.name,
                       )
                       displayArgs = parsedArgs.displayCommand
                       timeoutSeconds = parsedArgs.timeoutSeconds
+                      waitFinish = parsedArgs.waitFinish
                     }
                     return (
                       <div
@@ -739,6 +779,16 @@ const MessageBubble = React.memo(
                             {t.ai.tool.timeoutSeconds.replace(
                               "{seconds}",
                               String(timeoutSeconds),
+                            )}
+                          </span>
+                        )}
+                        {waitFinish !== null && (
+                          <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
+                            {t.ai.tool.waitFinish.replace(
+                              "{value}",
+                              waitFinish
+                                ? t.ai.tool.waitFinishOn
+                                : t.ai.tool.waitFinishOff,
                             )}
                           </span>
                         )}

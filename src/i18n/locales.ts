@@ -325,6 +325,9 @@ export const locales = {
         executeCommand: "Execute Command",
         executeBackgroundCommand: "Execute Background Command",
         timeoutSeconds: "Timeout: {seconds}s",
+        waitFinish: "Wait for completion: {value}",
+        waitFinishOn: "Yes",
+        waitFinishOff: "No",
       },
     },
     sftp: {
@@ -755,6 +758,9 @@ export const locales = {
         executeCommand: "执行命令",
         executeBackgroundCommand: "后台执行命令",
         timeoutSeconds: "超时时间: {seconds}秒",
+        waitFinish: "等待命令结束: {value}",
+        waitFinishOn: "是",
+        waitFinishOff: "否",
       },
     },
     sftp: {

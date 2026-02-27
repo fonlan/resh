@@ -76,6 +76,13 @@ fn extract_command(arguments: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn extract_wait_finish(arguments: &str) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()?
+        .get("wait_finish")
+        .and_then(|v| v.as_bool())
+}
+
 #[derive(Debug)]
 struct ExecChannelCommandResult {
     output: String,
@@ -569,7 +576,7 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "run_in_terminal".to_string(),
-                description: "Execute a command in the terminal. Waits for command to complete or timeout, then returns the command output. Use this to fix issues, install packages, or perform system operations.".to_string(),
+                description: "Execute a command in the terminal. By default it waits for command completion or timeout and then returns output. Set wait_finish=false for interactive TUI programs (for example vim/top/htop) when you only need to launch without waiting.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -580,6 +587,10 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                         "timeoutSeconds": {
                             "type": "integer",
                             "description": "Timeout in seconds (default: 30). Maximum time to wait for command completion."
+                        },
+                        "wait_finish": {
+                            "type": "boolean",
+                            "description": "Whether to wait for command completion before returning (default: true). Set false for TUI/interactive programs that keep running."
                         }
                     },
                     "required": ["command"]
@@ -626,13 +637,13 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "send_terminal_input".to_string(),
-                description: "Send arbitrary characters or escape sequences to the terminal. Use this to send key presses like 'q' to quit a TUI program, or special keys like escape sequences. Useful for dismissing prompts or navigating TUI applications.".to_string(),
+                description: "Send arbitrary characters or escape sequences to the terminal. Use this to send key presses like 'q' to quit a TUI program, or special keys like escape sequences. To press Enter, send '\\n' (newline), not literal '\\\\n'. Useful for dismissing prompts or navigating TUI applications.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
                         "input": {
                             "type": "string",
-                            "description": "The characters or escape sequence to send (e.g., 'q' to quit, '\\x1b' for Escape, '\\n' for Enter)"
+                            "description": "The characters or escape sequence to send. IMPORTANT: use '\\n' (newline) to send Enter; do not send literal '\\\\n' text. Example: ':wq\\n'."
                         }
                     },
                     "required": ["input"]
@@ -1017,79 +1028,99 @@ async fn execute_tools_and_save(
                                 .get("timeoutSeconds")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(30);
+                            let wait_finish = args
+                                .get("wait_finish")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(true);
 
-                            SSHClient::start_command_recording(ssh_id).await?;
-                            tracing::debug!(
-                                "[execute_tools] Command '{}' sent, timeout={}s",
-                                cmd,
-                                timeout
-                            );
-
-                            let cmd_nl = format!("{}\n", cmd);
-                            if let Err(e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
-                                let _ = SSHClient::stop_command_recording(ssh_id).await;
-                                return Err(format!("Failed to send command: {}", e));
-                            }
-
-                            let marker = "\x1b\x1b\n";
-                            let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
-
-                            let mut interval =
-                                tokio::time::interval(tokio::time::Duration::from_millis(100));
-                            let mut elapsed = 0u64;
-                            let timeout_ms = timeout * 1000;
-                            let mut completion_detected = false;
-                            let mut timed_out = false;
-
-                            loop {
-                                if cancellation_token.is_cancelled() {
-                                    SSHClient::stop_command_recording(ssh_id).await.ok();
-                                    return Err("CANCELLED".to_string());
+                            if !wait_finish {
+                                tracing::debug!(
+                                    "[execute_tools] Command '{}' sent with wait_finish=false",
+                                    cmd
+                                );
+                                let cmd_nl = format!("{}\n", cmd);
+                                match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                                    Ok(_) => {
+                                        "Command sent to terminal without waiting for completion (wait_finish=false).".to_string()
+                                    }
+                                    Err(e) => format!("Failed to send command: {}", e),
                                 }
-                                interval.tick().await;
-                                elapsed += 100;
+                            } else {
+                                SSHClient::start_command_recording(ssh_id).await?;
+                                tracing::debug!(
+                                    "[execute_tools] Command '{}' sent, timeout={}s",
+                                    cmd,
+                                    timeout
+                                );
 
-                                let is_completed =
-                                    SSHClient::check_command_completed(ssh_id).await?;
-                                if is_completed {
-                                    completion_detected = true;
-                                    tracing::debug!(
-                                        "[execute_tools] Command '{}' completed at {}ms",
-                                        cmd,
-                                        elapsed
-                                    );
-                                    break;
+                                let cmd_nl = format!("{}\n", cmd);
+                                if let Err(e) =
+                                    SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await
+                                {
+                                    let _ = SSHClient::stop_command_recording(ssh_id).await;
+                                    return Err(format!("Failed to send command: {}", e));
                                 }
 
-                                if elapsed >= timeout_ms {
-                                    tracing::warn!(
-                                        "[execute_tools] Timeout reached at {}ms for command '{}'",
-                                        elapsed,
-                                        cmd
-                                    );
-                                    timed_out = true;
-                                    break;
-                                }
-                            }
+                                let marker = "\x1b\x1b\n";
+                                let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
 
-                            match SSHClient::stop_command_recording(ssh_id).await {
-                                Ok(output) => {
-                                    let clean_output = String::from_utf8_lossy(
-                                        &strip_ansi_escapes::strip(output.as_bytes()),
-                                    )
-                                    .to_string();
-                                    if timed_out && !completion_detected {
-                                        build_run_in_terminal_timeout_failure_message(
-                                            timeout,
-                                            &clean_output,
-                                        )
-                                    } else if clean_output.trim().is_empty() {
-                                        "Command produced no output".to_string()
-                                    } else {
-                                        clean_output
+                                let mut interval =
+                                    tokio::time::interval(tokio::time::Duration::from_millis(100));
+                                let mut elapsed = 0u64;
+                                let timeout_ms = timeout * 1000;
+                                let mut completion_detected = false;
+                                let mut timed_out = false;
+
+                                loop {
+                                    if cancellation_token.is_cancelled() {
+                                        SSHClient::stop_command_recording(ssh_id).await.ok();
+                                        return Err("CANCELLED".to_string());
+                                    }
+                                    interval.tick().await;
+                                    elapsed += 100;
+
+                                    let is_completed =
+                                        SSHClient::check_command_completed(ssh_id).await?;
+                                    if is_completed {
+                                        completion_detected = true;
+                                        tracing::debug!(
+                                            "[execute_tools] Command '{}' completed at {}ms",
+                                            cmd,
+                                            elapsed
+                                        );
+                                        break;
+                                    }
+
+                                    if elapsed >= timeout_ms {
+                                        tracing::warn!(
+                                            "[execute_tools] Timeout reached at {}ms for command '{}'",
+                                            elapsed,
+                                            cmd
+                                        );
+                                        timed_out = true;
+                                        break;
                                     }
                                 }
-                                Err(e) => format!("Error getting output: {}", e),
+
+                                match SSHClient::stop_command_recording(ssh_id).await {
+                                    Ok(output) => {
+                                        let clean_output = String::from_utf8_lossy(
+                                            &strip_ansi_escapes::strip(output.as_bytes()),
+                                        )
+                                        .to_string();
+                                        if timed_out && !completion_detected {
+                                            build_run_in_terminal_timeout_failure_message(
+                                                timeout,
+                                                &clean_output,
+                                            )
+                                        } else if clean_output.trim().is_empty() {
+                                            "Command produced no output".to_string()
+                                        } else {
+                                            clean_output
+                                        }
+                                    }
+                                    Err(e) => format!("Error getting output: {}", e),
+                                }
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -1693,12 +1724,14 @@ pub fn run_ai_turn(
                         for call in &tool_calls {
                             let timeout = extract_timeout(&call.function.arguments);
                             let command = extract_command(&call.function.arguments);
+                            let wait_finish = extract_wait_finish(&call.function.arguments);
                             tracing::info!(
-                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s, raw_args=\"{}\"",
+                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s, wait_finish={}, raw_args=\"{}\"",
                                     call.id,
                                     call.function.name,
                                     command.as_deref().unwrap_or("N/A"),
                                     timeout.unwrap_or(30),
+                                    wait_finish.unwrap_or(true),
                                     call.function.arguments
                                 );
                         }
@@ -2460,7 +2493,20 @@ pub async fn run_in_terminal(
     session_id: String,
     command: String,
     timeout_seconds: Option<u64>,
+    wait_finish: Option<bool>,
 ) -> Result<String, String> {
+    let should_wait_finish = wait_finish.unwrap_or(true);
+    if !should_wait_finish {
+        let cmd_nl = format!("{}\n", command);
+        SSHClient::send_input(&session_id, cmd_nl.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to send command: {}", e))?;
+        return Ok(
+            "Command sent to terminal without waiting for completion (wait_finish=false)."
+                .to_string(),
+        );
+    }
+
     let timeout = timeout_seconds.unwrap_or(30);
     let timeout_ms = timeout * 1000;
 
