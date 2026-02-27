@@ -1,5 +1,6 @@
 use russh_sftp::client::RawSftpSession;
-use russh_sftp::protocol::{OpenFlags, FileAttributes, StatusCode};
+use russh_sftp::protocol::{FileAttributes, OpenFlags, Packet, Status, StatusCode};
+use russh_sftp::ser;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use std::io::SeekFrom;
@@ -106,8 +107,26 @@ pub struct PendingTask {
     pub cancel_token: Arc<AtomicBool>,
 }
 
+const COPY_DATA_EXTENSION_NAME: &str = "copy-data";
+const COPY_DATA_EXTENSION_VERSION: &str = "1";
+
+#[derive(Serialize)]
+struct CopyDataExtension {
+    read_from_handle: String,
+    read_from_offset: u64,
+    read_data_length: u64,
+    write_to_handle: String,
+    write_to_offset: u64,
+}
+
+enum ServerSideCopyError {
+    Unsupported,
+    Other(String),
+}
+
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> = Mutex::new(HashMap::new());
+    static ref SFTP_COPY_DATA_SUPPORT: Mutex<HashMap<String, bool>> = Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref CONFLICT_RESPONSES: Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>> = Mutex::new(HashMap::new());
     static ref TASK_QUEUE: Mutex<VecDeque<PendingTask>> = Mutex::new(VecDeque::new());
@@ -419,10 +438,18 @@ impl SftpManager {
             .map_err(|e| format!("Failed to request SFTP subsystem: {}", e))?;
 
         let sftp = RawSftpSession::new(channel.into_stream());
-        sftp.init().await.map_err(|e| format!("Failed to init SFTP session: {}", e))?;
+        let version = sftp.init().await.map_err(|e| format!("Failed to init SFTP session: {}", e))?;
+        let supports_copy_data = version
+            .extensions
+            .get(COPY_DATA_EXTENSION_NAME)
+            .is_some_and(|value| value == COPY_DATA_EXTENSION_VERSION);
 
         let sftp = Arc::new(sftp);
         sessions.insert(session_id.to_string(), sftp.clone());
+        drop(sessions);
+
+        let mut copy_data_support = SFTP_COPY_DATA_SUPPORT.lock().await;
+        copy_data_support.insert(session_id.to_string(), supports_copy_data);
 
         Ok(sftp)
     }
@@ -430,6 +457,10 @@ impl SftpManager {
     pub async fn remove_session(session_id: &str) {
         let mut sessions = SFTP_SESSIONS.lock().await;
         sessions.remove(session_id);
+        drop(sessions);
+
+        let mut copy_data_support = SFTP_COPY_DATA_SUPPORT.lock().await;
+        copy_data_support.remove(session_id);
     }
 
     pub async fn list_dir(session_id: &str, path: &str) -> Result<Vec<FileEntry>, String> {
@@ -1452,15 +1483,120 @@ impl SftpManager {
         let is_dir = metadata.is_dir();
 
         if is_dir {
-            Self::copy_dir_recursive(&sftp, source_path, dest_path).await?;
+            Self::copy_dir_recursive(session_id, &sftp, source_path, dest_path).await?;
         } else {
-            Self::copy_file(&sftp, source_path, dest_path).await?;
+            Self::copy_file(session_id, &sftp, source_path, dest_path).await?;
         }
 
         Ok(())
     }
 
-    async fn copy_file(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+    fn is_copy_data_unsupported_status(status: &Status) -> bool {
+        if status.status_code == StatusCode::OpUnsupported {
+            return true;
+        }
+
+        if status.status_code != StatusCode::Failure {
+            return false;
+        }
+
+        let error_message = status.error_message.to_ascii_lowercase();
+        error_message.contains("unsupported")
+            || error_message.contains("unknown extended request")
+            || error_message.contains("copy-data")
+    }
+
+    async fn session_supports_copy_data(session_id: &str) -> bool {
+        let support = SFTP_COPY_DATA_SUPPORT.lock().await;
+        support.get(session_id).copied().unwrap_or(false)
+    }
+
+    async fn mark_copy_data_unsupported(session_id: &str) {
+        let mut support = SFTP_COPY_DATA_SUPPORT.lock().await;
+        support.insert(session_id.to_string(), false);
+    }
+
+    async fn copy_file(session_id: &str, sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+        if Self::session_supports_copy_data(session_id).await {
+            match Self::copy_file_server_side(sftp, source, dest).await {
+                Ok(()) => return Ok(()),
+                Err(ServerSideCopyError::Unsupported) => {
+                    Self::mark_copy_data_unsupported(session_id).await;
+                }
+                Err(ServerSideCopyError::Other(error)) => return Err(error),
+            }
+        }
+
+        Self::copy_file_streaming(sftp, source, dest).await
+    }
+
+    async fn copy_file_server_side(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), ServerSideCopyError> {
+        let handle = sftp
+            .open(source, OpenFlags::READ, FileAttributes::default())
+            .await
+            .map_err(|e| ServerSideCopyError::Other(e.to_string()))?
+            .handle;
+
+        let mut attrs = FileAttributes::default();
+        if let Ok(source_attrs) = sftp.stat(source).await {
+            attrs.permissions = source_attrs.attrs.permissions;
+        }
+
+        let dest_handle = match sftp
+            .open(dest, OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE, attrs)
+            .await
+        {
+            Ok(result) => result.handle,
+            Err(error) => {
+                let _ = sftp.close(handle).await;
+                return Err(ServerSideCopyError::Other(error.to_string()));
+            }
+        };
+
+        let request_data = match ser::to_bytes(&CopyDataExtension {
+            read_from_handle: handle.clone(),
+            read_from_offset: 0,
+            read_data_length: 0,
+            write_to_handle: dest_handle.clone(),
+            write_to_offset: 0,
+        }) {
+            Ok(data) => data.to_vec(),
+            Err(error) => {
+                let _ = sftp.close(handle).await;
+                let _ = sftp.close(dest_handle).await;
+                return Err(ServerSideCopyError::Other(error.to_string()));
+            }
+        };
+
+        let result = match sftp.extended(COPY_DATA_EXTENSION_NAME, request_data).await {
+            Ok(Packet::Status(status)) if status.status_code == StatusCode::Ok => Ok(()),
+            Ok(Packet::Status(status)) if Self::is_copy_data_unsupported_status(&status) => {
+                Err(ServerSideCopyError::Unsupported)
+            }
+            Ok(Packet::Status(status)) => {
+                Err(ServerSideCopyError::Other(format!(
+                    "Server-side copy failed: {}",
+                    status.error_message
+                )))
+            }
+            Ok(_) => Err(ServerSideCopyError::Other(
+                "Server-side copy failed: unexpected response packet".to_string(),
+            )),
+            Err(russh_sftp::client::error::Error::Status(status))
+                if Self::is_copy_data_unsupported_status(&status) =>
+            {
+                Err(ServerSideCopyError::Unsupported)
+            }
+            Err(error) => Err(ServerSideCopyError::Other(error.to_string())),
+        };
+
+        let _ = sftp.close(handle).await;
+        let _ = sftp.close(dest_handle).await;
+
+        result
+    }
+
+    async fn copy_file_streaming(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
         let handle = sftp.open(source, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
 
         let mut attrs = FileAttributes::default();
@@ -1514,7 +1650,7 @@ impl SftpManager {
         Ok(())
     }
 
-    async fn copy_dir_recursive(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+    async fn copy_dir_recursive(session_id: &str, sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
         sftp.mkdir(dest, FileAttributes::default()).await.map_err(|e| e.to_string())?;
 
         let handle = sftp.opendir(source).await.map_err(|e| e.to_string())?.handle;
@@ -1531,10 +1667,10 @@ impl SftpManager {
                         let is_dir = entry.attrs.is_dir();
 
                         if is_dir {
-                            Box::pin(Self::copy_dir_recursive(sftp, &source_path, &dest_path)).await?;
+                            Box::pin(Self::copy_dir_recursive(session_id, sftp, &source_path, &dest_path)).await?;
                         } else {
                             Box::pin(async {
-                                Self::copy_file(sftp, &source_path, &dest_path).await
+                                Self::copy_file(session_id, sftp, &source_path, &dest_path).await
                             }).await?;
                         }
                     }
