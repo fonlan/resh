@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
-import { Plus, Settings, Server as ServerIcon } from 'lucide-react';
-import { Server } from '../types';
-import { useTranslation } from '../i18n';
-import { EmojiText } from './EmojiText';
+import React, { useState, useEffect, useRef, useCallback } from "react"
+import { createPortal } from "react-dom"
+import { Plus, Settings, Server as ServerIcon } from "lucide-react"
+import { Server } from "../types"
+import { useTranslation } from "../i18n"
+import { EmojiText } from "./EmojiText"
 
 interface NewTabButtonProps {
-  servers: Server[];
-  onServerSelect: (serverId: string) => void;
-  onOpenSettings: () => void;
+  servers: Server[]
+  onServerSelect: (serverId: string) => void
+  onOpenSettings: () => void
 }
 
 export const NewTabButton: React.FC<NewTabButtonProps> = ({
@@ -16,28 +16,35 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
   onServerSelect,
   onOpenSettings,
 }) => {
-  const { t } = useTranslation();
-  const [isOpen, setIsOpen] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
+  const { t } = useTranslation()
+  const [isOpen, setIsOpen] = useState(false)
+  const [menuPosition, setMenuPosition] = useState<{
+    top: number
+    left: number
+  } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
 
   const updateMenuPosition = useCallback(() => {
     if (!buttonRef.current) {
-      return;
+      return
     }
 
-    const rect = buttonRef.current.getBoundingClientRect();
-    const menuWidth = 360;
-    const estimatedMenuHeight = 420;
-    const left = Math.min(Math.max(rect.left, 8), window.innerWidth - menuWidth - 8);
-    const canOpenDownward = rect.bottom + 10 + estimatedMenuHeight <= window.innerHeight - 8;
+    const rect = buttonRef.current.getBoundingClientRect()
+    const menuWidth = 360
+    const estimatedMenuHeight = 420
+    const left = Math.min(
+      Math.max(rect.left, 8),
+      window.innerWidth - menuWidth - 8,
+    )
+    const canOpenDownward =
+      rect.bottom + 10 + estimatedMenuHeight <= window.innerHeight - 8
     const top = canOpenDownward
       ? rect.bottom + 10
-      : Math.max(8, rect.top - estimatedMenuHeight - 10);
+      : Math.max(8, rect.top - estimatedMenuHeight - 10)
 
-    setMenuPosition({ top, left });
-  }, []);
+    setMenuPosition({ top, left })
+  }, [])
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -48,43 +55,45 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
         buttonRef.current &&
         !buttonRef.current.contains(event.target as Node)
       ) {
-        setIsOpen(false);
+        setIsOpen(false)
       }
-    };
+    }
 
-    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside)
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, []);
+      document.removeEventListener("mousedown", handleClickOutside)
+    }
+  }, [])
 
   useEffect(() => {
     if (!isOpen) {
-      setMenuPosition(null);
-      return;
+      setMenuPosition(null)
+      return
     }
 
-    updateMenuPosition();
-    window.addEventListener('resize', updateMenuPosition);
-    window.addEventListener('scroll', updateMenuPosition, true);
+    updateMenuPosition()
+    window.addEventListener("resize", updateMenuPosition)
+    window.addEventListener("scroll", updateMenuPosition, true)
 
     return () => {
-      window.removeEventListener('resize', updateMenuPosition);
-      window.removeEventListener('scroll', updateMenuPosition, true);
-    };
-  }, [isOpen, updateMenuPosition]);
+      window.removeEventListener("resize", updateMenuPosition)
+      window.removeEventListener("scroll", updateMenuPosition, true)
+    }
+  }, [isOpen, updateMenuPosition])
 
   const handleServerClick = (serverId: string) => {
-    onServerSelect(serverId);
-    setIsOpen(false);
-  };
+    onServerSelect(serverId)
+    setIsOpen(false)
+  }
 
   const handleSettingsClick = () => {
-    onOpenSettings();
-    setIsOpen(false);
-  };
+    onOpenSettings()
+    setIsOpen(false)
+  }
 
-  const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedServers = [...servers].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 
   const menu =
     isOpen && menuPosition
@@ -95,7 +104,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
             style={{
               top: menuPosition.top,
               left: menuPosition.left,
-              animation: 'dropdownReveal 0.3s cubic-bezier(0.16, 1, 0.3, 1)'
+              animation: "dropdownReveal 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
             }}
           >
             <style>{`
@@ -130,13 +139,17 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
                     className="w-full flex items-center gap-[14px] p-[12px_16px] bg-transparent border-none rounded-[var(--radius-md)] cursor-pointer transition-all duration-200 text-left text-[var(--text-secondary)] my-0.5 hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-primary)] hover:translate-x-1 group"
                     onClick={() => handleServerClick(server.id)}
                   >
-                    <ServerIcon size={18} className="text-[var(--accent-primary)] opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110" />
+                    <ServerIcon
+                      size={18}
+                      className="text-[var(--accent-primary)] opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110"
+                    />
                     <div className="flex flex-col min-w-0 flex-1">
                       <span className="text-[14px] font-bold text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis">
                         <EmojiText text={server.name} />
                       </span>
                       <span className="text-[11px] text-[var(--text-muted)] font-mono opacity-70 whitespace-nowrap overflow-hidden text-ellipsis">
-                        {server.username ? `${server.username}@` : ''}{server.host}
+                        {server.username ? `${server.username}@` : ""}
+                        {server.host}
                       </span>
                     </div>
                   </button>
@@ -155,9 +168,9 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               </button>
             </div>
           </div>,
-          document.body
+          document.body,
         )
-      : null;
+      : null
 
   return (
     <>
@@ -167,13 +180,13 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
           ref={buttonRef}
           className="h-10 w-10 flex items-center justify-center bg-transparent border-none rounded-none text-[var(--text-secondary)] cursor-pointer transition-all shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
           onClick={() => {
-            setIsOpen(prev => {
-              const next = !prev;
+            setIsOpen((prev) => {
+              const next = !prev
               if (next) {
-                updateMenuPosition();
+                updateMenuPosition()
               }
-              return next;
-            });
+              return next
+            })
           }}
           aria-label={t.welcome.newConnection}
           title={t.welcome.newConnection}
@@ -184,5 +197,5 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
       </div>
       {menu}
     </>
-  );
-};
+  )
+}

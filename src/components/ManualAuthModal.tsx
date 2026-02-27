@@ -1,15 +1,15 @@
-import React, { useRef } from 'react';
-import type { ManualAuthCredentials } from '../types';
-import { useTranslation } from '../i18n';
-import { Upload } from 'lucide-react';
+import React, { useRef } from "react"
+import type { ManualAuthCredentials } from "../types"
+import { useTranslation } from "../i18n"
+import { Upload } from "lucide-react"
 
 interface ManualAuthModalProps {
-  serverName: string;
-  credentials: ManualAuthCredentials;
-  onCredentialsChange: (creds: ManualAuthCredentials) => void;
-  onConnect: () => void;
-  onCancel: () => void;
-  isRetry?: boolean;
+  serverName: string
+  credentials: ManualAuthCredentials
+  onCredentialsChange: (creds: ManualAuthCredentials) => void
+  onConnect: () => void
+  onCancel: () => void
+  isRetry?: boolean
 }
 
 export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
@@ -20,56 +20,61 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
   onCancel,
   isRetry = false,
 }) => {
-  const { t } = useTranslation();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const modalRef = useRef<HTMLDivElement>(null);
-  const mouseDownInsideRef = useRef(false);
+  const { t } = useTranslation()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const modalRef = useRef<HTMLDivElement>(null)
+  const mouseDownInsideRef = useRef(false)
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const file = e.target.files?.[0]
+    if (!file) return
 
-    const reader = new FileReader();
+    const reader = new FileReader()
     reader.onload = (event) => {
-      const content = event.target?.result as string;
+      const content = event.target?.result as string
       if (content) {
-        onCredentialsChange({ ...credentials, privateKey: content });
+        onCredentialsChange({ ...credentials, privateKey: content })
       }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
+    }
+    reader.readAsText(file)
+    e.target.value = ""
+  }
 
   const handleOverlayMouseDown = (e: React.MouseEvent) => {
     if (modalRef.current && modalRef.current.contains(e.target as Node)) {
-      mouseDownInsideRef.current = true;
+      mouseDownInsideRef.current = true
     } else {
-      mouseDownInsideRef.current = false;
+      mouseDownInsideRef.current = false
     }
-  };
+  }
 
   const handleOverlayMouseUp = (e: React.MouseEvent) => {
-    if (!mouseDownInsideRef.current && modalRef.current && !modalRef.current.contains(e.target as Node)) {
-      onCancel();
+    if (
+      !mouseDownInsideRef.current &&
+      modalRef.current &&
+      !modalRef.current.contains(e.target as Node)
+    ) {
+      onCancel()
     }
-    mouseDownInsideRef.current = false;
-  };
+    mouseDownInsideRef.current = false
+  }
 
   return (
-    <div 
+    <div
       className="fixed inset-0 flex items-center justify-center z-[1000] animate-in fade-in duration-300"
       style={{
-        background: 'rgba(2, 6, 23, 0.4)',
-        backdropFilter: 'blur(12px) saturate(180%)'
+        background: "rgba(2, 6, 23, 0.4)",
+        backdropFilter: "blur(12px) saturate(180%)",
       }}
       onMouseDown={handleOverlayMouseDown}
       onMouseUp={handleOverlayMouseUp}
     >
-      <div 
+      <div
         ref={modalRef}
         className="relative bg-[var(--bg-secondary)] rounded-lg w-full max-w-[480px] flex flex-col overflow-hidden animate-in slide-in-from-bottom-2 duration-400"
         style={{
-          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--glass-border), inset 0 1px 1px rgba(255, 255, 255, 0.05)'
+          boxShadow:
+            "0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--glass-border), inset 0 1px 1px rgba(255, 255, 255, 0.05)",
         }}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--glass-border)] bg-[var(--bg-secondary)]">
@@ -80,11 +85,16 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
 
         <div className="p-6 overflow-y-auto bg-[var(--bg-secondary)]">
           <p className="text-sm mb-5 text-zinc-400">
-            {isRetry ? t.manualAuth.retryDescription.replace('{server}', serverName) : t.manualAuth.enterCredentials.replace('{server}', serverName)}
+            {isRetry
+              ? t.manualAuth.retryDescription.replace("{server}", serverName)
+              : t.manualAuth.enterCredentials.replace("{server}", serverName)}
           </p>
 
           <div className="mb-4">
-            <label htmlFor="manual-username" className="block text-sm font-medium text-zinc-400 mb-1.5">
+            <label
+              htmlFor="manual-username"
+              className="block text-sm font-medium text-zinc-400 mb-1.5"
+            >
               {t.manualAuth.usernameLabel}
             </label>
             <input
@@ -92,14 +102,20 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               type="text"
               value={credentials.username}
               onChange={(e) =>
-                onCredentialsChange({ ...credentials, username: e.target.value })
+                onCredentialsChange({
+                  ...credentials,
+                  username: e.target.value,
+                })
               }
               className="w-full px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
             />
           </div>
 
           <div className="mb-4">
-            <label htmlFor="manual-password" className="block text-sm font-medium text-zinc-400 mb-1.5">
+            <label
+              htmlFor="manual-password"
+              className="block text-sm font-medium text-zinc-400 mb-1.5"
+            >
               {t.manualAuth.passwordLabel}
             </label>
             <input
@@ -107,7 +123,10 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               type="password"
               value={credentials.password}
               onChange={(e) =>
-                onCredentialsChange({ ...credentials, password: e.target.value })
+                onCredentialsChange({
+                  ...credentials,
+                  password: e.target.value,
+                })
               }
               className="w-full px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
               placeholder={t.manualAuth.passwordPlaceholder}
@@ -120,7 +139,10 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
 
           <div className="mb-4">
             <div className="flex justify-between items-center mb-1.5">
-              <label htmlFor="manual-key" className="block text-sm font-medium text-zinc-400 mb-0">
+              <label
+                htmlFor="manual-key"
+                className="block text-sm font-medium text-zinc-400 mb-0"
+              >
                 {t.manualAuth.privateKeyLabel}
               </label>
               <button
@@ -144,7 +166,10 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
               id="manual-key"
               value={credentials.privateKey}
               onChange={(e) =>
-                onCredentialsChange({ ...credentials, privateKey: e.target.value })
+                onCredentialsChange({
+                  ...credentials,
+                  privateKey: e.target.value,
+                })
               }
               className="w-full px-3 py-2 text-xs rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] min-h-[100px] resize-y font-mono"
               placeholder={t.manualAuth.privateKeyPlaceholder}
@@ -157,7 +182,10 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
                 type="checkbox"
                 checked={credentials.rememberMe || false}
                 onChange={(e) =>
-                  onCredentialsChange({ ...credentials, rememberMe: e.target.checked })
+                  onCredentialsChange({
+                    ...credentials,
+                    rememberMe: e.target.checked,
+                  })
                 }
                 className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
               />
@@ -188,5 +216,5 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
         </div>
       </div>
     </div>
-  );
-};
+  )
+}

@@ -1,81 +1,85 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Code, Folder } from 'lucide-react';
-import { Snippet } from '../../types';
-import { FormModal } from '../FormModal';
-import { ConfirmationModal } from '../ConfirmationModal';
-import { SnippetForm, SnippetFormHandle } from './SnippetForm';
-import { generateId } from '../../utils/idGenerator';
-import { useTranslation } from '../../i18n';
+import React, { useState, useRef, useEffect } from "react"
+import { Plus, Edit2, Trash2, Code, Folder } from "lucide-react"
+import { Snippet } from "../../types"
+import { FormModal } from "../FormModal"
+import { ConfirmationModal } from "../ConfirmationModal"
+import { SnippetForm, SnippetFormHandle } from "./SnippetForm"
+import { generateId } from "../../utils/idGenerator"
+import { useTranslation } from "../../i18n"
 
 interface SnippetsTabProps {
-  snippets: Snippet[];
-  onSnippetsUpdate: (snippets: Snippet[]) => void;
-  availableGroups?: string[];
+  snippets: Snippet[]
+  onSnippetsUpdate: (snippets: Snippet[]) => void
+  availableGroups?: string[]
 }
 
-export const SnippetsTab: React.FC<SnippetsTabProps> = ({ 
-  snippets, 
+export const SnippetsTab: React.FC<SnippetsTabProps> = ({
+  snippets,
   onSnippetsUpdate,
-  availableGroups = []
+  availableGroups = [],
 }) => {
-  const { t } = useTranslation();
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null);
-  const [isSynced, setIsSynced] = useState(true);
-  const [snippetToDelete, setSnippetToDelete] = useState<string | null>(null);
-  const formRef = useRef<SnippetFormHandle>(null);
+  const { t } = useTranslation()
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingSnippet, setEditingSnippet] = useState<Snippet | null>(null)
+  const [isSynced, setIsSynced] = useState(true)
+  const [snippetToDelete, setSnippetToDelete] = useState<string | null>(null)
+  const formRef = useRef<SnippetFormHandle>(null)
 
-  const existingGroups = Array.from(new Set([
-    ...snippets.map(s => s.group || t.snippetForm.defaultGroup),
-    ...availableGroups
-  ]));
+  const existingGroups = Array.from(
+    new Set([
+      ...snippets.map((s) => s.group || t.snippetForm.defaultGroup),
+      ...availableGroups,
+    ]),
+  )
 
   useEffect(() => {
     if (formRef.current) {
-      setIsSynced(formRef.current.synced);
+      setIsSynced(formRef.current.synced)
     }
-  }, [isFormOpen]);
+  }, [isFormOpen])
 
   const handleAddSnippet = () => {
-    setEditingSnippet(null);
-    setIsSynced(true);
-    setIsFormOpen(true);
-  };
+    setEditingSnippet(null)
+    setIsSynced(true)
+    setIsFormOpen(true)
+  }
 
   const handleEditSnippet = (snippet: Snippet) => {
-    setEditingSnippet(snippet);
-    setIsSynced(snippet.synced !== undefined ? snippet.synced : true);
-    setIsFormOpen(true);
-  };
+    setEditingSnippet(snippet)
+    setIsSynced(snippet.synced !== undefined ? snippet.synced : true)
+    setIsFormOpen(true)
+  }
 
   const handleDeleteSnippet = (snippetId: string) => {
-    setSnippetToDelete(snippetId);
-  };
+    setSnippetToDelete(snippetId)
+  }
 
   const confirmDeleteSnippet = () => {
     if (snippetToDelete) {
-      onSnippetsUpdate(snippets.filter((s) => s.id !== snippetToDelete));
-      setSnippetToDelete(null);
+      onSnippetsUpdate(snippets.filter((s) => s.id !== snippetToDelete))
+      setSnippetToDelete(null)
     }
-  };
+  }
 
   const handleSaveSnippet = (snippet: Snippet) => {
     if (editingSnippet) {
       onSnippetsUpdate(
-        snippets.map((s) => (s.id === editingSnippet.id ? { ...snippet, id: s.id } : s))
-      );
+        snippets.map((s) =>
+          s.id === editingSnippet.id ? { ...snippet, id: s.id } : s,
+        ),
+      )
     } else {
-      onSnippetsUpdate([...snippets, { ...snippet, id: generateId() }]);
+      onSnippetsUpdate([...snippets, { ...snippet, id: generateId() }])
     }
-    setIsFormOpen(false);
-    setEditingSnippet(null);
-  };
+    setIsFormOpen(false)
+    setEditingSnippet(null)
+  }
 
   const handleFormSubmit = () => {
     if (formRef.current) {
-      formRef.current.submit();
+      formRef.current.submit()
     }
-  };
+  }
 
   return (
     <div className="w-full max-w-full">
@@ -98,23 +102,22 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
       ) : (
         <div className="item-list">
           {snippets.map((snippet) => (
-            <div
-              key={snippet.id}
-              className="item-card"
-            >
+            <div key={snippet.id} className="item-card">
               <div className="item-info">
                 <p className="item-name flex items-center gap-2">
                   <Code size={14} className="text-[var(--text-muted)]" />
                   {snippet.name}
                 </p>
                 <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] mt-1">
-                   <span className="tag flex items-center gap-1">
-                     <Folder size={10} />
-                     {snippet.group || t.snippetForm.defaultGroup}
-                   </span>
-                   {snippet.description && (
-                     <span className="truncate max-w-[200px]">{snippet.description}</span>
-                   )}
+                  <span className="tag flex items-center gap-1">
+                    <Folder size={10} />
+                    {snippet.group || t.snippetForm.defaultGroup}
+                  </span>
+                  {snippet.description && (
+                    <span className="truncate max-w-[200px]">
+                      {snippet.description}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="item-actions">
@@ -142,10 +145,12 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
 
       <FormModal
         isOpen={isFormOpen}
-        title={editingSnippet ? t.snippetsTab.editSnippet : t.snippetsTab.addSnippet}
+        title={
+          editingSnippet ? t.snippetsTab.editSnippet : t.snippetsTab.addSnippet
+        }
         onClose={() => {
-          setIsFormOpen(false);
-          setEditingSnippet(null);
+          setIsFormOpen(false)
+          setEditingSnippet(null)
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
@@ -156,13 +161,16 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
               id="synced-footer-snippet"
               checked={isSynced}
               onChange={(e) => {
-                setIsSynced(e.target.checked);
+                setIsSynced(e.target.checked)
                 if (formRef.current) {
-                  formRef.current.setSynced(e.target.checked);
+                  formRef.current.setSynced(e.target.checked)
                 }
               }}
             />
-            <label htmlFor="synced-footer-snippet" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
+            <label
+              htmlFor="synced-footer-snippet"
+              className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer"
+            >
               {t.common.syncThisItem}
             </label>
           </div>
@@ -185,5 +193,5 @@ export const SnippetsTab: React.FC<SnippetsTabProps> = ({
         type="danger"
       />
     </div>
-  );
-};
+  )
+}

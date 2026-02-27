@@ -1,104 +1,110 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { ProxyConfig as ProxyType, Server as ServerType } from '../../types';
-import { FormModal } from '../FormModal';
-import { ConfirmationModal } from '../ConfirmationModal';
-import { ProxyForm, ProxyFormHandle } from './ProxyForm';
-import { generateId } from '../../utils/idGenerator';
-import { useTranslation } from '../../i18n';
-import { EmojiText } from '../EmojiText';
+import React, { useState, useRef, useEffect } from "react"
+import { Plus, Edit2, Trash2 } from "lucide-react"
+import { ProxyConfig as ProxyType, Server as ServerType } from "../../types"
+import { FormModal } from "../FormModal"
+import { ConfirmationModal } from "../ConfirmationModal"
+import { ProxyForm, ProxyFormHandle } from "./ProxyForm"
+import { generateId } from "../../utils/idGenerator"
+import { useTranslation } from "../../i18n"
+import { EmojiText } from "../EmojiText"
 
 interface ProxyTabProps {
-  proxies: ProxyType[];
-  onProxiesUpdate: (proxies: ProxyType[]) => void;
-  servers: ServerType[];
-  onServersUpdate: (servers: ServerType[]) => void;
+  proxies: ProxyType[]
+  onProxiesUpdate: (proxies: ProxyType[]) => void
+  servers: ServerType[]
+  onServersUpdate: (servers: ServerType[]) => void
 }
 
-export const ProxyTab: React.FC<ProxyTabProps> = ({ 
-  proxies, 
+export const ProxyTab: React.FC<ProxyTabProps> = ({
+  proxies,
   onProxiesUpdate,
   servers,
-  onServersUpdate
+  onServersUpdate,
 }) => {
-  const { t } = useTranslation();
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null);
-  const [isSynced, setIsSynced] = useState(true);
-  const [proxyToDelete, setProxyToDelete] = useState<string | null>(null);
-  const formRef = useRef<ProxyFormHandle>(null);
+  const { t } = useTranslation()
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingProxy, setEditingProxy] = useState<ProxyType | null>(null)
+  const [isSynced, setIsSynced] = useState(true)
+  const [proxyToDelete, setProxyToDelete] = useState<string | null>(null)
+  const formRef = useRef<ProxyFormHandle>(null)
 
   // Sync state with formref
   useEffect(() => {
     if (formRef.current) {
-      setIsSynced(formRef.current.synced);
+      setIsSynced(formRef.current.synced)
     }
-  }, [isFormOpen]);
+  }, [isFormOpen])
 
   const existingNames = proxies
     .filter((p) => p.id !== editingProxy?.id)
-    .map((p) => p.name);
+    .map((p) => p.name)
 
   const handleAddProxy = () => {
-    setEditingProxy(null);
-    setIsSynced(true);
-    setIsFormOpen(true);
-  };
+    setEditingProxy(null)
+    setIsSynced(true)
+    setIsFormOpen(true)
+  }
 
   const handleEditProxy = (proxy: ProxyType) => {
-    setEditingProxy(proxy);
-    setIsSynced(proxy.synced !== undefined ? proxy.synced : true);
-    setIsFormOpen(true);
-  };
+    setEditingProxy(proxy)
+    setIsSynced(proxy.synced !== undefined ? proxy.synced : true)
+    setIsFormOpen(true)
+  }
 
   const handleDeleteProxy = (proxyId: string) => {
-    const usingServers = servers.filter((s) => s.proxyId === proxyId);
-    
+    const usingServers = servers.filter((s) => s.proxyId === proxyId)
+
     if (usingServers.length > 0) {
-      setProxyToDelete(proxyId);
+      setProxyToDelete(proxyId)
     } else {
-      onProxiesUpdate(proxies.filter((p) => p.id !== proxyId));
+      onProxiesUpdate(proxies.filter((p) => p.id !== proxyId))
     }
-  };
+  }
 
   const confirmDeleteProxy = () => {
     if (proxyToDelete) {
-      const updatedServers = servers.map((s) => 
-        s.proxyId === proxyToDelete ? { ...s, proxyId: null } : s
-      );
-      onServersUpdate(updatedServers);
-      onProxiesUpdate(proxies.filter((p) => p.id !== proxyToDelete));
-      setProxyToDelete(null);
+      const updatedServers = servers.map((s) =>
+        s.proxyId === proxyToDelete ? { ...s, proxyId: null } : s,
+      )
+      onServersUpdate(updatedServers)
+      onProxiesUpdate(proxies.filter((p) => p.id !== proxyToDelete))
+      setProxyToDelete(null)
     }
-  };
+  }
 
   const handleSaveProxy = (proxy: ProxyType) => {
     if (editingProxy) {
       // Update existing
       onProxiesUpdate(
-        proxies.map((p) => (p.id === editingProxy.id ? { ...proxy, id: p.id } : p))
-      );
+        proxies.map((p) =>
+          p.id === editingProxy.id ? { ...proxy, id: p.id } : p,
+        ),
+      )
     } else {
       // Add new
-      onProxiesUpdate([...proxies, { ...proxy, id: generateId() }]);
+      onProxiesUpdate([...proxies, { ...proxy, id: generateId() }])
     }
-    setIsFormOpen(false);
-    setEditingProxy(null);
-  };
+    setIsFormOpen(false)
+    setEditingProxy(null)
+  }
 
   const handleFormSubmit = () => {
     // Trigger form validation and submission via ref
     if (formRef.current) {
-      formRef.current.submit();
+      formRef.current.submit()
     }
-  };
+  }
 
-  const sortedProxies = [...proxies].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedProxies = [...proxies].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 
   return (
     <div className="w-full max-w-full">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-base font-semibold text-[var(--text-primary)]">{t.proxyTab.title}</h3>
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">
+          {t.proxyTab.title}
+        </h3>
         <button
           type="button"
           onClick={handleAddProxy}
@@ -116,10 +122,7 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
       ) : (
         <div className="item-list">
           {sortedProxies.map((proxy) => (
-            <div
-              key={proxy.id}
-              className="item-card"
-            >
+            <div key={proxy.id} className="item-card">
               <div className="item-info">
                 <p className="item-name">
                   <EmojiText text={proxy.name} />
@@ -155,8 +158,8 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
         isOpen={isFormOpen}
         title={editingProxy ? t.proxyTab.editProxy : t.proxyTab.addProxy}
         onClose={() => {
-          setIsFormOpen(false);
-          setEditingProxy(null);
+          setIsFormOpen(false)
+          setEditingProxy(null)
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
@@ -167,15 +170,18 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
               id="synced-footer-proxy"
               checked={isSynced}
               onChange={(e) => {
-                setIsSynced(e.target.checked);
+                setIsSynced(e.target.checked)
                 if (formRef.current) {
-                  formRef.current.setSynced(e.target.checked);
+                  formRef.current.setSynced(e.target.checked)
                 }
               }}
               className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border border-[1.5px] border-[var(--glass-border)] rounded-[4px] bg-[var(--bg-primary)] cursor-pointer relative transition-all duration-[150ms] flex-shrink-0 inline-flex items-center justify-center vertical-align-middle checked:bg-[var(--accent-primary)] checked:border-[var(--accent-primary)] checked:shadow-[var(--glow-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
             />
-            <label htmlFor="synced-footer-proxy" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
-              {t.common.syncThisItem || 'Sync this item'}
+            <label
+              htmlFor="synced-footer-proxy"
+              className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer"
+            >
+              {t.common.syncThisItem || "Sync this item"}
             </label>
           </div>
         }
@@ -197,5 +203,5 @@ export const ProxyTab: React.FC<ProxyTabProps> = ({
         type="danger"
       />
     </div>
-  );
-};
+  )
+}

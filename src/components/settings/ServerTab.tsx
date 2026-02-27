@@ -1,21 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Power } from 'lucide-react';
-import { Server, Authentication, ProxyConfig as ProxyType, Snippet } from '../../types';
-import { FormModal } from '../FormModal';
-import { ConfirmationModal } from '../ConfirmationModal';
-import { ServerForm, ServerFormHandle } from './ServerForm';
-import { generateId } from '../../utils/idGenerator';
-import { useTranslation } from '../../i18n';
-import { EmojiText } from '../EmojiText';
+import React, { useState, useRef, useEffect } from "react"
+import { Plus, Edit2, Trash2, Power } from "lucide-react"
+import {
+  Server,
+  Authentication,
+  ProxyConfig as ProxyType,
+  Snippet,
+} from "../../types"
+import { FormModal } from "../FormModal"
+import { ConfirmationModal } from "../ConfirmationModal"
+import { ServerForm, ServerFormHandle } from "./ServerForm"
+import { generateId } from "../../utils/idGenerator"
+import { useTranslation } from "../../i18n"
+import { EmojiText } from "../EmojiText"
 
 interface ServerTabProps {
-  servers: Server[];
-  authentications: Authentication[];
-  proxies: ProxyType[];
-  snippets?: Snippet[];
-  onServersUpdate: (servers: Server[]) => void;
-  onConnectServer?: (serverId: string) => void;
-  editServerId?: string | null;
+  servers: Server[]
+  authentications: Authentication[]
+  proxies: ProxyType[]
+  snippets?: Snippet[]
+  onServersUpdate: (servers: Server[]) => void
+  onConnectServer?: (serverId: string) => void
+  editServerId?: string | null
 }
 
 export const ServerTab: React.FC<ServerTabProps> = ({
@@ -27,94 +32,105 @@ export const ServerTab: React.FC<ServerTabProps> = ({
   onConnectServer,
   editServerId,
 }) => {
-  const { t } = useTranslation();
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingServer, setEditingServer] = useState<Server | null>(null);
-  const [isSynced, setIsSynced] = useState(true);
-  const [serverToDelete, setServerToDelete] = useState<{ id: string; isInUse: boolean } | null>(null);
-  const formRef = useRef<ServerFormHandle>(null);
+  const { t } = useTranslation()
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingServer, setEditingServer] = useState<Server | null>(null)
+  const [isSynced, setIsSynced] = useState(true)
+  const [serverToDelete, setServerToDelete] = useState<{
+    id: string
+    isInUse: boolean
+  } | null>(null)
+  const formRef = useRef<ServerFormHandle>(null)
 
   const handleAddServer = () => {
-    setEditingServer(null);
-    setIsSynced(true);
-    setIsFormOpen(true);
-  };
+    setEditingServer(null)
+    setIsSynced(true)
+    setIsFormOpen(true)
+  }
 
   const handleEditServer = (server: Server) => {
-    setEditingServer(server);
-    setIsSynced(server.synced !== undefined ? server.synced : true);
-    setIsFormOpen(true);
-  };
+    setEditingServer(server)
+    setIsSynced(server.synced !== undefined ? server.synced : true)
+    setIsFormOpen(true)
+  }
 
   const handleDeleteServer = (serverId: string) => {
-    const usingServers = servers.filter((s) => s.jumphostId === serverId);
-    setServerToDelete({ id: serverId, isInUse: usingServers.length > 0 });
-  };
+    const usingServers = servers.filter((s) => s.jumphostId === serverId)
+    setServerToDelete({ id: serverId, isInUse: usingServers.length > 0 })
+  }
 
   const confirmDeleteServer = () => {
     if (serverToDelete) {
       const updatedServers = servers
         .filter((s) => s.id !== serverToDelete.id)
-        .map((s) => (s.jumphostId === serverToDelete.id ? { ...s, jumphostId: null } : s));
-      onServersUpdate(updatedServers);
-      setServerToDelete(null);
+        .map((s) =>
+          s.jumphostId === serverToDelete.id ? { ...s, jumphostId: null } : s,
+        )
+      onServersUpdate(updatedServers)
+      setServerToDelete(null)
     }
-  };
+  }
 
   const handleSaveServer = (server: Server) => {
     if (editingServer) {
-      const updatedServers = servers.map((s) => (s.id === editingServer.id ? { ...server, id: s.id } : s));
-      onServersUpdate(updatedServers);
+      const updatedServers = servers.map((s) =>
+        s.id === editingServer.id ? { ...server, id: s.id } : s,
+      )
+      onServersUpdate(updatedServers)
     } else {
-      onServersUpdate([...servers, { ...server, id: generateId() }]);
+      onServersUpdate([...servers, { ...server, id: generateId() }])
     }
-    setIsFormOpen(false);
-    setEditingServer(null);
-  };
+    setIsFormOpen(false)
+    setEditingServer(null)
+  }
 
   const handleFormSubmit = () => {
     if (formRef.current) {
-      formRef.current.submit();
+      formRef.current.submit()
     }
-  };
+  }
 
-  const lastProcessedEditServerId = useRef<string | null>(null);
+  const lastProcessedEditServerId = useRef<string | null>(null)
 
   useEffect(() => {
     if (!editServerId) {
-      lastProcessedEditServerId.current = null;
-      return;
+      lastProcessedEditServerId.current = null
+      return
     }
 
     if (editServerId !== lastProcessedEditServerId.current) {
-      const server = servers.find((s) => s.id === editServerId);
+      const server = servers.find((s) => s.id === editServerId)
       if (server) {
-        handleEditServer(server);
-        lastProcessedEditServerId.current = editServerId;
+        handleEditServer(server)
+        lastProcessedEditServerId.current = editServerId
       }
     }
-  }, [editServerId, servers]);
+  }, [editServerId, servers])
 
   useEffect(() => {
     if (isFormOpen && formRef.current) {
-      setIsSynced(formRef.current.synced);
+      setIsSynced(formRef.current.synced)
     }
-  }, [isFormOpen]);
+  }, [isFormOpen])
 
   const existingNames = servers
     .filter((s) => s.id !== editingServer?.id)
-    .map((s) => s.name);
+    .map((s) => s.name)
 
-  const globalSnippetGroups = Array.from(new Set(
-    snippets.map(s => s.group || t.snippetForm.defaultGroup)
-  ));
+  const globalSnippetGroups = Array.from(
+    new Set(snippets.map((s) => s.group || t.snippetForm.defaultGroup)),
+  )
 
-  const sortedServers = [...servers].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedServers = [...servers].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )
 
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h3 className="text-[15px] font-semibold text-[var(--text-primary)] m-0">{t.serverTab.title}</h3>
+        <h3 className="text-[15px] font-semibold text-[var(--text-primary)] m-0">
+          {t.serverTab.title}
+        </h3>
         <button
           type="button"
           onClick={handleAddServer}
@@ -132,27 +148,38 @@ export const ServerTab: React.FC<ServerTabProps> = ({
       ) : (
         <div className="item-list">
           {sortedServers.map((server) => {
-            const auth = authentications.find((a) => a.id === server.authId);
-            const proxy = proxies.find((p) => p.id === server.proxyId);
-            const jumphost = servers.find((s) => s.id === server.jumphostId);
+            const auth = authentications.find((a) => a.id === server.authId)
+            const proxy = proxies.find((p) => p.id === server.proxyId)
+            const jumphost = servers.find((s) => s.id === server.jumphostId)
 
             return (
-              <div
-                key={server.id}
-                className="item-card"
-              >
+              <div key={server.id} className="item-card">
                 <div className="item-info">
                   <p className="item-name">
                     <EmojiText text={server.name} />
                   </p>
                   <p className="item-detail">
-                    {server.username ? `${server.username}@` : ''}{server.host}:{server.port}
+                    {server.username ? `${server.username}@` : ""}
+                    {server.host}:{server.port}
                   </p>
                   {(auth || proxy || jumphost) && (
                     <div className="item-tags">
-                      {auth && <span className="tag">{t.auth}: <EmojiText text={auth.name} /></span>}
-                      {proxy && <span className="tag">{t.common.proxy}: <EmojiText text={proxy.name} /></span>}
-                      {jumphost && <span className="tag">{t.serverTab.jumphost}: <EmojiText text={jumphost.name} /></span>}
+                      {auth && (
+                        <span className="tag">
+                          {t.auth}: <EmojiText text={auth.name} />
+                        </span>
+                      )}
+                      {proxy && (
+                        <span className="tag">
+                          {t.common.proxy}: <EmojiText text={proxy.name} />
+                        </span>
+                      )}
+                      {jumphost && (
+                        <span className="tag">
+                          {t.serverTab.jumphost}:{" "}
+                          <EmojiText text={jumphost.name} />
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -185,7 +212,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
                   </button>
                 </div>
               </div>
-            );
+            )
           })}
         </div>
       )}
@@ -194,8 +221,8 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         isOpen={isFormOpen}
         title={editingServer ? t.serverTab.editServer : t.serverTab.addServer}
         onClose={() => {
-          setIsFormOpen(false);
-          setEditingServer(null);
+          setIsFormOpen(false)
+          setEditingServer(null)
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
@@ -207,15 +234,18 @@ export const ServerTab: React.FC<ServerTabProps> = ({
               id="synced-footer"
               checked={isSynced}
               onChange={(e) => {
-                setIsSynced(e.target.checked);
+                setIsSynced(e.target.checked)
                 if (formRef.current) {
-                  formRef.current.setSynced(e.target.checked);
+                  formRef.current.setSynced(e.target.checked)
                 }
               }}
               className="w-4 h-4 rounded border-[var(--glass-border)] bg-[var(--bg-tertiary)] text-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-primary)] focus:ring-offset-0 cursor-pointer"
             />
-            <label htmlFor="synced-footer" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
-              {t.common.syncThisItem || 'Sync this item'}
+            <label
+              htmlFor="synced-footer"
+              className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer"
+            >
+              {t.common.syncThisItem || "Sync this item"}
             </label>
           </div>
         }
@@ -235,11 +265,15 @@ export const ServerTab: React.FC<ServerTabProps> = ({
       <ConfirmationModal
         isOpen={!!serverToDelete}
         title={t.serverTab.deleteTooltip}
-        message={serverToDelete?.isInUse ? t.serverTab.deleteInUseConfirmation : t.serverTab.deleteConfirmation}
+        message={
+          serverToDelete?.isInUse
+            ? t.serverTab.deleteInUseConfirmation
+            : t.serverTab.deleteConfirmation
+        }
         onConfirm={confirmDeleteServer}
         onCancel={() => setServerToDelete(null)}
         type="danger"
       />
     </div>
-  );
-};
+  )
+}

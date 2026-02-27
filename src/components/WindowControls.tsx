@@ -1,33 +1,33 @@
-import React from 'react';
-import { Minus, Square, X } from 'lucide-react';
-import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { useTranslation } from '../i18n';
+import React from "react"
+import { Minus, Square, X } from "lucide-react"
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
+import { useTranslation } from "../i18n"
 
 export const WindowControls: React.FC = () => {
-  const { t } = useTranslation();
+  const { t } = useTranslation()
   const handleMinimize = async () => {
     try {
-      await getCurrentWebviewWindow().minimize();
+      await getCurrentWebviewWindow().minimize()
     } catch (err) {
       // Failed to minimize window
     }
-  };
+  }
 
   const handleMaximize = async () => {
     try {
-      await getCurrentWebviewWindow().toggleMaximize();
+      await getCurrentWebviewWindow().toggleMaximize()
     } catch (err) {
       // Failed to maximize window
     }
-  };
+  }
 
   const handleClose = async () => {
     try {
-      await getCurrentWebviewWindow().close();
+      await getCurrentWebviewWindow().close()
     } catch (err) {
       // Failed to close window
     }
-  };
+  }
 
   return (
     <div className="flex items-center">
@@ -59,5 +59,5 @@ export const WindowControls: React.FC = () => {
         <X size={16} />
       </button>
     </div>
-  );
-};
+  )
+}

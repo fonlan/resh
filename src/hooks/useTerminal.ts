@@ -1,280 +1,347 @@
-import { useEffect, useRef, useCallback, useMemo, useState } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import { WebglAddon } from 'xterm-addon-webgl';
-import 'xterm/css/xterm.css';
-import { TerminalSettings } from '../types';
-import { debounce } from '../utils/common';
-import { invoke } from '@tauri-apps/api/core';
+import { useEffect, useRef, useCallback, useMemo, useState } from "react"
+import { Terminal } from "xterm"
+import { FitAddon } from "xterm-addon-fit"
+import { WebglAddon } from "xterm-addon-webgl"
+import "xterm/css/xterm.css"
+import { TerminalSettings } from "../types"
+import { debounce } from "../utils/common"
+import { invoke } from "@tauri-apps/api/core"
 
 export const useTerminal = (
-  containerId: string, 
+  containerId: string,
   sessionIdRef: React.RefObject<string | null>,
-  settings?: TerminalSettings, 
-  theme?: 'light' | 'dark' | 'orange' | 'green' | 'system',
+  settings?: TerminalSettings,
+  theme?: "light" | "dark" | "orange" | "green" | "system",
   onData?: (data: string) => void,
-  onResize?: (cols: number, rows: number) => void
+  onResize?: (cols: number, rows: number) => void,
 ) => {
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const webglAddonRef = useRef<WebglAddon | null>(null);
-  const [isReady, setIsReady] = useState(false);
+  const terminalRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const webglAddonRef = useRef<WebglAddon | null>(null)
+  const [isReady, setIsReady] = useState(false)
 
-  const onDataRef = useRef(onData);
-  const onResizeRef = useRef(onResize);
-
-  useEffect(() => {
-    onDataRef.current = onData;
-  }, [onData]);
+  const onDataRef = useRef(onData)
+  const onResizeRef = useRef(onResize)
 
   useEffect(() => {
-    onResizeRef.current = onResize;
-  }, [onResize]);
+    onDataRef.current = onData
+  }, [onData])
 
   useEffect(() => {
-    const container = document.getElementById(containerId);
-    if (!container) return;
+    onResizeRef.current = onResize
+  }, [onResize])
+
+  useEffect(() => {
+    const container = document.getElementById(containerId)
+    if (!container) return
 
     // Determine actual theme
-    let actualTheme: 'light' | 'dark' | 'orange' | 'green' = 'dark';
-    if (theme === 'system') {
-      actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } else if (theme === 'light') {
-      actualTheme = 'light';
-    } else if (theme === 'orange') {
-      actualTheme = 'orange';
-    } else if (theme === 'green') {
-      actualTheme = 'green';
+    let actualTheme: "light" | "dark" | "orange" | "green" = "dark"
+    if (theme === "system") {
+      actualTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+    } else if (theme === "light") {
+      actualTheme = "light"
+    } else if (theme === "orange") {
+      actualTheme = "orange"
+    } else if (theme === "green") {
+      actualTheme = "green"
     }
 
     const term = new Terminal({
       cursorBlink: true,
       fontSize: settings?.fontSize || 14,
-      fontFamily: settings?.fontFamily || "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace",
-      cursorStyle: (settings?.cursorStyle as 'block' | 'underline' | 'bar') || 'block',
+      fontFamily:
+        settings?.fontFamily ||
+        "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace",
+      cursorStyle:
+        (settings?.cursorStyle as "block" | "underline" | "bar") || "block",
       scrollback: settings?.scrollback || 25000,
-      theme: actualTheme === 'light' ? {
-        background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
-      } : actualTheme === 'orange' ? {
-        background: '#1c1917', foreground: '#fafaf9', cursor: '#f97316', cursorAccent: '#1c1917', selectionBackground: 'rgba(249, 115, 22, 0.3)',
-      } : actualTheme === 'green' ? {
-        background: '#0a0f0d', foreground: '#f0fdf4', cursor: '#86efac', cursorAccent: '#0a0f0d', selectionBackground: 'rgba(134, 239, 172, 0.3)',
-      } : {
-        background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
-      },
-    });
+      theme:
+        actualTheme === "light"
+          ? {
+              background: "#ffffff",
+              foreground: "#1a202c",
+              cursor: "#1a202c",
+              cursorAccent: "#ffffff",
+              selectionBackground: "rgba(0, 245, 255, 0.3)",
+            }
+          : actualTheme === "orange"
+            ? {
+                background: "#1c1917",
+                foreground: "#fafaf9",
+                cursor: "#f97316",
+                cursorAccent: "#1c1917",
+                selectionBackground: "rgba(249, 115, 22, 0.3)",
+              }
+            : actualTheme === "green"
+              ? {
+                  background: "#0a0f0d",
+                  foreground: "#f0fdf4",
+                  cursor: "#86efac",
+                  cursorAccent: "#0a0f0d",
+                  selectionBackground: "rgba(134, 239, 172, 0.3)",
+                }
+              : {
+                  background: "#000000",
+                  foreground: "#ffffff",
+                  cursor: "#00f5ff",
+                  cursorAccent: "#000000",
+                  selectionBackground: "rgba(0, 245, 255, 0.3)",
+                },
+    })
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
+    const fitAddon = new FitAddon()
+    term.loadAddon(fitAddon)
 
     // Register onData inside the hook to ensure it's always attached to the current term
     const disposable = term.onData((data) => {
-      onDataRef.current?.(data);
-    });
+      onDataRef.current?.(data)
+    })
 
-    const selectionDisposable = term.onSelectionChange(debounce(() => {
+    const selectionDisposable = term.onSelectionChange(
+      debounce(() => {
         if (term.hasSelection()) {
-            const selection = term.getSelection();
-            if (selection) {
-                navigator.clipboard.writeText(selection).catch(() => {
-                    // Failed to copy
-                });
-                // Sync selection to backend for AI tools
-                const currentSessionId = sessionIdRef.current;
-                if (currentSessionId) {
-                    invoke('update_terminal_selection', {
-                        sessionId: currentSessionId,  // Tauri converts camelCase to snake_case
-                        selection
-                    }).catch((err) => {
-                        console.error('Failed to update backend selection:', err);
-                    });
-                }
+          const selection = term.getSelection()
+          if (selection) {
+            navigator.clipboard.writeText(selection).catch(() => {
+              // Failed to copy
+            })
+            // Sync selection to backend for AI tools
+            const currentSessionId = sessionIdRef.current
+            if (currentSessionId) {
+              invoke("update_terminal_selection", {
+                sessionId: currentSessionId, // Tauri converts camelCase to snake_case
+                selection,
+              }).catch((err) => {
+                console.error("Failed to update backend selection:", err)
+              })
             }
+          }
         }
-    }, 500));
+      }, 500),
+    )
 
     // Handle OSC 52 (Clipboard)
     const oscDisposable = term.parser.registerOscHandler(52, (data) => {
-        try {
-            const parts = data.split(';');
-            if (parts.length < 2) return false;
-            
-            const b64Data = parts.slice(1).join(';');
-            if (b64Data === '?') return true; 
+      try {
+        const parts = data.split(";")
+        if (parts.length < 2) return false
 
-            const text = new TextDecoder().decode(
-                Uint8Array.from(atob(b64Data), c => c.charCodeAt(0))
-            );
-            
-            navigator.clipboard.writeText(text).catch(() => {
-                // OSC 52 write failed
-            });
-            
-            return true;
-        } catch (e) {
-            return false;
-        }
-    });
+        const b64Data = parts.slice(1).join(";")
+        if (b64Data === "?") return true
+
+        const text = new TextDecoder().decode(
+          Uint8Array.from(atob(b64Data), (c) => c.charCodeAt(0)),
+        )
+
+        navigator.clipboard.writeText(text).catch(() => {
+          // OSC 52 write failed
+        })
+
+        return true
+      } catch (e) {
+        return false
+      }
+    })
 
     const initTerminal = () => {
-        if (!term.element && container.clientWidth > 0 && container.clientHeight > 0) {
-            term.open(container);
-            fitAddon.fit();
-            
-            // Initialize WebGL Addon after opening
-            if (!webglAddonRef.current) {
-                try {
-                    const webglAddon = new WebglAddon();
-                    term.loadAddon(webglAddon);
-                    webglAddonRef.current = webglAddon;
-                } catch (e) {
-                    // WebGL renderer could not be loaded
-                }
-            }
+      if (
+        !term.element &&
+        container.clientWidth > 0 &&
+        container.clientHeight > 0
+      ) {
+        term.open(container)
+        fitAddon.fit()
+
+        // Initialize WebGL Addon after opening
+        if (!webglAddonRef.current) {
+          try {
+            const webglAddon = new WebglAddon()
+            term.loadAddon(webglAddon)
+            webglAddonRef.current = webglAddon
+          } catch (e) {
+            // WebGL renderer could not be loaded
+          }
         }
-    };
+      }
+    }
 
     // Initial check
-    initTerminal();
-    
+    initTerminal()
+
     const handleResize = debounce(() => {
       if (container.clientWidth > 0 && container.clientHeight > 0) {
         if (!term.element) {
-          initTerminal();
+          initTerminal()
         }
         try {
-            fitAddon.fit();
-            onResizeRef.current?.(term.cols, term.rows);
+          fitAddon.fit()
+          onResizeRef.current?.(term.cols, term.rows)
         } catch (e) {
-            // Fit failed
+          // Fit failed
         }
       }
-    }, 50);
+    }, 50)
 
     const resizeObserver = new ResizeObserver(() => {
       // Use requestAnimationFrame to ensure we run after the CSS transition completes
       requestAnimationFrame(() => {
-        handleResize();
-      });
-    });
+        handleResize()
+      })
+    })
 
-    resizeObserver.observe(container);
+    resizeObserver.observe(container)
 
     // Also observe the parent to catch layout shifts (e.g., sidebar toggle)
     if (container.parentElement) {
-      resizeObserver.observe(container.parentElement);
+      resizeObserver.observe(container.parentElement)
     }
 
     // Observe the grandparent (the main flex container) to catch broader layout changes
     if (container.parentElement?.parentElement) {
-      resizeObserver.observe(container.parentElement.parentElement);
+      resizeObserver.observe(container.parentElement.parentElement)
     }
 
     // Listen for explicit resize requests (e.g., from sidebar toggle)
     const forceResizeHandler = () => {
-      handleResize();
-    };
-    window.addEventListener('resh-force-terminal-resize', forceResizeHandler);
+      handleResize()
+    }
+    window.addEventListener("resh-force-terminal-resize", forceResizeHandler)
 
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
-    setIsReady(true);
+    terminalRef.current = term
+    fitAddonRef.current = fitAddon
+    setIsReady(true)
 
     return () => {
-      disposable.dispose();
-      selectionDisposable.dispose();
-      oscDisposable.dispose();
-      resizeObserver.disconnect();
-      window.removeEventListener('resh-force-terminal-resize', forceResizeHandler);
-      webglAddonRef.current?.dispose();
-      term.dispose();
-      terminalRef.current = null;
-      webglAddonRef.current = null;
-      setIsReady(false);
-    };
+      disposable.dispose()
+      selectionDisposable.dispose()
+      oscDisposable.dispose()
+      resizeObserver.disconnect()
+      window.removeEventListener(
+        "resh-force-terminal-resize",
+        forceResizeHandler,
+      )
+      webglAddonRef.current?.dispose()
+      term.dispose()
+      terminalRef.current = null
+      webglAddonRef.current = null
+      setIsReady(false)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [containerId]);
+  }, [containerId])
 
   // Update terminal settings dynamically
   useEffect(() => {
-    const term = terminalRef.current;
-    if (!term) return;
+    const term = terminalRef.current
+    if (!term) return
 
     if (settings) {
-      term.options.fontSize = settings.fontSize || 14;
-      term.options.fontFamily = settings.fontFamily || "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace";
-      term.options.cursorStyle = (settings.cursorStyle as 'block' | 'underline' | 'bar') || 'block';
-      term.options.scrollback = settings.scrollback || 25000;
+      term.options.fontSize = settings.fontSize || 14
+      term.options.fontFamily =
+        settings.fontFamily ||
+        "'Maple Mono NF CN', 'JetBrains Mono', 'Consolas', monospace"
+      term.options.cursorStyle =
+        (settings.cursorStyle as "block" | "underline" | "bar") || "block"
+      term.options.scrollback = settings.scrollback || 25000
     }
 
     // Determine actual theme
-    let actualTheme: 'light' | 'dark' | 'orange' | 'green' = 'dark';
-    if (theme === 'system') {
-      actualTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-    } else if (theme === 'light') {
-      actualTheme = 'light';
-    } else if (theme === 'orange') {
-      actualTheme = 'orange';
-    } else if (theme === 'green') {
-      actualTheme = 'green';
+    let actualTheme: "light" | "dark" | "orange" | "green" = "dark"
+    if (theme === "system") {
+      actualTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+    } else if (theme === "light") {
+      actualTheme = "light"
+    } else if (theme === "orange") {
+      actualTheme = "orange"
+    } else if (theme === "green") {
+      actualTheme = "green"
     }
 
-    term.options.theme = actualTheme === 'light' ? {
-        background: '#ffffff', foreground: '#1a202c', cursor: '#1a202c', cursorAccent: '#ffffff', selectionBackground: 'rgba(0, 245, 255, 0.3)',
-    } : actualTheme === 'orange' ? {
-        background: '#1c1917', foreground: '#fafaf9', cursor: '#f97316', cursorAccent: '#1c1917', selectionBackground: 'rgba(249, 115, 22, 0.3)',
-    } : actualTheme === 'green' ? {
-        background: '#0a0f0d', foreground: '#f0fdf4', cursor: '#86efac', cursorAccent: '#0a0f0d', selectionBackground: 'rgba(134, 239, 172, 0.3)',
-    } : {
-        background: '#000000', foreground: '#ffffff', cursor: '#00f5ff', cursorAccent: '#000000', selectionBackground: 'rgba(0, 245, 255, 0.3)',
-    };
+    term.options.theme =
+      actualTheme === "light"
+        ? {
+            background: "#ffffff",
+            foreground: "#1a202c",
+            cursor: "#1a202c",
+            cursorAccent: "#ffffff",
+            selectionBackground: "rgba(0, 245, 255, 0.3)",
+          }
+        : actualTheme === "orange"
+          ? {
+              background: "#1c1917",
+              foreground: "#fafaf9",
+              cursor: "#f97316",
+              cursorAccent: "#1c1917",
+              selectionBackground: "rgba(249, 115, 22, 0.3)",
+            }
+          : actualTheme === "green"
+            ? {
+                background: "#0a0f0d",
+                foreground: "#f0fdf4",
+                cursor: "#86efac",
+                cursorAccent: "#0a0f0d",
+                selectionBackground: "rgba(134, 239, 172, 0.3)",
+              }
+            : {
+                background: "#000000",
+                foreground: "#ffffff",
+                cursor: "#00f5ff",
+                cursorAccent: "#000000",
+                selectionBackground: "rgba(0, 245, 255, 0.3)",
+              }
 
     // Re-fit after settings change (e.g. font size)
     // Small timeout to ensure DOM update if necessary
     setTimeout(() => {
-        fitAddonRef.current?.fit();
-        // Also notify backend about resize if needed
-        if (term.element && onResizeRef.current) {
-             onResizeRef.current(term.cols, term.rows);
-        }
-    }, 10);
-    
-  }, [settings, theme]);
+      fitAddonRef.current?.fit()
+      // Also notify backend about resize if needed
+      if (term.element && onResizeRef.current) {
+        onResizeRef.current(term.cols, term.rows)
+      }
+    }, 10)
+  }, [settings, theme])
 
   const write = useCallback((data: string) => {
-    terminalRef.current?.write(data);
-  }, []);
+    terminalRef.current?.write(data)
+  }, [])
 
   const focus = useCallback(() => {
-    terminalRef.current?.focus();
-  }, []);
+    terminalRef.current?.focus()
+  }, [])
 
   const getBufferText = useCallback(() => {
-    if (!terminalRef.current) return '';
-    const buffer = terminalRef.current.buffer.active;
-    let text = '';
+    if (!terminalRef.current) return ""
+    const buffer = terminalRef.current.buffer.active
+    let text = ""
     for (let i = 0; i < buffer.length; i++) {
-      const line = buffer.getLine(i);
+      const line = buffer.getLine(i)
       if (line) {
         // translateToString(true) trims the trailing whitespace
-        const lineText = line.translateToString(true);
-        text += lineText;
-        
+        const lineText = line.translateToString(true)
+        text += lineText
+
         // If this line is NOT wrapped to the next line, it means it's a real newline
-        const nextLine = buffer.getLine(i + 1);
+        const nextLine = buffer.getLine(i + 1)
         if (!nextLine || !nextLine.isWrapped) {
-          text += '\n';
+          text += "\n"
         }
       }
     }
-    return text;
-  }, []);
+    return text
+  }, [])
 
-  return useMemo(() => ({
-    terminal: terminalRef.current,
-    isReady,
-    write,
-    focus,
-    getBufferText,
-  }), [isReady, write, focus, getBufferText]);
-};
+  return useMemo(
+    () => ({
+      terminal: terminalRef.current,
+      isReady,
+      write,
+      focus,
+      getBufferText,
+    }),
+    [isReady, write, focus, getBufferText],
+  )
+}

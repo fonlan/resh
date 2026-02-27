@@ -1,102 +1,106 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Plus, Edit2, Trash2 } from 'lucide-react';
-import { Authentication, Server as ServerType } from '../../types';
-import { FormModal } from '../FormModal';
-import { ConfirmationModal } from '../ConfirmationModal';
-import { AuthForm, AuthFormHandle } from './AuthForm';
-import { generateId } from '../../utils/idGenerator';
-import { useTranslation } from '../../i18n';
-import { EmojiText } from '../EmojiText';
+import React, { useState, useRef, useEffect } from "react"
+import { Plus, Edit2, Trash2 } from "lucide-react"
+import { Authentication, Server as ServerType } from "../../types"
+import { FormModal } from "../FormModal"
+import { ConfirmationModal } from "../ConfirmationModal"
+import { AuthForm, AuthFormHandle } from "./AuthForm"
+import { generateId } from "../../utils/idGenerator"
+import { useTranslation } from "../../i18n"
+import { EmojiText } from "../EmojiText"
 
 interface AuthTabProps {
-  authentications: Authentication[];
-  onAuthUpdate: (auths: Authentication[]) => void;
-  servers: ServerType[];
-  onServersUpdate: (servers: ServerType[]) => void;
+  authentications: Authentication[]
+  onAuthUpdate: (auths: Authentication[]) => void
+  servers: ServerType[]
+  onServersUpdate: (servers: ServerType[]) => void
 }
 
-export const AuthTab: React.FC<AuthTabProps> = ({ 
-  authentications, 
+export const AuthTab: React.FC<AuthTabProps> = ({
+  authentications,
   onAuthUpdate,
   servers,
-  onServersUpdate
+  onServersUpdate,
 }) => {
-  const { t } = useTranslation();
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingAuth, setEditingAuth] = useState<Authentication | null>(null);
-  const [isSynced, setIsSynced] = useState(true);
-  const [authToDelete, setAuthToDelete] = useState<string | null>(null);
-  const formRef = useRef<AuthFormHandle>(null);
+  const { t } = useTranslation()
+  const [isFormOpen, setIsFormOpen] = useState(false)
+  const [editingAuth, setEditingAuth] = useState<Authentication | null>(null)
+  const [isSynced, setIsSynced] = useState(true)
+  const [authToDelete, setAuthToDelete] = useState<string | null>(null)
+  const formRef = useRef<AuthFormHandle>(null)
 
   // Sync state with formref
   useEffect(() => {
     if (formRef.current) {
-      setIsSynced(formRef.current.synced);
+      setIsSynced(formRef.current.synced)
     }
-  }, [isFormOpen]);
+  }, [isFormOpen])
 
   const existingNames = authentications
     .filter((a) => a.id !== editingAuth?.id)
-    .map((a) => a.name);
+    .map((a) => a.name)
 
   const handleAddAuth = () => {
-    setEditingAuth(null);
-    setIsSynced(true);
-    setIsFormOpen(true);
-  };
+    setEditingAuth(null)
+    setIsSynced(true)
+    setIsFormOpen(true)
+  }
 
   const handleEditAuth = (auth: Authentication) => {
-    setEditingAuth(auth);
-    setIsSynced(auth.synced !== undefined ? auth.synced : true);
-    setIsFormOpen(true);
-  };
+    setEditingAuth(auth)
+    setIsSynced(auth.synced !== undefined ? auth.synced : true)
+    setIsFormOpen(true)
+  }
 
   const handleDeleteAuth = (authId: string) => {
-    const usingServers = servers.filter((s) => s.authId === authId);
-    
+    const usingServers = servers.filter((s) => s.authId === authId)
+
     if (usingServers.length > 0) {
-      setAuthToDelete(authId);
+      setAuthToDelete(authId)
     } else {
-      onAuthUpdate(authentications.filter((a) => a.id !== authId));
+      onAuthUpdate(authentications.filter((a) => a.id !== authId))
     }
-  };
+  }
 
   const confirmDeleteAuth = () => {
     if (authToDelete) {
-      const updatedServers = servers.map((s) => 
-        s.authId === authToDelete ? { ...s, authId: null } : s
-      );
-      onServersUpdate(updatedServers);
-      onAuthUpdate(authentications.filter((a) => a.id !== authToDelete));
-      setAuthToDelete(null);
+      const updatedServers = servers.map((s) =>
+        s.authId === authToDelete ? { ...s, authId: null } : s,
+      )
+      onServersUpdate(updatedServers)
+      onAuthUpdate(authentications.filter((a) => a.id !== authToDelete))
+      setAuthToDelete(null)
     }
-  };
+  }
 
   const handleSaveAuth = (auth: Authentication) => {
     if (editingAuth) {
       // Update existing
       onAuthUpdate(
-        authentications.map((a) => (a.id === editingAuth.id ? { ...auth, id: a.id } : a))
-      );
+        authentications.map((a) =>
+          a.id === editingAuth.id ? { ...auth, id: a.id } : a,
+        ),
+      )
     } else {
       // Add new
-      onAuthUpdate([...authentications, { ...auth, id: generateId() }]);
+      onAuthUpdate([...authentications, { ...auth, id: generateId() }])
     }
-    setIsFormOpen(false);
-    setEditingAuth(null);
-  };
+    setIsFormOpen(false)
+    setEditingAuth(null)
+  }
 
   const handleFormSubmit = () => {
     // Trigger form validation and submission via ref
     if (formRef.current) {
-      formRef.current.submit();
+      formRef.current.submit()
     }
-  };
+  }
 
   return (
     <div className="w-full max-w-full">
       <div className="flex justify-between items-center mb-4">
-        <h3 className="text-base font-semibold text-[var(--text-primary)]">{t.authTab.title}</h3>
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">
+          {t.authTab.title}
+        </h3>
         <button
           type="button"
           onClick={handleAddAuth}
@@ -114,16 +118,15 @@ export const AuthTab: React.FC<AuthTabProps> = ({
       ) : (
         <div className="item-list">
           {authentications.map((auth) => (
-            <div
-              key={auth.id}
-              className="item-card"
-            >
+            <div key={auth.id} className="item-card">
               <div className="item-info">
                 <p className="item-name">
                   <EmojiText text={auth.name} />
                 </p>
                 <p className="item-detail">
-                  {auth.type === 'password' ? t.authTab.passwordType : t.authTab.keyType}
+                  {auth.type === "password"
+                    ? t.authTab.passwordType
+                    : t.authTab.keyType}
                 </p>
               </div>
               <div className="item-actions">
@@ -153,8 +156,8 @@ export const AuthTab: React.FC<AuthTabProps> = ({
         isOpen={isFormOpen}
         title={editingAuth ? t.authTab.editAuth : t.authTab.addAuth}
         onClose={() => {
-          setIsFormOpen(false);
-          setEditingAuth(null);
+          setIsFormOpen(false)
+          setEditingAuth(null)
         }}
         onSubmit={handleFormSubmit}
         submitText={t.common.save}
@@ -165,15 +168,18 @@ export const AuthTab: React.FC<AuthTabProps> = ({
               id="synced-footer-auth"
               checked={isSynced}
               onChange={(e) => {
-                setIsSynced(e.target.checked);
+                setIsSynced(e.target.checked)
                 if (formRef.current) {
-                  formRef.current.setSynced(e.target.checked);
+                  formRef.current.setSynced(e.target.checked)
                 }
               }}
               className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border border-[1.5px] border-[var(--glass-border)] rounded-[4px] bg-[var(--bg-primary)] cursor-pointer relative transition-all duration-[150ms] flex-shrink-0 inline-flex items-center justify-center vertical-align-middle checked:bg-[var(--accent-primary)] checked:border-[var(--accent-primary)] checked:shadow-[var(--glow-primary)] hover:border-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)] focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)]"
             />
-            <label htmlFor="synced-footer-auth" className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer">
-              {t.common.syncThisItem || 'Sync this item'}
+            <label
+              htmlFor="synced-footer-auth"
+              className="text-sm font-medium text-[var(--text-secondary)] cursor-pointer"
+            >
+              {t.common.syncThisItem || "Sync this item"}
             </label>
           </div>
         }
@@ -195,5 +201,5 @@ export const AuthTab: React.FC<AuthTabProps> = ({
         type="danger"
       />
     </div>
-  );
-};
+  )
+}

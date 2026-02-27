@@ -1,14 +1,14 @@
-import React from 'react';
-import { Server as ServerIcon, Plus, Terminal } from 'lucide-react';
-import { Server } from '../types';
-import { useTranslation } from '../i18n';
-import { EmojiText } from './EmojiText';
+import React from "react"
+import { Server as ServerIcon, Plus, Terminal } from "lucide-react"
+import { Server } from "../types"
+import { useTranslation } from "../i18n"
+import { EmojiText } from "./EmojiText"
 
 interface WelcomeScreenProps {
-  servers: Server[];
-  onServerClick: (serverId: string) => void;
-  onOpenSettings: () => void;
-  onServerContextMenu: (e: React.MouseEvent, serverId: string) => void;
+  servers: Server[]
+  onServerClick: (serverId: string) => void
+  onOpenSettings: () => void
+  onServerContextMenu: (e: React.MouseEvent, serverId: string) => void
 }
 
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
@@ -17,8 +17,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
   onOpenSettings,
   onServerContextMenu,
 }) => {
-  const { t } = useTranslation();
-  const hasServers = servers.length > 0;
+  const { t } = useTranslation()
+  const hasServers = servers.length > 0
 
   return (
     <div className="w-full h-full flex flex-col items-center justify-center bg-[var(--bg-primary)] overflow-y-auto">
@@ -41,7 +41,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
               <h2 className="text-[14px] font-semibold text-zinc-500 uppercase  my-0 leading-[1.4]">
                 {t.welcome.recentTitle}
               </h2>
-              <button type="button" className="bg-transparent border-0 text-[var(--accent-primary)] text-[13px] font-semibold cursor-pointer px-2 py-1 rounded transition-all hover:bg-[rgba(59,130,246,0.1)]" onClick={onOpenSettings}>
+              <button
+                type="button"
+                className="bg-transparent border-0 text-[var(--accent-primary)] text-[13px] font-semibold cursor-pointer px-2 py-1 rounded transition-all hover:bg-[rgba(59,130,246,0.1)]"
+                onClick={onOpenSettings}
+              >
                 {t.welcome.viewAll}
               </button>
             </div>
@@ -62,7 +66,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
                       <EmojiText text={server.name} />
                     </h3>
                     <p className="text-xs text-zinc-500 my-0 whitespace-nowrap overflow-hidden text-ellipsis leading-[1.5] w-full">
-                      {server.username ? `${server.username}@` : ''}{server.host}
+                      {server.username ? `${server.username}@` : ""}
+                      {server.host}
                     </p>
                   </div>
                 </button>
@@ -80,7 +85,11 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
             <p className="text-[14px] text-[var(--text-secondary)] my-0 mx-0 mb-8 leading-[1.6]">
               {t.welcome.getFirstStarted}
             </p>
-            <button type="button" className="inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent-success)] text-white border-0 rounded-[var(--radius-md)] text-[14px] font-semibold cursor-pointer transition-all shadow-[var(--glow-success)]  leading-[1.4] hover:brightness-110 hover:-translate-y-px" onClick={onOpenSettings}>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent-success)] text-white border-0 rounded-[var(--radius-md)] text-[14px] font-semibold cursor-pointer transition-all shadow-[var(--glow-success)]  leading-[1.4] hover:brightness-110 hover:-translate-y-px"
+              onClick={onOpenSettings}
+            >
               <Plus size={18} />
               <span>{t.serverTab.addServer}</span>
             </button>
@@ -88,5 +97,5 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({
         )}
       </div>
     </div>
-  );
-};
+  )
+}

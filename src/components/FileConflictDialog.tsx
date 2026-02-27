@@ -1,4 +1,4 @@
-import { FileConflict, ConflictResolution } from '../types/sftp'
+import { FileConflict, ConflictResolution } from "../types/sftp"
 
 interface FileConflictDialogProps {
   conflict: FileConflict
@@ -7,7 +7,7 @@ interface FileConflictDialogProps {
 
 function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
   const formatSize = (bytes?: number) => {
-    if (!bytes) return '未知'
+    if (!bytes) return "未知"
     const kb = bytes / 1024
     const mb = kb / 1024
     const gb = mb / 1024
@@ -17,18 +17,18 @@ function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
   }
 
   const formatDate = (timestamp?: number) => {
-    if (!timestamp) return '未知'
-    return new Date(timestamp * 1000).toLocaleString('zh-CN', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
+    if (!timestamp) return "未知"
+    return new Date(timestamp * 1000).toLocaleString("zh-CN", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     })
   }
 
-  const fileName = conflict.file_path.split('/').pop() || conflict.file_path
+  const fileName = conflict.file_path.split("/").pop() || conflict.file_path
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -50,11 +50,12 @@ function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
               </h4>
               <div className="text-sm space-y-1">
                 <div className="text-[var(--text-secondary)]">
-                  大小: <span className="text-[var(--text-primary)]">{formatSize(conflict.local_size)}</span>
+                  大小:{" "}
+                  <span className="text-[var(--text-primary)]">
+                    {formatSize(conflict.local_size)}
+                  </span>
                 </div>
-                <div className="text-[var(--text-secondary)]">
-                  修改时间:
-                </div>
+                <div className="text-[var(--text-secondary)]">修改时间:</div>
                 <div className="text-xs text-[var(--text-primary)]">
                   {formatDate(conflict.local_modified)}
                 </div>
@@ -67,11 +68,12 @@ function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
               </h4>
               <div className="text-sm space-y-1">
                 <div className="text-[var(--text-secondary)]">
-                  大小: <span className="text-[var(--text-primary)]">{formatSize(conflict.remote_size)}</span>
+                  大小:{" "}
+                  <span className="text-[var(--text-primary)]">
+                    {formatSize(conflict.remote_size)}
+                  </span>
                 </div>
-                <div className="text-[var(--text-secondary)]">
-                  修改时间:
-                </div>
+                <div className="text-[var(--text-secondary)]">修改时间:</div>
                 <div className="text-xs text-[var(--text-primary)]">
                   {formatDate(conflict.remote_modified)}
                 </div>
@@ -80,35 +82,38 @@ function FileConflictDialog({ conflict, onResolve }: FileConflictDialogProps) {
           </div>
 
           <div className="text-sm text-[var(--text-secondary)]">
-            远程路径: <span className="text-[var(--text-primary)] break-all">{conflict.file_path}</span>
+            远程路径:{" "}
+            <span className="text-[var(--text-primary)] break-all">
+              {conflict.file_path}
+            </span>
           </div>
         </div>
 
         <div className="p-4 border-t border-[var(--border)] flex gap-2 justify-end">
           <button
             type="button"
-            onClick={() => onResolve('skip')}
+            onClick={() => onResolve("skip")}
             className="px-4 py-2 text-sm rounded border border-[var(--border)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] transition-colors"
           >
             跳过
           </button>
           <button
             type="button"
-            onClick={() => onResolve('cancel')}
+            onClick={() => onResolve("cancel")}
             className="px-4 py-2 text-sm rounded border border-[var(--border)] hover:bg-[var(--bg-hover)] text-[var(--text-primary)] transition-colors"
           >
             取消所有
           </button>
           <button
             type="button"
-            onClick={() => onResolve('overwrite')}
+            onClick={() => onResolve("overwrite")}
             className="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white transition-colors"
           >
             覆盖
           </button>
           <button
             type="button"
-            onClick={() => onResolve('overwrite-all')}
+            onClick={() => onResolve("overwrite-all")}
             className="px-4 py-2 text-sm rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
           >
             覆盖所有

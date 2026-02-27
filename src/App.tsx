@@ -1,40 +1,46 @@
-import { Suspense, lazy, useEffect } from 'react'
-import { emit } from '@tauri-apps/api/event'
-import { useConfig } from './hooks/useConfig';
-import { useTheme } from './hooks/useTheme';
+import { Suspense, lazy, useEffect } from "react"
+import { emit } from "@tauri-apps/api/event"
+import { useConfig } from "./hooks/useConfig"
+import { useTheme } from "./hooks/useTheme"
 
 const MainWindow = lazy(() =>
-  import('./components/MainWindow').then(module => ({ default: module.MainWindow }))
+  import("./components/MainWindow").then((module) => ({
+    default: module.MainWindow,
+  })),
 )
 
 const AppBootFallback = ({ message }: { message: string }) => (
   <div className="w-full h-screen flex items-center justify-center bg-[var(--bg-primary)]">
     <div className="px-5 py-4 rounded-xl border border-[var(--glass-border)] bg-[var(--bg-secondary)] text-center">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">Resh</div>
+      <div className="text-sm font-semibold text-[var(--text-primary)]">
+        Resh
+      </div>
       <div className="text-xs text-[var(--text-secondary)] mt-1">{message}</div>
     </div>
   </div>
 )
 
 const NON_TEXT_INPUT_TYPES = new Set([
-  'button',
-  'checkbox',
-  'color',
-  'file',
-  'hidden',
-  'image',
-  'radio',
-  'range',
-  'reset',
-  'submit',
+  "button",
+  "checkbox",
+  "color",
+  "file",
+  "hidden",
+  "image",
+  "radio",
+  "range",
+  "reset",
+  "submit",
 ])
 
-const isNativeContextMenuAllowedTarget = (target: EventTarget | null): boolean => {
+const isNativeContextMenuAllowedTarget = (
+  target: EventTarget | null,
+): boolean => {
   if (!(target instanceof Element)) {
     return false
   }
 
-  const editableElement = target.closest('input, textarea')
+  const editableElement = target.closest("input, textarea")
   if (editableElement instanceof HTMLTextAreaElement) {
     return true
   }
@@ -43,7 +49,7 @@ const isNativeContextMenuAllowedTarget = (target: EventTarget | null): boolean =
     return false
   }
 
-  const inputType = (editableElement.type || 'text').toLowerCase()
+  const inputType = (editableElement.type || "text").toLowerCase()
   return !NON_TEXT_INPUT_TYPES.has(inputType)
 }
 
@@ -54,8 +60,8 @@ function App() {
   useTheme(theme)
 
   useEffect(() => {
-    window.dispatchEvent(new Event('resh-app-ready'))
-    void emit('resh-app-ready').catch(() => {})
+    window.dispatchEvent(new Event("resh-app-ready"))
+    void emit("resh-app-ready").catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -67,9 +73,9 @@ function App() {
       event.preventDefault()
     }
 
-    document.addEventListener('contextmenu', handleGlobalContextMenu, true)
+    document.addEventListener("contextmenu", handleGlobalContextMenu, true)
     return () => {
-      document.removeEventListener('contextmenu', handleGlobalContextMenu, true)
+      document.removeEventListener("contextmenu", handleGlobalContextMenu, true)
     }
   }, [])
 
@@ -86,4 +92,4 @@ function App() {
   )
 }
 
-export default App;
+export default App

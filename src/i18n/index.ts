@@ -1,11 +1,11 @@
-import { locales, LocaleType } from './locales';
-import { useConfig } from '../hooks/useConfig';
+import { locales, LocaleType } from "./locales"
+import { useConfig } from "../hooks/useConfig"
 
 export const useTranslation = () => {
-  const { config } = useConfig();
-  const language = (config?.general.language || 'en') as LocaleType;
-  
-  const t = locales[language] || locales.en;
+  const { config } = useConfig()
+  const language = (config?.general.language || "en") as LocaleType
 
-  return { t, language };
-};
+  const t = locales[language] || locales.en
+
+  return { t, language }
+}
