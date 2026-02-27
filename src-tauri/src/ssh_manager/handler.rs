@@ -1,6 +1,4 @@
 use russh::client;
-use russh_keys::key;
-use async_trait::async_trait;
 use tokio::sync::mpsc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -33,13 +31,12 @@ impl ClientHandler {
     }
 }
 
-#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
+        _server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)  // Accept all keys
     }

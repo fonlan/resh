@@ -4,7 +4,6 @@ use crate::sftp_manager::SftpManager;
 use base64::prelude::*;
 use lazy_static::lazy_static;
 use russh::client;
-use russh_keys;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -165,13 +164,6 @@ impl SSHClient {
         let mut config = client::Config::default();
         config.window_size = 64 * 1024 * 1024; // 64MB window size
         config.maximum_packet_size = 128 * 1024; // 128KB packet size
-
-        config.preferred.key = std::borrow::Cow::Owned(vec![
-            russh::keys::key::Name("ssh-ed25519"),
-            russh::keys::key::Name("rsa-sha2-256"),
-            russh::keys::key::Name("rsa-sha2-512"),
-            russh::keys::key::Name("ssh-rsa"),
-        ]);
 
         let config = Arc::new(config);
         let shell_channel_id = Arc::new(Mutex::new(None));
@@ -565,21 +557,56 @@ impl SSHClient {
                 username,
                 passphrase.is_some()
             );
-            let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(
+            let key = russh::keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(
                 |e| {
                     error!("[SSH] Failed to decode private key: {}", e);
                     format!("Failed to decode private key: {}", e)
                 },
             )?;
 
-            let key_pair = Arc::new(key);
-            match session.authenticate_publickey(username, key_pair).await {
-                Ok(true) => {
-                    authenticated = true;
-                    info!("[SSH] Publickey authentication successful.");
+            let key = Arc::new(key);
+            let mut hash_candidates = vec![None];
+
+            if key.algorithm().is_rsa() {
+                hash_candidates.clear();
+                match session.best_supported_rsa_hash().await {
+                    Ok(Some(hash_alg)) => hash_candidates.push(hash_alg),
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(
+                            "[SSH] Failed to query server RSA signature algorithms, using fallback order: {}",
+                            e
+                        );
+                    }
                 }
-                Ok(false) => warn!("[SSH] Publickey authentication rejected."),
-                Err(e) => error!("[SSH] Publickey authentication error: {}", e),
+
+                for candidate in [
+                    Some(russh::keys::HashAlg::Sha512),
+                    Some(russh::keys::HashAlg::Sha256),
+                    None,
+                ] {
+                    if !hash_candidates.contains(&candidate) {
+                        hash_candidates.push(candidate);
+                    }
+                }
+            }
+
+            for hash_alg in hash_candidates {
+                let key_pair = russh::keys::PrivateKeyWithHashAlg::new(key.clone(), hash_alg);
+                match session.authenticate_publickey(username, key_pair).await {
+                    Ok(result) if result.success() => {
+                        authenticated = true;
+                        info!("[SSH] Publickey authentication successful.");
+                        break;
+                    }
+                    Ok(_) => warn!(
+                        "[SSH] Publickey authentication rejected{}.",
+                        hash_alg
+                            .map(|alg| format!(" (rsa hash: {:?})", alg))
+                            .unwrap_or_default()
+                    ),
+                    Err(e) => error!("[SSH] Publickey authentication error: {}", e),
+                }
             }
         }
 
@@ -587,11 +614,11 @@ impl SSHClient {
             if let Some(pwd) = password {
                 info!("[SSH] Attempting password auth for user: '{}'...", username);
                 match session.authenticate_password(username, &pwd).await {
-                    Ok(true) => {
+                    Ok(result) if result.success() => {
                         authenticated = true;
                         info!("[SSH] Password authentication successful.");
                     }
-                    Ok(false) => warn!("[SSH] Password authentication failed."),
+                    Ok(_) => warn!("[SSH] Password authentication failed."),
                     Err(e) => error!("[SSH] Password authentication error: {}", e),
                 }
             }
@@ -988,12 +1015,6 @@ impl SSHClient {
         let mut config = client::Config::default();
         config.window_size = 64 * 1024 * 1024; // 64MB window size
         config.maximum_packet_size = 128 * 1024; // 128KB packet size
-        config.preferred.key = std::borrow::Cow::Owned(vec![
-            russh::keys::key::Name("ssh-ed25519"),
-            russh::keys::key::Name("rsa-sha2-256"),
-            russh::keys::key::Name("rsa-sha2-512"),
-            russh::keys::key::Name("ssh-rsa"),
-        ]);
         let config = Arc::new(config);
         let handler = ClientHandler::new();
 
