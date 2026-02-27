@@ -59,7 +59,27 @@ struct SessionData {
     recording_prompt: Option<String>,
     command_finished: bool,
     last_exit_code: Option<i32>,
+    last_completion_check_state: Option<CompletionCheckState>,
     pub system_info: Option<SystemInfo>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompletionCheckState {
+    NoRecorder,
+    Waiting,
+    CompletedByMarker,
+    CompletedByPrompt,
+}
+
+impl CompletionCheckState {
+    fn is_completed(self) -> bool {
+        matches!(
+            self,
+            CompletionCheckState::NoRecorder
+                | CompletionCheckState::CompletedByMarker
+                | CompletionCheckState::CompletedByPrompt
+        )
+    }
 }
 
 // Public wrapper for SessionData to allow external access if needed (safe subset)
@@ -119,6 +139,7 @@ impl SSHClient {
                     recording_prompt: None,
                     command_finished: false,
                     last_exit_code: None,
+                    last_completion_check_state: None,
                     system_info: None,
                 },
             );
@@ -659,6 +680,7 @@ impl SSHClient {
                     data.last_output_len = 0;
                     data.recording_prompt = None;
                     data.command_finished = false;
+                    data.last_completion_check_state = None;
                     info!("[SSH] Reconnection successful for {}", session_id);
                     Ok(())
                 } else {
@@ -752,6 +774,7 @@ impl SSHClient {
                 Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
             session_data.command_finished = false;
             session_data.last_exit_code = None;
+            session_data.last_completion_check_state = None;
 
             Ok(())
         } else {
@@ -783,6 +806,7 @@ impl SSHClient {
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
             let recorded = session_data.command_recorder.take().unwrap_or_default();
+            session_data.last_completion_check_state = None;
             Ok(recorded)
         } else {
             Err("Session not found".to_string())
@@ -801,55 +825,55 @@ impl SSHClient {
 
     /// Check if command execution appears completed (prompt detected or completion marker)
     pub async fn check_command_completed(session_id: &str) -> Result<bool, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            let Some(recorder) = session_data.command_recorder.as_ref() else {
-                tracing::debug!(
-                    "[check_command_completed] {} - no recorder, returning true",
-                    session_id
-                );
-                return Ok(true);
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            let current_buffer_len = session_data.terminal_buffer.len();
+            let recording_start = session_data.last_output_len;
+            let mut recorder_len = 0usize;
+            let mut preview = String::new();
+
+            let state = if let Some(recorder) = session_data.command_recorder.as_ref() {
+                // Completion detection must use recorder data because terminal_buffer is rolling
+                // and can be truncated when it hits MAX_BUFFER_SIZE.
+                let new_content = recorder.as_str();
+                recorder_len = new_content.len();
+                preview = new_content.chars().take(50).collect::<String>();
+
+                // Priority 1: Completion marker detection (pure control chars)
+                // The marker is: \x1b\x1b (double ESC, completely invisible)
+                if new_content.contains("\x1b\x1b") {
+                    CompletionCheckState::CompletedByMarker
+                } else if let Some(recorded) = session_data.recording_prompt.as_ref() {
+                    // Priority 2: Prompt suffix comparison
+                    // Record prompt suffix before command, compare after command
+                    // Simple and works with any shell/theme
+                    let new_suffix = Self::extract_prompt_suffix(new_content, 3);
+                    if new_suffix.as_deref() == Some(recorded.as_str()) {
+                        CompletionCheckState::CompletedByPrompt
+                    } else {
+                        CompletionCheckState::Waiting
+                    }
+                } else {
+                    CompletionCheckState::Waiting
+                }
+            } else {
+                CompletionCheckState::NoRecorder
             };
 
-            // Completion detection must use recorder data because terminal_buffer is rolling
-            // and can be truncated when it hits MAX_BUFFER_SIZE.
-            let new_content = recorder.as_str();
-            let recording_start = session_data.last_output_len;
-            let current_buffer_len = session_data.terminal_buffer.len();
-
-            tracing::debug!(
-                "[check_command_completed] {} - buffer_len={}, start={}, recorder_len={}, content={:?}",
-                session_id,
-                current_buffer_len,
-                recording_start,
-                new_content.len(),
-                new_content.chars().take(50).collect::<String>()
-            );
-
-            // Priority 1: Completion marker detection (pure control chars)
-            // The marker is: \x1b\x1b (double ESC, completely invisible)
-            if new_content.contains("\x1b\x1b") {
+            if session_data.last_completion_check_state != Some(state) {
                 tracing::debug!(
-                    "[check_command_completed] {} - Completion marker detected, returning true",
-                    session_id
+                    "[check_command_completed] {} - state={:?}, buffer_len={}, start={}, recorder_len={}, content={:?}",
+                    session_id,
+                    state,
+                    current_buffer_len,
+                    recording_start,
+                    recorder_len,
+                    preview
                 );
-                return Ok(true);
+                session_data.last_completion_check_state = Some(state);
             }
 
-            // Priority 2: Prompt suffix comparison
-            // Record prompt suffix before command, compare after command
-            // Simple and works with any shell/theme
-            if let Some(ref recorded) = session_data.recording_prompt {
-                let new_suffix = Self::extract_prompt_suffix(new_content, 3);
-                if new_suffix.as_ref().map(|s| s.as_str()) == Some(recorded.as_str()) {
-                    tracing::debug!("[check_command_completed] {} - prompt suffix matches, command completed",
-                        session_id);
-                    return Ok(true);
-                }
-            }
-
-            tracing::debug!("[check_command_completed] {} - returning false", session_id);
-            Ok(false)
+            Ok(state.is_completed())
         } else {
             Err("Session not found".to_string())
         }
