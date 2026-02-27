@@ -85,15 +85,43 @@ const FileTreeItem: React.FC<{
   const clipboardTextClass = isInClipboard
     ? (clipboardIsCut ? 'line-through opacity-60' : 'italic opacity-60')
     : '';
+  const rowRef = useRef<HTMLButtonElement>(null);
+  const nameRef = useRef<HTMLSpanElement>(null);
+  const [showFullNameTooltip, setShowFullNameTooltip] = useState(false);
+
+  const updateTooltipVisibility = useCallback(() => {
+    const rowElement = rowRef.current;
+    const nameElement = nameRef.current;
+    if (!rowElement || !nameElement) {
+      setShowFullNameTooltip(false);
+      return;
+    }
+
+    const treeContainer = rowElement.closest('[data-sftp-tree-scroll]');
+    if (!(treeContainer instanceof HTMLElement)) {
+      setShowFullNameTooltip(nameElement.scrollWidth > nameElement.clientWidth);
+      return;
+    }
+
+    const containerRect = treeContainer.getBoundingClientRect();
+    const nameRect = nameElement.getBoundingClientRect();
+    const isPartiallyHidden = nameRect.left < containerRect.left || nameRect.right > containerRect.right;
+    const isTextOverflowed = nameElement.scrollWidth > nameElement.clientWidth;
+    setShowFullNameTooltip(isPartiallyHidden || isTextOverflowed);
+  }, []);
+
   return (
     <div>
       <button
+        ref={rowRef}
         type="button"
         draggable
         className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent min-w-full w-max text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? 'opacity-50' : ''}`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         onDragStart={(e) => onDragStart(e, entry)}
+        onMouseEnter={updateTooltipVisibility}
+        onFocus={updateTooltipVisibility}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         <div className="w-4 flex-shrink-0 flex items-center justify-center">
@@ -124,7 +152,11 @@ const FileTreeItem: React.FC<{
           <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
 
-        <span className={`ml-0.25 flex-1 whitespace-nowrap ${clipboardTextClass}`}>
+        <span
+          ref={nameRef}
+          className={`ml-0.25 flex-1 whitespace-nowrap ${clipboardTextClass}`}
+          title={showFullNameTooltip ? entry.name : undefined}
+        >
           {entry.name}
           {entry.link_target && (
             <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
@@ -1374,7 +1406,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
          </div>
        </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2">
+      <div
+        className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2"
+        data-sftp-tree-scroll
+      >
           {rootFiles.map(entry => (
               <FileTreeItem
                 key={entry.path}
