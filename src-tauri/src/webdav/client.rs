@@ -1,6 +1,6 @@
+use crate::config::types::Proxy;
 use reqwest::Client;
 use std::error::Error;
-use crate::config::types::Proxy;
 
 pub struct WebDAVClient {
     base_url: String,
@@ -11,8 +11,7 @@ pub struct WebDAVClient {
 
 impl WebDAVClient {
     pub fn new(base_url: String, username: String, password: String, proxy: Option<Proxy>) -> Self {
-        let mut client_builder = Client::builder()
-            .user_agent("Resh/0.1.0");
+        let mut client_builder = Client::builder().user_agent("Resh/0.1.0");
 
         if let Some(proxy_config) = proxy {
             let scheme = match proxy_config.proxy_type.as_str() {
@@ -20,7 +19,7 @@ impl WebDAVClient {
                 _ => "http",
             };
             let proxy_url = format!("{}://{}:{}", scheme, proxy_config.host, proxy_config.port);
-            
+
             if let Ok(mut p) = reqwest::Proxy::all(&proxy_url) {
                 if let (Some(u), Some(pass)) = (proxy_config.username, proxy_config.password) {
                     if !u.is_empty() {
@@ -34,7 +33,10 @@ impl WebDAVClient {
 
             // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
             if proxy_config.ignore_ssl_errors {
-                tracing::warn!("WebDAV: Ignoring SSL certificates for proxy {}", proxy_config.name);
+                tracing::warn!(
+                    "WebDAV: Ignoring SSL certificates for proxy {}",
+                    proxy_config.name
+                );
                 client_builder = client_builder.danger_accept_invalid_certs(true);
             }
         }
@@ -49,8 +51,9 @@ impl WebDAVClient {
 
     pub async fn upload(&self, filename: &str, content: &[u8]) -> Result<(), Box<dyn Error>> {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .put(&url)
             .basic_auth(&self.username, Some(&self.password))
             .body(content.to_vec())
@@ -59,7 +62,10 @@ impl WebDAVClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await.unwrap_or_else(|_| "Could not read response body".to_string());
+            let text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Could not read response body".to_string());
             tracing::error!("Upload failed: HTTP {} - {}", status, text);
             return Err(format!("Upload failed: HTTP {} - {}", status, text).into());
         }
@@ -69,8 +75,9 @@ impl WebDAVClient {
 
     pub async fn download(&self, filename: &str) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .basic_auth(&self.username, Some(&self.password))
             .header("Cache-Control", "no-cache")
@@ -84,7 +91,10 @@ impl WebDAVClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await.unwrap_or_else(|_| "Could not read response body".to_string());
+            let text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Could not read response body".to_string());
             tracing::error!("Download failed: HTTP {} - {}", status, text);
             return Err(format!("Download failed: HTTP {} - {}", status, text).into());
         }
@@ -95,8 +105,9 @@ impl WebDAVClient {
 
     pub async fn exists(&self, filename: &str) -> Result<bool, Box<dyn Error>> {
         let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .head(&url)
             .basic_auth(&self.username, Some(&self.password))
             .header("Cache-Control", "no-cache")
@@ -125,7 +136,7 @@ mod tests {
             "pass".to_string(),
             None,
         );
-        
+
         assert_eq!(client.base_url, "https://example.com/webdav");
         assert_eq!(client.username, "user");
     }

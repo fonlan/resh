@@ -2,8 +2,8 @@
 // Tauri commands for master password management
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
 use std::sync::Arc;
+use tauri::State;
 
 use super::AppState;
 
@@ -32,10 +32,10 @@ pub struct VerifyMasterPasswordResponse {
 }
 
 /// Check if a master password has been set
-/// 
+///
 /// # Arguments
 /// * `state` - Application state containing the password manager
-/// 
+///
 /// # Returns
 /// A response indicating whether a master password is set
 #[tauri::command]
@@ -47,11 +47,11 @@ pub async fn get_master_password_status(
 }
 
 /// Set the master password
-/// 
+///
 /// # Arguments
 /// * `params` - The password to set
 /// * `state` - Application state containing the password manager
-/// 
+///
 /// # Returns
 /// Result indicating success or failure
 #[tauri::command]
@@ -64,11 +64,11 @@ pub async fn set_master_password(
 }
 
 /// Verify the master password
-/// 
+///
 /// # Arguments
 /// * `params` - The password to verify
 /// * `state` - Application state containing the password manager
-/// 
+///
 /// # Returns
 /// A response indicating whether the password is valid
 #[tauri::command]

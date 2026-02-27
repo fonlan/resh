@@ -1,12 +1,12 @@
-use tauri::{State, AppHandle, Emitter};
-use std::sync::Arc;
 use crate::commands::AppState;
 use crate::sftp_manager::{SftpManager, TransferProgress};
+use russh_sftp::protocol::StatusCode;
+use std::path::Path;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, State};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use std::path::Path;
 use uuid::Uuid;
-use russh_sftp::protocol::StatusCode;
 
 #[tauri::command]
 pub async fn sftp_edit_file(
@@ -21,7 +21,9 @@ pub async fn sftp_edit_file(
         .join("resh_sftp")
         .join(&session_id)
         .join(&task_uuid);
-    fs::create_dir_all(&temp_dir).await.map_err(|e| e.to_string())?;
+    fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // 2. Determine local filename
     let file_name_str = Path::new(&remote_path)
@@ -32,7 +34,9 @@ pub async fn sftp_edit_file(
 
     // Kill any existing watch for the same remote file in this session
     // This ensures only one watcher exists per remote file
-    state.sftp_edit_manager.stop_watching_remote(&session_id, &remote_path);
+    state
+        .sftp_edit_manager
+        .stop_watching_remote(&session_id, &remote_path);
 
     let task_id = Uuid::new_v4().to_string();
 
@@ -44,26 +48,39 @@ pub async fn sftp_edit_file(
     let total_bytes = metadata.attrs.size.unwrap_or(0);
 
     // Emit Initial Progress
-    let _ = app.emit("transfer-progress", TransferProgress {
-        task_id: task_id.clone(),
-        type_: "download".to_string(),
-        session_id: session_id.clone(),
-        file_name: file_name_str.to_string(),
-        source: remote_path.clone(),
-        destination: local_path.to_string_lossy().to_string(),
-        total_bytes,
-        transferred_bytes: 0,
-        speed: 0.0,
-        eta: None,
-        status: "transferring".to_string(),
-        error: None,
-    });
+    let _ = app.emit(
+        "transfer-progress",
+        TransferProgress {
+            task_id: task_id.clone(),
+            type_: "download".to_string(),
+            session_id: session_id.clone(),
+            file_name: file_name_str.to_string(),
+            source: remote_path.clone(),
+            destination: local_path.to_string_lossy().to_string(),
+            total_bytes,
+            transferred_bytes: 0,
+            speed: 0.0,
+            eta: None,
+            status: "transferring".to_string(),
+            error: None,
+        },
+    );
 
     let result: Result<u64, String> = async {
         let sftp = SftpManager::get_session(&session_id).await?;
-        let handle = sftp.open(&remote_path, russh_sftp::protocol::OpenFlags::READ, russh_sftp::protocol::FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
-        let mut local_file = fs::File::create(&local_path).await.map_err(|e| e.to_string())?;
-        
+        let handle = sftp
+            .open(
+                &remote_path,
+                russh_sftp::protocol::OpenFlags::READ,
+                russh_sftp::protocol::FileAttributes::default(),
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .handle;
+        let mut local_file = fs::File::create(&local_path)
+            .await
+            .map_err(|e| e.to_string())?;
+
         let mut offset = 0u64;
         loop {
             let read_len = if total_bytes > 0 {
@@ -88,10 +105,15 @@ pub async fn sftp_edit_file(
                             offset, total_bytes
                         ));
                     }
-                    local_file.write_all(&data.data).await.map_err(|e| e.to_string())?;
+                    local_file
+                        .write_all(&data.data)
+                        .await
+                        .map_err(|e| e.to_string())?;
                     offset += data.data.len() as u64;
                 }
-                Err(russh_sftp::client::error::Error::Status(status)) if status.status_code == StatusCode::Eof => {
+                Err(russh_sftp::client::error::Error::Status(status))
+                    if status.status_code == StatusCode::Eof =>
+                {
                     if total_bytes > 0 && offset < total_bytes {
                         let _ = sftp.close(handle).await;
                         return Err(format!(
@@ -112,69 +134,78 @@ pub async fn sftp_edit_file(
         drop(local_file);
         let _ = sftp.close(handle).await;
         Ok(offset)
-    }.await;
+    }
+    .await;
 
     // Emit Final Progress
-    let final_status = if result.is_ok() { "completed" } else { "failed" };
+    let final_status = if result.is_ok() {
+        "completed"
+    } else {
+        "failed"
+    };
     let downloaded_bytes = result.as_ref().copied().unwrap_or(0);
     let final_error = result.err();
 
-    let _ = app.emit("transfer-progress", TransferProgress {
-        task_id,
-        type_: "download".to_string(),
-        session_id: session_id.clone(),
-        file_name: file_name_str.to_string(),
-        source: remote_path.clone(),
-        destination: local_path.to_string_lossy().to_string(),
-        total_bytes,
-        transferred_bytes: downloaded_bytes,
-        speed: 0.0,
-        eta: None,
-        status: final_status.to_string(),
-        error: final_error.clone(),
-    });
+    let _ = app.emit(
+        "transfer-progress",
+        TransferProgress {
+            task_id,
+            type_: "download".to_string(),
+            session_id: session_id.clone(),
+            file_name: file_name_str.to_string(),
+            source: remote_path.clone(),
+            destination: local_path.to_string_lossy().to_string(),
+            total_bytes,
+            transferred_bytes: downloaded_bytes,
+            speed: 0.0,
+            eta: None,
+            status: final_status.to_string(),
+            error: final_error.clone(),
+        },
+    );
 
     if final_status == "failed" {
         return Err(final_error.unwrap_or_else(|| "Unknown error during download".to_string()));
     }
 
     // 4. Register watcher
-    state.sftp_edit_manager.watch_file(local_path.clone(), session_id, remote_path).map_err(|e| e.to_string())?;
+    state
+        .sftp_edit_manager
+        .watch_file(local_path.clone(), session_id, remote_path)
+        .map_err(|e| e.to_string())?;
 
     Ok(local_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub async fn open_local_editor(
-    path: String,
-    editor: Option<String>,
-) -> Result<(), String> {
+pub async fn open_local_editor(path: String, editor: Option<String>) -> Result<(), String> {
     tracing::info!("Opening local editor for path: {}", path);
-    
+
     if let Some(editor_cmd) = editor {
         if !editor_cmd.is_empty() {
-             tracing::info!("Using custom editor command: {}", editor_cmd);
-             
-             std::process::Command::new(&editor_cmd)
+            tracing::info!("Using custom editor command: {}", editor_cmd);
+
+            std::process::Command::new(&editor_cmd)
                 .arg(&path)
                 .spawn()
                 .map_err(|e| format!("Failed to launch editor: {}", e))?;
-             return Ok(());
+            return Ok(());
         }
     }
-    
+
     tracing::info!("Using system default editor");
-    open::that(&path).map_err(|e| format!("Failed to open file with default application: {}", e))?;
-    
+    open::that(&path)
+        .map_err(|e| format!("Failed to open file with default application: {}", e))?;
+
     Ok(())
 }
 
 #[tauri::command]
 pub async fn pick_folder() -> Result<Option<String>, String> {
     use rfd::FileDialog;
-    let folder = tokio::task::spawn_blocking(move || {
-        FileDialog::new().pick_folder()
-    }).await.map_err(|e| e.to_string())?;
+    let folder = tokio::task::spawn_blocking(move || FileDialog::new().pick_folder())
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
@@ -182,9 +213,9 @@ pub async fn pick_folder() -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn pick_file() -> Result<Option<String>, String> {
     use rfd::FileDialog;
-    let file = tokio::task::spawn_blocking(move || {
-        FileDialog::new().pick_file()
-    }).await.map_err(|e| e.to_string())?;
+    let file = tokio::task::spawn_blocking(move || FileDialog::new().pick_file())
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }

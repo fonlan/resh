@@ -1,18 +1,20 @@
 use crate::ai::prompts::SYSTEM_PROMPT;
-use crate::ai::validator::{validate_and_fix_messages, MessagePayload, ToolCallPayload, ToolCallFunction};
+use crate::ai::validator::{
+    validate_and_fix_messages, MessagePayload, ToolCallFunction, ToolCallPayload,
+};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
-use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
+use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent, Tool};
+use reqwest::Client;
 use rusqlite::params;
+use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tauri::{Emitter, State, Window, Manager};
+use tauri::{Emitter, Manager, State, Window};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
-use genai::chat::{ChatMessage as GenaiMessage, Tool, ChatStreamEvent};
-use reqwest::Client;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolCall {
@@ -81,7 +83,10 @@ struct ExecChannelCommandResult {
     timed_out: bool,
 }
 
-fn build_run_in_terminal_timeout_failure_message(timeout_seconds: u64, partial_output: &str) -> String {
+fn build_run_in_terminal_timeout_failure_message(
+    timeout_seconds: u64,
+    partial_output: &str,
+) -> String {
     let base = format!(
         "Error: run_in_terminal timed out after {}s without detecting command completion. Treat this as a failed foreground execution. Use run_in_background to check whether the process is still running and terminate it if needed.",
         timeout_seconds
@@ -254,7 +259,9 @@ fn append_response_stream_text(
 
     if *has_pending_reasoning {
         flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
-        window.emit(reasoning_end_event, "end").map_err(|e| e.to_string())?;
+        window
+            .emit(reasoning_end_event, "end")
+            .map_err(|e| e.to_string())?;
         *has_pending_reasoning = false;
         *last_emit_at = Instant::now();
     }
@@ -262,7 +269,9 @@ fn append_response_stream_text(
     full_content.push_str(text);
     response_emit_buffer.push_str(text);
 
-    if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+    if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN
+        || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL
+    {
         flush_response_buffer(window, response_event, response_emit_buffer)?;
         *last_emit_at = Instant::now();
     }
@@ -287,7 +296,9 @@ fn append_reasoning_stream_text(
     full_reasoning.push_str(text);
     reasoning_emit_buffer.push_str(text);
 
-    if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+    if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN
+        || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL
+    {
         flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
         *last_emit_at = Instant::now();
     }
@@ -343,18 +354,7 @@ fn flush_think_parser_remainder(
 fn is_path_trailing_punctuation(character: char) -> bool {
     matches!(
         character,
-        '.'
-            | ','
-            | ';'
-            | ':'
-            | '!'
-            | '?'
-            | ')'
-            | ']'
-            | '}'
-            | '>'
-            | '"'
-            | '\''
+        '.' | ',' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '>' | '"' | '\''
     )
 }
 
@@ -431,7 +431,10 @@ async fn read_remote_file_via_sftp(
     Ok((String::from_utf8_lossy(&content).to_string(), truncated))
 }
 
-async fn enrich_user_message_with_tagged_files(content: &str, ssh_session_id: Option<&str>) -> String {
+async fn enrich_user_message_with_tagged_files(
+    content: &str,
+    ssh_session_id: Option<&str>,
+) -> String {
     let tagged_paths = extract_tagged_file_paths(content);
     if tagged_paths.is_empty() {
         return content.to_string();
@@ -454,8 +457,10 @@ async fn enrich_user_message_with_tagged_files(content: &str, ssh_session_id: Op
                     enriched_content.push_str(&format!("\n[File: {}]\n", path));
                     enriched_content.push_str(&file_content);
                     if truncated {
-                        enriched_content
-                            .push_str(&format!("\n[Truncated to first {} bytes]", READ_FILE_MAX_BYTES));
+                        enriched_content.push_str(&format!(
+                            "\n[Truncated to first {} bytes]",
+                            READ_FILE_MAX_BYTES
+                        ));
                     }
                     enriched_content.push_str("\n[/File]\n");
                 }
@@ -484,22 +489,34 @@ async fn enrich_user_message_with_tagged_files(content: &str, ssh_session_id: Op
     enriched_content
 }
 
-fn flush_response_buffer(window: &Window, response_event: &str, buffer: &mut String) -> Result<(), String> {
+fn flush_response_buffer(
+    window: &Window,
+    response_event: &str,
+    buffer: &mut String,
+) -> Result<(), String> {
     if buffer.is_empty() {
         return Ok(());
     }
 
     let payload = std::mem::take(buffer);
-    window.emit(response_event, payload).map_err(|e| e.to_string())
+    window
+        .emit(response_event, payload)
+        .map_err(|e| e.to_string())
 }
 
-fn flush_reasoning_buffer(window: &Window, reasoning_event: &str, buffer: &mut String) -> Result<(), String> {
+fn flush_reasoning_buffer(
+    window: &Window,
+    reasoning_event: &str,
+    buffer: &mut String,
+) -> Result<(), String> {
     if buffer.is_empty() {
         return Ok(());
     }
 
     let payload = std::mem::take(buffer);
-    window.emit(reasoning_event, payload).map_err(|e| e.to_string())
+    window
+        .emit(reasoning_event, payload)
+        .map_err(|e| e.to_string())
 }
 
 pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
@@ -672,36 +689,37 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
 }
 
 fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
-    history.into_iter().map(|msg| {
-        match msg.role.as_str() {
+    history
+        .into_iter()
+        .map(|msg| match msg.role.as_str() {
             "system" => GenaiMessage::system(msg.content.unwrap_or_default()),
             "user" => GenaiMessage::user(msg.content.unwrap_or_default()),
             "assistant" => {
                 let content = msg.content.unwrap_or_default();
                 if let Some(tool_calls) = msg.tool_calls {
-                    let genai_tool_calls: Vec<genai::chat::ToolCall> = tool_calls.into_iter().map(|tc| {
-                        genai::chat::ToolCall {
+                    let genai_tool_calls: Vec<genai::chat::ToolCall> = tool_calls
+                        .into_iter()
+                        .map(|tc| genai::chat::ToolCall {
                             call_id: tc.id,
                             fn_name: tc.function.name,
-                            fn_arguments: serde_json::from_str(&tc.function.arguments).unwrap_or(serde_json::Value::Null),
+                            fn_arguments: serde_json::from_str(&tc.function.arguments)
+                                .unwrap_or(serde_json::Value::Null),
                             thought_signatures: None,
-                        }
-                    }).collect();
-                    
+                        })
+                        .collect();
+
                     GenaiMessage::assistant(genai_tool_calls)
                 } else {
                     GenaiMessage::assistant(content)
                 }
-            },
-            "tool" => {
-                GenaiMessage::from(genai::chat::ToolResponse::new(
-                    msg.tool_call_id.unwrap_or_default(),
-                    msg.content.unwrap_or_default()
-                ))
-            },
+            }
+            "tool" => GenaiMessage::from(genai::chat::ToolResponse::new(
+                msg.tool_call_id.unwrap_or_default(),
+                msg.content.unwrap_or_default(),
+            )),
             _ => GenaiMessage::user(msg.content.unwrap_or_default()),
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 async fn load_history(
@@ -726,7 +744,11 @@ async fn load_history(
         let max = config.general.ai_max_history as usize;
         let gp = config.additional_prompt.clone();
         let sp = if let Some(sid) = &server_id {
-            config.servers.iter().find(|s| s.id == *sid).and_then(|s| s.additional_prompt.clone())
+            config
+                .servers
+                .iter()
+                .find(|s| s.id == *sid)
+                .and_then(|s| s.additional_prompt.clone())
         } else {
             None
         };
@@ -849,7 +871,8 @@ async fn load_history(
             content: m.content.clone(),
             reasoning_content: m.reasoning_content.clone(),
             tool_calls: m.tool_calls.as_ref().map(|calls| {
-                calls.iter()
+                calls
+                    .iter()
                     .map(|c| ToolCallPayload {
                         id: c.id.clone(),
                         function: ToolCallFunction {
@@ -877,7 +900,8 @@ async fn load_history(
             content: m.content,
             reasoning_content: m.reasoning_content,
             tool_calls: m.tool_calls.map(|calls| {
-                calls.iter()
+                calls
+                    .iter()
                     .map(|c| ToolCall {
                         id: c.id.clone(),
                         tool_type: "function".to_string(),
@@ -930,7 +954,8 @@ async fn execute_tools_and_save(
                             if text.is_empty() {
                                 "Error: No text is currently selected in the terminal.".to_string()
                             } else {
-                                String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
+                                String::from_utf8_lossy(&strip_ansi_escapes::strip(&text))
+                                    .to_string()
                             }
                         }
                         Err(e) => format!("Error: {}", e),
@@ -941,7 +966,8 @@ async fn execute_tools_and_save(
             }
             "read_file" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
                     {
                         let remote_path = args
                             .get("remote_path")
@@ -953,11 +979,16 @@ async fn execute_tools_and_save(
                         if remote_path.is_empty() {
                             "Error: Missing 'remote_path' argument".to_string()
                         } else {
-                            match read_remote_file_via_sftp(ssh_id, &remote_path, READ_FILE_MAX_BYTES)
-                                .await
+                            match read_remote_file_via_sftp(
+                                ssh_id,
+                                &remote_path,
+                                READ_FILE_MAX_BYTES,
+                            )
+                            .await
                             {
                                 Ok((file_content, truncated)) => {
-                                    let mut response = format!("[File: {}]\n{}", remote_path, file_content);
+                                    let mut response =
+                                        format!("[File: {}]\n{}", remote_path, file_content);
                                     if truncated {
                                         response.push_str(&format!(
                                             "\n[Truncated to first {} bytes]",
@@ -988,7 +1019,11 @@ async fn execute_tools_and_save(
                                 .unwrap_or(30);
 
                             SSHClient::start_command_recording(ssh_id).await?;
-                            tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
+                            tracing::debug!(
+                                "[execute_tools] Command '{}' sent, timeout={}s",
+                                cmd,
+                                timeout
+                            );
 
                             let cmd_nl = format!("{}\n", cmd);
                             if let Err(e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
@@ -1018,12 +1053,20 @@ async fn execute_tools_and_save(
                                     SSHClient::check_command_completed(ssh_id).await?;
                                 if is_completed {
                                     completion_detected = true;
-                                    tracing::debug!("[execute_tools] Command '{}' completed at {}ms", cmd, elapsed);
+                                    tracing::debug!(
+                                        "[execute_tools] Command '{}' completed at {}ms",
+                                        cmd,
+                                        elapsed
+                                    );
                                     break;
                                 }
 
                                 if elapsed >= timeout_ms {
-                                    tracing::warn!("[execute_tools] Timeout reached at {}ms for command '{}'", elapsed, cmd);
+                                    tracing::warn!(
+                                        "[execute_tools] Timeout reached at {}ms for command '{}'",
+                                        elapsed,
+                                        cmd
+                                    );
                                     timed_out = true;
                                     break;
                                 }
@@ -1036,7 +1079,10 @@ async fn execute_tools_and_save(
                                     )
                                     .to_string();
                                     if timed_out && !completion_detected {
-                                        build_run_in_terminal_timeout_failure_message(timeout, &clean_output)
+                                        build_run_in_terminal_timeout_failure_message(
+                                            timeout,
+                                            &clean_output,
+                                        )
                                     } else if clean_output.trim().is_empty() {
                                         "Command produced no output".to_string()
                                     } else {
@@ -1066,7 +1112,14 @@ async fn execute_tools_and_save(
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(30);
 
-                            match execute_command_in_exec_channel(ssh_id, cmd, timeout, Some(&cancellation_token)).await {
+                            match execute_command_in_exec_channel(
+                                ssh_id,
+                                cmd,
+                                timeout,
+                                Some(&cancellation_token),
+                            )
+                            .await
+                            {
                                 Ok(exec_result) => {
                                     let clean_output = String::from_utf8_lossy(
                                         &strip_ansi_escapes::strip(exec_result.output.as_bytes()),
@@ -1075,7 +1128,10 @@ async fn execute_tools_and_save(
 
                                     if exec_result.timed_out {
                                         if clean_output.trim().is_empty() {
-                                            format!("Error: run_in_background timed out after {}s.", timeout)
+                                            format!(
+                                                "Error: run_in_background timed out after {}s.",
+                                                timeout
+                                            )
                                         } else {
                                             format!(
                                                 "Error: run_in_background timed out after {}s.\n\n[Partial output]\n{}",
@@ -1091,7 +1147,8 @@ async fn execute_tools_and_save(
                                                 format!("Error: run_in_background command exited with status {}.\n\n{}", status, clean_output)
                                             }
                                         } else if clean_output.trim().is_empty() {
-                                            "Command completed successfully with no output".to_string()
+                                            "Command completed successfully with no output"
+                                                .to_string()
                                         } else {
                                             clean_output
                                         }
@@ -1120,8 +1177,11 @@ async fn execute_tools_and_save(
             }
             "sftp_download" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
-                        let remote_path = args["remote_path"].as_str().unwrap_or_default().to_string();
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
+                        let remote_path =
+                            args["remote_path"].as_str().unwrap_or_default().to_string();
                         let local_path = args["local_path"].as_str().map(|s| s.to_string());
 
                         if remote_path.is_empty() {
@@ -1129,8 +1189,9 @@ async fn execute_tools_and_save(
                         } else {
                             let metadata_res = tokio::time::timeout(
                                 std::time::Duration::from_secs(5),
-                                crate::sftp_manager::SftpManager::metadata(ssh_id, &remote_path)
-                            ).await;
+                                crate::sftp_manager::SftpManager::metadata(ssh_id, &remote_path),
+                            )
+                            .await;
 
                             match metadata_res {
                                 Ok(Ok(_)) => {
@@ -1208,9 +1269,13 @@ async fn execute_tools_and_save(
             }
             "sftp_upload" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    if let Ok(args) = serde_json::from_str::<serde_json::Value>(&call.function.arguments) {
-                        let local_path = args["local_path"].as_str().unwrap_or_default().to_string();
-                        let remote_path = args["remote_path"].as_str().unwrap_or_default().to_string();
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
+                        let local_path =
+                            args["local_path"].as_str().unwrap_or_default().to_string();
+                        let remote_path =
+                            args["remote_path"].as_str().unwrap_or_default().to_string();
 
                         if local_path.is_empty() || remote_path.is_empty() {
                             "Error: Missing 'local_path' or 'remote_path' argument".to_string()
@@ -1220,12 +1285,17 @@ async fn execute_tools_and_save(
                                 format!("Error: Local source path '{}' does not exist.", local_path)
                             } else {
                                 let remote_p = std::path::Path::new(&remote_path);
-                                let remote_parent = remote_p.parent().and_then(|p| p.to_str()).unwrap_or("/");
+                                let remote_parent =
+                                    remote_p.parent().and_then(|p| p.to_str()).unwrap_or("/");
 
                                 let metadata_res = tokio::time::timeout(
                                     std::time::Duration::from_secs(5),
-                                    crate::sftp_manager::SftpManager::metadata(ssh_id, remote_parent)
-                                ).await;
+                                    crate::sftp_manager::SftpManager::metadata(
+                                        ssh_id,
+                                        remote_parent,
+                                    ),
+                                )
+                                .await;
 
                                 match metadata_res {
                                     Ok(Ok(_)) => {
@@ -1329,30 +1399,48 @@ pub fn run_ai_turn(
     Box::pin(async move {
         let (channel, model, proxy) = {
             let config = state.config.lock().await;
-            let model = config.ai_models.iter().find(|m| m.id == model_id).cloned().ok_or("Model not found")?;
-            let channel = config.ai_channels.iter().find(|c| c.id == channel_id).cloned().ok_or("Channel not found")?;
-            let proxy = channel.proxy_id.as_ref().and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+            let model = config
+                .ai_models
+                .iter()
+                .find(|m| m.id == model_id)
+                .cloned()
+                .ok_or("Model not found")?;
+            let channel = config
+                .ai_channels
+                .iter()
+                .find(|c| c.id == channel_id)
+                .cloned()
+                .ok_or("Channel not found")?;
+            let proxy = channel
+                .proxy_id
+                .as_ref()
+                .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
             (channel, model, proxy)
         };
 
-        let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, ssh_session_id.as_deref()).await?;
+        let history: Vec<ChatMessage> = load_history(
+            &state,
+            &session_id,
+            is_agent_mode,
+            ssh_session_id.as_deref(),
+        )
+        .await?;
         let genai_history = to_genai_messages(history);
 
         let genai_tools: Option<Vec<Tool>> = tools.as_ref().map(|ts| {
-            ts.iter().map(|t| {
-                Tool::new(t.function.name.clone())
-                    .with_description(t.function.description.clone())
-                    .with_schema(t.function.parameters.clone())
-            }).collect()
+            ts.iter()
+                .map(|t| {
+                    Tool::new(t.function.name.clone())
+                        .with_description(t.function.description.clone())
+                        .with_schema(t.function.parameters.clone())
+                })
+                .collect()
         });
 
-        let mut stream = state.ai_manager.stream_chat(
-            &channel,
-            &model,
-            genai_history,
-            genai_tools,
-            proxy
-        ).await?;
+        let mut stream = state
+            .ai_manager
+            .stream_chat(&channel, &model, genai_history, genai_tools, proxy)
+            .await?;
 
         let mut full_content = String::new();
         let mut full_reasoning = String::new();
@@ -1389,181 +1477,223 @@ pub fn run_ai_turn(
                 flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
                 flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
                 if has_pending_reasoning {
-                    window.emit(&reasoning_end_event, "end").map_err(|e| e.to_string())?;
+                    window
+                        .emit(&reasoning_end_event, "end")
+                        .map_err(|e| e.to_string())?;
                 }
                 return Err("CANCELLED".to_string());
             }
             match event_result {
-                Ok(event) => {
-                    match event {
-                        ChatStreamEvent::Chunk(chunk) => {
-                            think_parser_buffer.push_str(&chunk.content);
-                            let segments = extract_think_segments(&mut think_parser_buffer, &mut in_think_block);
-                            for (is_reasoning, segment) in segments {
-                                if is_reasoning {
-                                    append_reasoning_stream_text(
-                                        &window,
-                                        &reasoning_event,
-                                        &segment,
-                                        &mut full_reasoning,
-                                        &mut reasoning_emit_buffer,
-                                        &mut has_pending_reasoning,
-                                        &mut last_emit_at,
-                                    )?;
-                                } else {
-                                    append_response_stream_text(
-                                        &window,
-                                        &response_event,
-                                        &reasoning_event,
-                                        &reasoning_end_event,
-                                        &segment,
-                                        &mut full_content,
-                                        &mut response_emit_buffer,
-                                        &mut reasoning_emit_buffer,
-                                        &mut has_pending_reasoning,
-                                        &mut last_emit_at,
-                                    )?;
-                                }
+                Ok(event) => match event {
+                    ChatStreamEvent::Chunk(chunk) => {
+                        think_parser_buffer.push_str(&chunk.content);
+                        let segments =
+                            extract_think_segments(&mut think_parser_buffer, &mut in_think_block);
+                        for (is_reasoning, segment) in segments {
+                            if is_reasoning {
+                                append_reasoning_stream_text(
+                                    &window,
+                                    &reasoning_event,
+                                    &segment,
+                                    &mut full_reasoning,
+                                    &mut reasoning_emit_buffer,
+                                    &mut has_pending_reasoning,
+                                    &mut last_emit_at,
+                                )?;
+                            } else {
+                                append_response_stream_text(
+                                    &window,
+                                    &response_event,
+                                    &reasoning_event,
+                                    &reasoning_end_event,
+                                    &segment,
+                                    &mut full_content,
+                                    &mut response_emit_buffer,
+                                    &mut reasoning_emit_buffer,
+                                    &mut has_pending_reasoning,
+                                    &mut last_emit_at,
+                                )?;
                             }
                         }
-                        ChatStreamEvent::ReasoningChunk(chunk) => {
-                            append_reasoning_stream_text(
-                                &window,
-                                &reasoning_event,
-                                &chunk.content,
-                                &mut full_reasoning,
-                                &mut reasoning_emit_buffer,
-                                &mut has_pending_reasoning,
-                                &mut last_emit_at,
-                            )?;
-                        }
-                        ChatStreamEvent::ToolCallChunk(chunk) => {
-                            flush_think_parser_remainder(
-                                &window,
-                                &response_event,
-                                &reasoning_event,
-                                &reasoning_end_event,
-                                &mut think_parser_buffer,
-                                in_think_block,
-                                &mut full_content,
-                                &mut full_reasoning,
-                                &mut response_emit_buffer,
-                                &mut reasoning_emit_buffer,
-                                &mut has_pending_reasoning,
-                                &mut last_emit_at,
-                            )?;
-                            flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                            flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
-                            last_emit_at = Instant::now();
+                    }
+                    ChatStreamEvent::ReasoningChunk(chunk) => {
+                        append_reasoning_stream_text(
+                            &window,
+                            &reasoning_event,
+                            &chunk.content,
+                            &mut full_reasoning,
+                            &mut reasoning_emit_buffer,
+                            &mut has_pending_reasoning,
+                            &mut last_emit_at,
+                        )?;
+                    }
+                    ChatStreamEvent::ToolCallChunk(chunk) => {
+                        flush_think_parser_remainder(
+                            &window,
+                            &response_event,
+                            &reasoning_event,
+                            &reasoning_end_event,
+                            &mut think_parser_buffer,
+                            in_think_block,
+                            &mut full_content,
+                            &mut full_reasoning,
+                            &mut response_emit_buffer,
+                            &mut reasoning_emit_buffer,
+                            &mut has_pending_reasoning,
+                            &mut last_emit_at,
+                        )?;
+                        flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                        flush_reasoning_buffer(
+                            &window,
+                            &reasoning_event,
+                            &mut reasoning_emit_buffer,
+                        )?;
+                        last_emit_at = Instant::now();
 
-                            tracing::debug!("[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
-                                chunk.tool_call.call_id, chunk.tool_call.fn_name, chunk.tool_call.fn_arguments);
+                        tracing::debug!(
+                            "[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
+                            chunk.tool_call.call_id,
+                            chunk.tool_call.fn_name,
+                            chunk.tool_call.fn_arguments
+                        );
 
-                            let args = chunk.tool_call.fn_arguments.as_str()
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
+                        let args = chunk
+                            .tool_call
+                            .fn_arguments
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
 
-                            tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
+                        tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
 
-                            if let Some(existing) = accumulated_tool_calls.iter_mut().find(|tc| tc.id == chunk.tool_call.call_id) {
-                                existing.function.arguments.push_str(&args);
+                        if let Some(existing) = accumulated_tool_calls
+                            .iter_mut()
+                            .find(|tc| tc.id == chunk.tool_call.call_id)
+                        {
+                            existing.function.arguments.push_str(&args);
 
-                                if existing.function.name.is_empty() && !chunk.tool_call.fn_name.is_empty() {
-                                    existing.function.name = chunk.tool_call.fn_name.clone();
-                                }
+                            if existing.function.name.is_empty()
+                                && !chunk.tool_call.fn_name.is_empty()
+                            {
+                                existing.function.name = chunk.tool_call.fn_name.clone();
+                            }
 
-                                tracing::debug!("[AI] ToolCallChunk (append by id): id={}, name={}, args_len={}, total_len={}",
+                            tracing::debug!("[AI] ToolCallChunk (append by id): id={}, name={}, args_len={}, total_len={}",
                                     chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
-                            } else if chunk.tool_call.call_id == "call_0" && accumulated_tool_calls.len() == 1 {
-                                let existing = &mut accumulated_tool_calls[0];
-                                existing.function.arguments.push_str(&args);
+                        } else if chunk.tool_call.call_id == "call_0"
+                            && accumulated_tool_calls.len() == 1
+                        {
+                            let existing = &mut accumulated_tool_calls[0];
+                            existing.function.arguments.push_str(&args);
 
-                                if existing.function.name.is_empty() && !chunk.tool_call.fn_name.is_empty() {
-                                    existing.function.name = chunk.tool_call.fn_name.clone();
-                                }
+                            if existing.function.name.is_empty()
+                                && !chunk.tool_call.fn_name.is_empty()
+                            {
+                                existing.function.name = chunk.tool_call.fn_name.clone();
+                            }
 
-                                tracing::debug!("[AI] ToolCallChunk (append by fallback): original_id={}, fallback_id={}, name={}, args_len={}, total_len={}",
+                            tracing::debug!("[AI] ToolCallChunk (append by fallback): original_id={}, fallback_id={}, name={}, args_len={}, total_len={}",
                                     existing.id, chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
-                            } else if !chunk.tool_call.fn_name.is_empty() || !args.is_empty() {
-                                accumulated_tool_calls.push(ToolCall {
-                                    id: chunk.tool_call.call_id.clone(),
-                                    tool_type: "function".to_string(),
-                                    function: FunctionCall {
-                                        name: chunk.tool_call.fn_name.clone(),
-                                        arguments: args.clone(),
-                                    }
-                                });
-                                tracing::debug!("[AI] ToolCallChunk (new): id={}, name={}, args=\"{}\"",
-                                    chunk.tool_call.call_id, chunk.tool_call.fn_name, args);
-                            } else {
-                                tracing::debug!("[AI] ToolCallChunk (skipped): empty fn_name and args");
-                            }
+                        } else if !chunk.tool_call.fn_name.is_empty() || !args.is_empty() {
+                            accumulated_tool_calls.push(ToolCall {
+                                id: chunk.tool_call.call_id.clone(),
+                                tool_type: "function".to_string(),
+                                function: FunctionCall {
+                                    name: chunk.tool_call.fn_name.clone(),
+                                    arguments: args.clone(),
+                                },
+                            });
+                            tracing::debug!(
+                                "[AI] ToolCallChunk (new): id={}, name={}, args=\"{}\"",
+                                chunk.tool_call.call_id,
+                                chunk.tool_call.fn_name,
+                                args
+                            );
+                        } else {
+                            tracing::debug!("[AI] ToolCallChunk (skipped): empty fn_name and args");
                         }
-                        ChatStreamEvent::End(end) => {
-                            flush_think_parser_remainder(
-                                &window,
-                                &response_event,
-                                &reasoning_event,
-                                &reasoning_end_event,
-                                &mut think_parser_buffer,
-                                in_think_block,
-                                &mut full_content,
-                                &mut full_reasoning,
-                                &mut response_emit_buffer,
-                                &mut reasoning_emit_buffer,
-                                &mut has_pending_reasoning,
-                                &mut last_emit_at,
-                            )?;
-                            if has_pending_reasoning {
-                                window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
-                                has_pending_reasoning = false;
-                            }
+                    }
+                    ChatStreamEvent::End(end) => {
+                        flush_think_parser_remainder(
+                            &window,
+                            &response_event,
+                            &reasoning_event,
+                            &reasoning_end_event,
+                            &mut think_parser_buffer,
+                            in_think_block,
+                            &mut full_content,
+                            &mut full_reasoning,
+                            &mut response_emit_buffer,
+                            &mut reasoning_emit_buffer,
+                            &mut has_pending_reasoning,
+                            &mut last_emit_at,
+                        )?;
+                        if has_pending_reasoning {
+                            window
+                                .emit(&format!("ai-reasoning-end-{}", session_id), "end")
+                                .map_err(|e| e.to_string())?;
+                            has_pending_reasoning = false;
+                        }
 
-                            let tool_calls = if let Some(content) = end.captured_content {
-                                let raw_tool_calls = content.tool_calls();
-                                tracing::debug!("[AI] End event captured_content tool_calls count: {}", raw_tool_calls.len());
+                        let tool_calls = if let Some(content) = end.captured_content {
+                            let raw_tool_calls = content.tool_calls();
+                            tracing::debug!(
+                                "[AI] End event captured_content tool_calls count: {}",
+                                raw_tool_calls.len()
+                            );
 
-                                let calls_from_captured: Vec<ToolCall> = raw_tool_calls
-                                    .into_iter()
-                                    .filter(|tc| !tc.fn_name.is_empty())
-                                    .map(|tc| {
-                                        let args = tc.fn_arguments.as_str()
-                                            .map(|s| s.to_string())
-                                            .unwrap_or_else(|| tc.fn_arguments.to_string());
-                                        ToolCall {
-                                            id: tc.call_id.clone(),
-                                            tool_type: "function".to_string(),
-                                            function: FunctionCall {
-                                                name: tc.fn_name.clone(),
-                                                arguments: args,
-                                            }
-                                        }
-                                    })
-                                    .collect();
-
-                                if calls_from_captured.is_empty() && !accumulated_tool_calls.is_empty() {
-                                    tracing::debug!("[AI] captured_content tool_calls is empty, fallback to accumulated tool_calls: {}", accumulated_tool_calls.len());
-                                    for acc_call in &accumulated_tool_calls {
-                                        tracing::debug!("[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
-                                            acc_call.id, acc_call.function.name, acc_call.function.arguments);
+                            let calls_from_captured: Vec<ToolCall> = raw_tool_calls
+                                .into_iter()
+                                .filter(|tc| !tc.fn_name.is_empty())
+                                .map(|tc| {
+                                    let args = tc
+                                        .fn_arguments
+                                        .as_str()
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| tc.fn_arguments.to_string());
+                                    ToolCall {
+                                        id: tc.call_id.clone(),
+                                        tool_type: "function".to_string(),
+                                        function: FunctionCall {
+                                            name: tc.fn_name.clone(),
+                                            arguments: args,
+                                        },
                                     }
-                                    accumulated_tool_calls.clone()
-                                } else {
-                                    calls_from_captured
-                                }
-                            } else {
-                                tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
+                                })
+                                .collect();
+
+                            if calls_from_captured.is_empty() && !accumulated_tool_calls.is_empty()
+                            {
+                                tracing::debug!("[AI] captured_content tool_calls is empty, fallback to accumulated tool_calls: {}", accumulated_tool_calls.len());
                                 for acc_call in &accumulated_tool_calls {
-                                    tracing::debug!("[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
-                                        acc_call.id, acc_call.function.name, acc_call.function.arguments);
+                                    tracing::debug!(
+                                        "[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
+                                        acc_call.id,
+                                        acc_call.function.name,
+                                        acc_call.function.arguments
+                                    );
                                 }
                                 accumulated_tool_calls.clone()
-                            };
+                            } else {
+                                calls_from_captured
+                            }
+                        } else {
+                            tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
+                            for acc_call in &accumulated_tool_calls {
+                                tracing::debug!(
+                                    "[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
+                                    acc_call.id,
+                                    acc_call.function.name,
+                                    acc_call.function.arguments
+                                );
+                            }
+                            accumulated_tool_calls.clone()
+                        };
 
-                            for call in &tool_calls {
-                                let timeout = extract_timeout(&call.function.arguments);
-                                let command = extract_command(&call.function.arguments);
-                                tracing::info!(
+                        for call in &tool_calls {
+                            let timeout = extract_timeout(&call.function.arguments);
+                            let command = extract_command(&call.function.arguments);
+                            tracing::info!(
                                     "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s, raw_args=\"{}\"",
                                     call.id,
                                     call.function.name,
@@ -1571,15 +1701,14 @@ pub fn run_ai_turn(
                                     timeout.unwrap_or(30),
                                     call.function.arguments
                                 );
-                            }
-
-                            if !tool_calls.is_empty() {
-                                *final_tool_calls.get_or_insert_with(Vec::new) = tool_calls;
-                            }
                         }
-                        _ => {}
+
+                        if !tool_calls.is_empty() {
+                            *final_tool_calls.get_or_insert_with(Vec::new) = tool_calls;
+                        }
                     }
-                }
+                    _ => {}
+                },
                 Err(e) => {
                     flush_think_parser_remainder(
                         &window,
@@ -1603,7 +1732,9 @@ pub fn run_ai_turn(
                     }
 
                     let err_msg = e.to_string();
-                    window.emit(&error_event, err_msg.clone()).map_err(|e| e.to_string())?;
+                    window
+                        .emit(&error_event, err_msg.clone())
+                        .map_err(|e| e.to_string())?;
                     return Err(err_msg);
                 }
             }
@@ -1640,7 +1771,8 @@ pub fn run_ai_turn(
                 None
             };
 
-            if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty() {
+            if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty()
+            {
                 conn.execute(
                     "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls, model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json, model.id],
@@ -1650,7 +1782,8 @@ pub fn run_ai_turn(
 
         if let Some(calls) = &final_tool_calls {
             if !calls.is_empty() {
-                let auto_exec_calls: Vec<ToolCall> = calls.iter()
+                let auto_exec_calls: Vec<ToolCall> = calls
+                    .iter()
                     .filter(|c| {
                         c.function.name == "get_terminal_output"
                             || c.function.name == "get_selected_terminal_output"
@@ -1659,7 +1792,8 @@ pub fn run_ai_turn(
                     .cloned()
                     .collect();
 
-                let confirm_calls: Vec<ToolCall> = calls.iter()
+                let confirm_calls: Vec<ToolCall> = calls
+                    .iter()
                     .filter(|c| {
                         c.function.name != "get_terminal_output"
                             && c.function.name != "get_selected_terminal_output"
@@ -1680,13 +1814,21 @@ pub fn run_ai_turn(
                         ssh_session_id.as_deref(),
                         auto_exec_calls,
                         cancellation_token.clone(),
-                    ).await?;
+                    )
+                    .await?;
                 }
 
                 if !confirm_calls.is_empty() {
                     if is_agent_mode {
-                        tracing::info!("[AI] {} tools need confirmation, emitting for frontend countdown", confirm_calls.len());
-                        window.emit(&format!("ai-tool-call-{}", session_id), confirm_calls.clone())
+                        tracing::info!(
+                            "[AI] {} tools need confirmation, emitting for frontend countdown",
+                            confirm_calls.len()
+                        );
+                        window
+                            .emit(
+                                &format!("ai-tool-call-{}", session_id),
+                                confirm_calls.clone(),
+                            )
                             .map_err(|e| e.to_string())?;
                         return Ok(Some(confirm_calls));
                     } else {
@@ -1704,7 +1846,8 @@ pub fn run_ai_turn(
                     tools,
                     cancellation_token,
                     ssh_session_id,
-                ).await;
+                )
+                .await;
             }
         }
 
@@ -1772,7 +1915,8 @@ pub struct AccessTokenResponse {
 #[tauri::command]
 pub async fn start_copilot_auth() -> Result<DeviceCodeResponse, String> {
     let client = Client::new();
-    let res = client.post("https://github.com/login/device/code")
+    let res = client
+        .post("https://github.com/login/device/code")
         .header("Accept", "application/json")
         .json(&serde_json::json!({
             "client_id": CLIENT_ID,
@@ -1786,14 +1930,18 @@ pub async fn start_copilot_auth() -> Result<DeviceCodeResponse, String> {
         return Err(format!("Failed to request device code: {}", res.status()));
     }
 
-    let body = res.json::<DeviceCodeResponse>().await.map_err(|e| e.to_string())?;
+    let body = res
+        .json::<DeviceCodeResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(body)
 }
 
 #[tauri::command]
 pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
     let client = Client::new();
-    let res = client.post("https://github.com/login/oauth/access_token")
+    let res = client
+        .post("https://github.com/login/oauth/access_token")
         .header("Accept", "application/json")
         .json(&serde_json::json!({
             "client_id": CLIENT_ID,
@@ -1808,7 +1956,10 @@ pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
         return Err(format!("Poll failed: {}", res.status()));
     }
 
-    let body = res.json::<AccessTokenResponse>().await.map_err(|e| e.to_string())?;
+    let body = res
+        .json::<AccessTokenResponse>()
+        .await
+        .map_err(|e| e.to_string())?;
 
     if let Some(error) = body.error {
         if error == "authorization_pending" {
@@ -1816,7 +1967,11 @@ pub async fn poll_copilot_auth(device_code: String) -> Result<String, String> {
         } else if error == "slow_down" {
             return Err("slow_down".to_string());
         } else {
-            return Err(format!("Auth error: {} - {}", error, body.error_description.unwrap_or_default()));
+            return Err(format!(
+                "Auth error: {} - {}",
+                error,
+                body.error_description.unwrap_or_default()
+            ));
         }
     }
 
@@ -1922,11 +2077,13 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    load_history(&state, &session_id, false, None).await.map(|msgs: Vec<ChatMessage>| {
-        msgs.into_iter()
-            .filter(|m| m.role != "system" && m.role != "tool")
-            .collect()
-    })
+    load_history(&state, &session_id, false, None)
+        .await
+        .map(|msgs: Vec<ChatMessage>| {
+            msgs.into_iter()
+                .filter(|m| m.role != "system" && m.role != "tool")
+                .collect()
+        })
 }
 
 #[tauri::command]
@@ -1945,20 +2102,28 @@ pub async fn send_chat_message(
     let bound_ssh_session_id = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        
-        let existing_ssh_id: Option<String> = conn.query_row(
-            "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-            params![session_id],
-            |row| row.get(0),
-        ).ok();
 
-        if existing_ssh_id.is_none() || existing_ssh_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        let existing_ssh_id: Option<String> = conn
+            .query_row(
+                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if existing_ssh_id.is_none()
+            || existing_ssh_id
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        {
             if let Some(ref new_id) = ssh_session_id {
                 if !new_id.is_empty() {
                     conn.execute(
                         "UPDATE ai_sessions SET ssh_session_id = ?1 WHERE id = ?2",
                         params![new_id, session_id],
-                    ).ok();
+                    )
+                    .ok();
                     ssh_session_id.clone()
                 } else {
                     None
@@ -1971,7 +2136,8 @@ pub async fn send_chat_message(
         }
     };
 
-    let content = enrich_user_message_with_tagged_files(&content, bound_ssh_session_id.as_deref()).await;
+    let content =
+        enrich_user_message_with_tagged_files(&content, bound_ssh_session_id.as_deref()).await;
 
     let user_msg_id = Uuid::new_v4().to_string();
     {
@@ -2028,7 +2194,9 @@ pub async fn send_chat_message(
         }
         Err(e) => {
             tracing::error!("[AI] send_chat_message error: {}", e);
-            window.emit(&format!("ai-error-{}", session_id), e.clone()).ok();
+            window
+                .emit(&format!("ai-error-{}", session_id), e.clone())
+                .ok();
             Err(e)
         }
     }
@@ -2085,8 +2253,11 @@ pub async fn regenerate_ai_response(
             return Err("Latest message is not an assistant response".to_string());
         }
 
-        conn.execute("DELETE FROM ai_messages WHERE id = ?1", params![latest_msg_id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "DELETE FROM ai_messages WHERE id = ?1",
+            params![latest_msg_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
@@ -2133,7 +2304,9 @@ pub async fn regenerate_ai_response(
         }
         Err(e) => {
             tracing::error!("[AI] regenerate_ai_response error: {}", e);
-            window.emit(&format!("ai-error-{}", session_id), e.clone()).ok();
+            window
+                .emit(&format!("ai-error-{}", session_id), e.clone())
+                .ok();
             Err(e)
         }
     }
@@ -2155,14 +2328,21 @@ pub async fn execute_agent_tools(
     let bound_ssh_session_id = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        
-        let existing_ssh_id: Option<String> = conn.query_row(
-            "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-            params![session_id],
-            |row| row.get(0),
-        ).ok();
 
-        if existing_ssh_id.is_none() || existing_ssh_id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        let existing_ssh_id: Option<String> = conn
+            .query_row(
+                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .ok();
+
+        if existing_ssh_id.is_none()
+            || existing_ssh_id
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        {
             ssh_session_id.clone()
         } else {
             existing_ssh_id
@@ -2171,7 +2351,13 @@ pub async fn execute_agent_tools(
 
     let is_agent_mode = mode.as_deref() == Some("agent");
 
-    let history: Vec<ChatMessage> = load_history(&state, &session_id, is_agent_mode, bound_ssh_session_id.as_deref()).await?;
+    let history: Vec<ChatMessage> = load_history(
+        &state,
+        &session_id,
+        is_agent_mode,
+        bound_ssh_session_id.as_deref(),
+    )
+    .await?;
     let last_msg = history.last().ok_or("No history found")?;
 
     if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
@@ -2193,8 +2379,7 @@ pub async fn execute_agent_tools(
 
     if !is_agent_mode {
         for call in &tools_filtered {
-            if call.function.name == "run_in_terminal"
-                || call.function.name == "run_in_background"
+            if call.function.name == "run_in_terminal" || call.function.name == "run_in_background"
             {
                 return Err(
                     "Execution denied: run_in_terminal/run_in_background are only allowed in Agent mode.".to_string(),
@@ -2255,7 +2440,9 @@ pub async fn execute_agent_tools(
         }
         Err(e) => {
             tracing::error!("[AI] execute_agent_tools error: {}", e);
-            window.emit(&format!("ai-error-{}", session_id), e.clone()).ok();
+            window
+                .emit(&format!("ai-error-{}", session_id), e.clone())
+                .ok();
             Err(e)
         }
     }
@@ -2313,10 +2500,14 @@ pub async fn run_in_terminal(
     }
 
     let output = SSHClient::stop_command_recording(&session_id).await?;
-    let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
+    let clean_output =
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
 
     if timed_out && !completion_detected {
-        return Err(build_run_in_terminal_timeout_failure_message(timeout, &clean_output));
+        return Err(build_run_in_terminal_timeout_failure_message(
+            timeout,
+            &clean_output,
+        ));
     }
 
     if clean_output.trim().is_empty() {
@@ -2340,10 +2531,7 @@ pub async fn run_in_background(
 
     if exec_result.timed_out {
         if clean_output.trim().is_empty() {
-            return Err(format!(
-                "run_in_background timed out after {}s.",
-                timeout
-            ));
+            return Err(format!("run_in_background timed out after {}s.", timeout));
         }
         return Err(format!(
             "run_in_background timed out after {}s.\n\n[Partial output]\n{}",
@@ -2385,7 +2573,10 @@ pub async fn send_interrupt(session_id: String) -> Result<String, String> {
 #[tauri::command]
 pub async fn send_terminal_input(session_id: String, input: String) -> Result<String, String> {
     match SSHClient::send_terminal_input(&session_id, &input).await {
-        Ok(_) => Ok(format!("Input '{}' sent successfully", input.escape_debug())),
+        Ok(_) => Ok(format!(
+            "Input '{}' sent successfully",
+            input.escape_debug()
+        )),
         Err(e) => Err(format!("Error sending input: {}", e)),
     }
 }
@@ -2400,57 +2591,106 @@ pub async fn generate_session_title(
     let current_title = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT title FROM ai_sessions WHERE id = ?1").map_err(|e| e.to_string())?;
-        stmt.query_row(params![session_id], |row| row.get::<_, String>(0)).map_err(|e| e.to_string())?
+        let mut stmt = conn
+            .prepare("SELECT title FROM ai_sessions WHERE id = ?1")
+            .map_err(|e| e.to_string())?;
+        stmt.query_row(params![session_id], |row| row.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
     };
 
-    if current_title != "New Chat" { return Ok(current_title); }
+    if current_title != "New Chat" {
+        return Ok(current_title);
+    }
 
     let messages = {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
         let mut stmt = conn.prepare("SELECT role, content FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC LIMIT 2").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map(params![session_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
         let mut msgs = Vec::new();
-        for row in rows { msgs.push(row.map_err(|e| e.to_string())?); }
+        for row in rows {
+            msgs.push(row.map_err(|e| e.to_string())?);
+        }
         msgs
     };
 
-    if messages.len() < 2 { return Err("Not enough messages to generate title".to_string()); }
+    if messages.len() < 2 {
+        return Err("Not enough messages to generate title".to_string());
+    }
 
     let (channel, model, proxy) = {
         let config = state.config.lock().await;
-        let model = config.ai_models.iter().find(|m| m.id == model_id).cloned().ok_or("Model not found")?;
-        let channel = config.ai_channels.iter().find(|c| c.id == channel_id).cloned().ok_or("Channel not found")?;
-        let proxy = channel.proxy_id.as_ref().and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+        let model = config
+            .ai_models
+            .iter()
+            .find(|m| m.id == model_id)
+            .cloned()
+            .ok_or("Model not found")?;
+        let channel = config
+            .ai_channels
+            .iter()
+            .find(|c| c.id == channel_id)
+            .cloned()
+            .ok_or("Channel not found")?;
+        let proxy = channel
+            .proxy_id
+            .as_ref()
+            .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
         (channel, model, proxy)
     };
 
     let system_prompt = "You are a helpful assistant that generates concise chat titles. Generate a short title (max 6 words) that summarizes the main topic of the conversation. Only output the title text, nothing else.";
-    let user_content = format!("Based on this conversation, generate a concise title:\n\nUser: {}\n\nAssistant: {}", messages.get(0).map(|(_, c)| c.as_str()).unwrap_or(""), messages.get(1).map(|(_, c)| c.as_str()).unwrap_or(""));
+    let user_content = format!(
+        "Based on this conversation, generate a concise title:\n\nUser: {}\n\nAssistant: {}",
+        messages.get(0).map(|(_, c)| c.as_str()).unwrap_or(""),
+        messages.get(1).map(|(_, c)| c.as_str()).unwrap_or("")
+    );
 
     let title_messages = vec![
         GenaiMessage::system(system_prompt.to_string()),
         GenaiMessage::user(user_content),
     ];
 
-    let mut stream = state.ai_manager.stream_chat(&channel, &model, title_messages, None, proxy).await?;
+    let mut stream = state
+        .ai_manager
+        .stream_chat(&channel, &model, title_messages, None, proxy)
+        .await?;
     let mut title = String::new();
     while let Some(event_result) = stream.next().await {
         match event_result {
-            Ok(ChatStreamEvent::Chunk(chunk)) => { title.push_str(&chunk.content); }
+            Ok(ChatStreamEvent::Chunk(chunk)) => {
+                title.push_str(&chunk.content);
+            }
             _ => {}
         }
     }
 
-    let title = title.trim().trim_matches('"').trim_matches('\'').to_string();
-    let title = if title.len() > 50 { format!("{}...", &title[..47]) } else { title };
-    if title.is_empty() { return Err("Failed to generate title".to_string()); }
+    let title = title
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string();
+    let title = if title.len() > 50 {
+        format!("{}...", &title[..47])
+    } else {
+        title
+    };
+    if title.is_empty() {
+        return Err("Failed to generate title".to_string());
+    }
 
     {
         let conn = state.db_manager.get_connection();
         let conn = conn.lock().unwrap();
-        conn.execute("UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2", params![title, session_id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![title, session_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(title)
@@ -2463,8 +2703,13 @@ pub async fn delete_ai_session(
 ) -> Result<(), String> {
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
-    conn.execute("DELETE FROM ai_messages WHERE session_id = ?1", params![session_id]).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM ai_messages WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2476,6 +2721,10 @@ pub async fn delete_all_ai_sessions(
     let conn = state.db_manager.get_connection();
     let conn = conn.lock().unwrap();
     conn.execute("DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)", params![server_id]).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM ai_sessions WHERE server_id = ?1", params![server_id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM ai_sessions WHERE server_id = ?1",
+        params![server_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }

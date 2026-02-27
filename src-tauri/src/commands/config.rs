@@ -1,9 +1,9 @@
 // src-tauri/src/commands/config.rs
 
-use crate::config::{Config, ConfigManager, SyncManager};
-use crate::master_password::MasterPasswordManager;
-use crate::db::DatabaseManager;
 use crate::ai::manager::AiManager;
+use crate::config::{Config, ConfigManager, SyncManager};
+use crate::db::DatabaseManager;
+use crate::master_password::MasterPasswordManager;
 use crate::sftp_manager::edit::SftpEditManager;
 use std::sync::Arc;
 use tauri::{Emitter, State, Window};
@@ -35,12 +35,12 @@ pub async fn save_config(
     window: Window,
 ) -> Result<(), String> {
     let mut current_config = state.config.lock().await;
-    
+
     // Calculate removed IDs to prevent them from being resurrected by sync
     let removed_ids = find_removed_ids(&current_config, &config);
 
     *current_config = config.clone();
-    
+
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
     tracing::debug!("Local config saved to {:?}", local_path);
@@ -51,7 +51,11 @@ pub async fn save_config(
     // If sync is enabled, trigger async sync in background without blocking
     // Local save is already complete, sync failures should not block the operation
     if config.general.webdav.enabled && !config.general.webdav.url.is_empty() {
-        let proxy = config.general.webdav.proxy_id.as_ref()
+        let proxy = config
+            .general
+            .webdav
+            .proxy_id
+            .as_ref()
             .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
 
         let sync_manager = SyncManager::new(
@@ -73,15 +77,18 @@ pub async fn save_config(
                 tracing::warn!("Background sync failed: {}", e);
                 let _ = window.emit("sync-failed", e);
             } else {
-                if let Err(e) = app_state.config_manager.save_config(&local_copy, &sync_path) {
+                if let Err(e) = app_state
+                    .config_manager
+                    .save_config(&local_copy, &sync_path)
+                {
                     tracing::error!("Failed to save merged config after sync: {}", e);
                 }
-                
+
                 {
                     let mut in_memory = app_state.config.lock().await;
                     *in_memory = local_copy.clone();
                 }
-                
+
                 let _ = window.emit("config-updated", local_copy);
             }
         });
@@ -97,7 +104,11 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         return Err("WebDAV sync is not enabled or configured".to_string());
     }
 
-    let proxy = config.general.webdav.proxy_id.as_ref()
+    let proxy = config
+        .general
+        .webdav
+        .proxy_id
+        .as_ref()
         .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
 
     let sync_manager = SyncManager::new(
@@ -108,16 +119,16 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
     );
 
     sync_manager.sync(&mut config, vec![]).await?;
-    
+
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
-    
+
     Ok(config.clone())
 }
 
 fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {
     let mut removed = Vec::new();
-    
+
     let new_server_ids: Vec<&String> = new.servers.iter().map(|s| &s.id).collect();
     for server in &old.servers {
         if !new_server_ids.contains(&&server.id) {
@@ -138,7 +149,7 @@ fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {
             removed.push(proxy.id.clone());
         }
     }
-    
+
     let new_snippet_ids: Vec<&String> = new.snippets.iter().map(|s| &s.id).collect();
     for snippet in &old.snippets {
         if !new_snippet_ids.contains(&&snippet.id) {

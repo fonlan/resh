@@ -1,6 +1,6 @@
 use russh::client;
-use tokio::sync::mpsc;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 pub struct ClientHandler {
@@ -38,7 +38,7 @@ impl client::Handler for ClientHandler {
         &mut self,
         _server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)  // Accept all keys
+        Ok(true) // Accept all keys
     }
 
     async fn data(

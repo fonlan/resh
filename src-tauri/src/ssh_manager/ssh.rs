@@ -1,6 +1,6 @@
 use crate::config::types::Proxy;
-use crate::ssh_manager::handler::ClientHandler;
 use crate::sftp_manager::SftpManager;
+use crate::ssh_manager::handler::ClientHandler;
 use base64::prelude::*;
 use lazy_static::lazy_static;
 use russh::client;
@@ -167,7 +167,8 @@ impl SSHClient {
 
         let config = Arc::new(config);
         let shell_channel_id = Arc::new(Mutex::new(None));
-        let handler = ClientHandler::with_channel(session_id.clone(), tx.clone(), shell_channel_id.clone());
+        let handler =
+            ClientHandler::with_channel(session_id.clone(), tx.clone(), shell_channel_id.clone());
 
         info!(
             "[SSH] Connecting to {}:{} as {}",
@@ -755,7 +756,9 @@ impl SSHClient {
         }
     }
 
-    pub async fn get_session_handle(session_id: &str) -> Option<Arc<russh::client::Handle<ClientHandler>>> {
+    pub async fn get_session_handle(
+        session_id: &str,
+    ) -> Option<Arc<russh::client::Handle<ClientHandler>>> {
         let sessions = SESSIONS.lock().await;
         sessions.get(session_id).map(|s| s.session.clone())
     }
@@ -781,7 +784,10 @@ impl SSHClient {
     }
 
     /// Update the terminal selection (called from frontend via Tauri command)
-    pub async fn update_terminal_selection(session_id: &str, selection: String) -> Result<(), String> {
+    pub async fn update_terminal_selection(
+        session_id: &str,
+        selection: String,
+    ) -> Result<(), String> {
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
             session_data.terminal_selection = selection;

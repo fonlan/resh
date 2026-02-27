@@ -1,18 +1,19 @@
-use crate::ssh_manager::ssh::{SSHClient, ConnectParams};
-use serde::{Deserialize, Serialize};
-use tauri::{State, Window, Emitter};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use crate::ssh_manager::ssh::{ConnectParams, SSHClient};
 use lazy_static::lazy_static;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
+use tauri::{Emitter, State, Window};
 use tokio::fs::File;
-use tokio::io::{BufWriter, AsyncWriteExt};
+use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::{Duration, MissedTickBehavior};
 
 use super::AppState;
 
 lazy_static! {
-    static ref RECORDING_SESSIONS: Mutex<HashMap<String, (Arc<Mutex<BufWriter<File>>>, String)>> = Mutex::new(HashMap::new());
+    static ref RECORDING_SESSIONS: Mutex<HashMap<String, (Arc<Mutex<BufWriter<File>>>, String)>> =
+        Mutex::new(HashMap::new());
 }
 
 async fn flush_terminal_output(window: &Window, session_id: &str, pending_output: &mut String) {
@@ -130,11 +131,11 @@ pub async fn connect_to_server(
         if let Some(session_id) = current_session_id.as_deref() {
             flush_terminal_output(&window_clone, session_id, &mut pending_output).await;
         }
-        
+
         // Notify frontend that connection is closed
         if let Some(session_id) = current_session_id {
             tracing::info!("SSH Session {} loop ended (connection closed)", session_id);
-            
+
             // Clean up SFTP edit sessions and watchers
             state_clone.sftp_edit_manager.cleanup_session(&session_id);
 
@@ -143,7 +144,7 @@ pub async fn connect_to_server(
                 let mut sessions = RECORDING_SESSIONS.lock().await;
                 sessions.remove(&session_id);
             }
-            
+
             if let Err(e) = window_clone.emit(&format!("connection-closed:{}", session_id), ()) {
                 tracing::debug!("Failed to emit connection-closed event: {}", e);
             }
@@ -158,11 +159,19 @@ pub async fn connect_to_server(
         match SSHClient::gather_system_info(params).await {
             Ok(info) => {
                 if let Err(e) = SSHClient::update_system_info(&session_id_clone, info).await {
-                    tracing::error!("Failed to update system info for {}: {}", session_id_clone, e);
+                    tracing::error!(
+                        "Failed to update system info for {}: {}",
+                        session_id_clone,
+                        e
+                    );
                 }
             }
             Err(e) => {
-                tracing::debug!("Failed to gather system info for {} (this is expected for some systems): {}", session_id_clone, e);
+                tracing::debug!(
+                    "Failed to gather system info for {} (this is expected for some systems): {}",
+                    session_id_clone,
+                    e
+                );
             }
         }
     });
@@ -176,23 +185,26 @@ pub async fn start_recording(
     file_path: String,
     mode: String,
 ) -> Result<(), String> {
-    let file = File::create(&file_path).await.map_err(|e| format!("Failed to create file: {}", e))?;
+    let file = File::create(&file_path)
+        .await
+        .map_err(|e| format!("Failed to create file: {}", e))?;
     let writer = BufWriter::new(file);
-    
+
     let mut sessions = RECORDING_SESSIONS.lock().await;
     sessions.insert(session_id, (Arc::new(Mutex::new(writer)), mode));
-    
+
     Ok(())
 }
 
 #[tauri::command]
-pub async fn stop_recording(
-    session_id: String,
-) -> Result<(), String> {
+pub async fn stop_recording(session_id: String) -> Result<(), String> {
     let mut sessions = RECORDING_SESSIONS.lock().await;
     if let Some((writer_mutex, _)) = sessions.remove(&session_id) {
         let mut writer = writer_mutex.lock().await;
-        writer.flush().await.map_err(|e| format!("Failed to flush file: {}", e))?;
+        writer
+            .flush()
+            .await
+            .map_err(|e| format!("Failed to flush file: {}", e))?;
         // File closes when dropped
     }
     Ok(())
@@ -205,11 +217,13 @@ pub async fn send_command(
 ) -> Result<CommandResponse, String> {
     // Convert string input to bytes
     let data = params.command.as_bytes();
-    
+
     SSHClient::send_input(&params.session_id, data).await?;
 
     // No echo here - the SSH server will echo back if appropriate (default for PTY)
-    Ok(CommandResponse { output: String::new() })
+    Ok(CommandResponse {
+        output: String::new(),
+    })
 }
 
 #[tauri::command]
@@ -241,10 +255,7 @@ pub async fn reconnect_session(
 }
 
 #[tauri::command]
-pub async fn export_terminal_log(
-    content: String,
-    default_path: String,
-) -> Result<(), String> {
+pub async fn export_terminal_log(content: String, default_path: String) -> Result<(), String> {
     use rfd::FileDialog;
     use std::fs;
 
@@ -263,20 +274,24 @@ pub async fn export_terminal_log(
 }
 
 #[tauri::command]
-pub async fn select_save_path(default_name: String, initial_dir: Option<String>) -> Result<Option<String>, String> {
+pub async fn select_save_path(
+    default_name: String,
+    initial_dir: Option<String>,
+) -> Result<Option<String>, String> {
     use rfd::FileDialog;
     let path = tokio::task::spawn_blocking(move || {
-        let mut dialog = FileDialog::new()
-            .set_file_name(&default_name);
-        
+        let mut dialog = FileDialog::new().set_file_name(&default_name);
+
         if let Some(dir) = initial_dir {
             if !dir.is_empty() {
                 dialog = dialog.set_directory(dir);
             }
         }
-        
+
         dialog.save_file()
-    }).await.map_err(|e| e.to_string())?;
+    })
+    .await
+    .map_err(|e| e.to_string())?;
 
     Ok(path.map(|p| p.to_string_lossy().to_string()))
 }

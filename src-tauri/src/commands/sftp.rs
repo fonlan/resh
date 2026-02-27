@@ -1,7 +1,9 @@
-use crate::sftp_manager::{DirectoryListResult, FileEntry, SftpManager, SftpSortOrder, SftpSortType};
-use tauri::{AppHandle, Manager};
-use std::sync::Arc;
 use crate::commands::AppState;
+use crate::sftp_manager::{
+    DirectoryListResult, FileEntry, SftpManager, SftpSortOrder, SftpSortType,
+};
+use std::sync::Arc;
+use tauri::{AppHandle, Manager};
 
 #[tauri::command]
 pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileEntry>, String> {
@@ -53,13 +55,25 @@ pub async fn sftp_list_dirs_sorted(
 }
 
 #[tauri::command]
-pub async fn sftp_download(app: AppHandle, session_id: String, remote_path: String, local_path: String, task_id: Option<String>) -> Result<String, String> {
+pub async fn sftp_download(
+    app: AppHandle,
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+    task_id: Option<String>,
+) -> Result<String, String> {
     let db = app.state::<Arc<AppState>>().db_manager.clone();
     SftpManager::download_file(app, db, session_id, remote_path, local_path, task_id, None).await
 }
 
 #[tauri::command]
-pub async fn sftp_upload(app: AppHandle, session_id: String, local_path: String, remote_path: String, task_id: Option<String>) -> Result<String, String> {
+pub async fn sftp_upload(
+    app: AppHandle,
+    session_id: String,
+    local_path: String,
+    remote_path: String,
+    task_id: Option<String>,
+) -> Result<String, String> {
     let db = app.state::<Arc<AppState>>().db_manager.clone();
     SftpManager::upload_file(app, db, session_id, local_path, remote_path, task_id, None).await
 }
@@ -84,13 +98,17 @@ pub async fn sftp_resolve_conflict(task_id: String, resolution: String) -> Resul
 #[tauri::command]
 pub async fn pick_files() -> Result<Option<Vec<String>>, String> {
     use rfd::FileDialog;
-    let files = tokio::task::spawn_blocking(move || {
-        FileDialog::new()
-            .pick_files()
-    }).await.map_err(|e| e.to_string())?;
+    let files = tokio::task::spawn_blocking(move || FileDialog::new().pick_files())
+        .await
+        .map_err(|e| e.to_string())?;
 
     if let Some(files) = files {
-        Ok(Some(files.into_iter().map(|p| p.to_string_lossy().to_string()).collect()))
+        Ok(Some(
+            files
+                .into_iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect(),
+        ))
     } else {
         Ok(None)
     }
@@ -117,7 +135,11 @@ pub async fn sftp_chmod(session_id: String, path: String, mode: u32) -> Result<(
 }
 
 #[tauri::command]
-pub async fn sftp_rename(session_id: String, old_path: String, new_path: String) -> Result<(), String> {
+pub async fn sftp_rename(
+    session_id: String,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
     SftpManager::rename_item(&session_id, &old_path, &new_path).await
 }
 

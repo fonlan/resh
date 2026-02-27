@@ -1,9 +1,9 @@
-pub mod config;
-pub mod ssh_manager;
-pub mod master_password;
-pub mod webdav;
-pub mod logger;
-pub mod db;
-pub mod commands;
 pub mod ai;
+pub mod commands;
+pub mod config;
+pub mod db;
+pub mod logger;
+pub mod master_password;
 pub mod sftp_manager;
+pub mod ssh_manager;
+pub mod webdav;

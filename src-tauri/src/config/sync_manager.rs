@@ -1,4 +1,7 @@
-use crate::config::types::{Config, Server, Authentication, Proxy, Snippet, SyncConfig, AiChannel, AiModel, SftpCustomCommand};
+use crate::config::types::{
+    AiChannel, AiModel, Authentication, Config, Proxy, Server, SftpCustomCommand, Snippet,
+    SyncConfig,
+};
 use crate::webdav::client::WebDAVClient;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
@@ -14,13 +17,21 @@ impl SyncManager {
         }
     }
 
-    pub async fn sync(&self, local_config: &mut Config, recently_removed_ids: Vec<String>) -> Result<(), String> {
+    pub async fn sync(
+        &self,
+        local_config: &mut Config,
+        recently_removed_ids: Vec<String>,
+    ) -> Result<(), String> {
         // 1. Download sync.json from WebDAV
         let remote_sync_config = match self.client.download("sync.json").await {
             Ok(Some(content)) => {
                 let config = serde_json::from_slice::<SyncConfig>(&content)
                     .map_err(|e| format!("Failed to parse remote sync.json: {}", e))?;
-                tracing::info!("Downloaded remote sync.json: {} servers, {} snippets", config.servers.len(), config.snippets.len());
+                tracing::info!(
+                    "Downloaded remote sync.json: {} servers, {} snippets",
+                    config.servers.len(),
+                    config.snippets.len()
+                );
                 config
             }
             Ok(None) => {
@@ -50,11 +61,17 @@ impl SyncManager {
 
         // Safety Check: If remote had items but local is empty after merge, something is wrong.
         // This prevents a "fresh" client from wiping remote if merge fails silently.
-        if !remote_sync_config.snippets.is_empty() && local_config.snippets.is_empty() && recently_removed_ids.is_empty() {
+        if !remote_sync_config.snippets.is_empty()
+            && local_config.snippets.is_empty()
+            && recently_removed_ids.is_empty()
+        {
             tracing::error!("CRITICAL: Remote has {} snippets but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.snippets.len());
             return Err("Merge integrity check failed: Snippets missing after merge".to_string());
         }
-        if !remote_sync_config.servers.is_empty() && local_config.servers.is_empty() && recently_removed_ids.is_empty() {
+        if !remote_sync_config.servers.is_empty()
+            && local_config.servers.is_empty()
+            && recently_removed_ids.is_empty()
+        {
             tracing::error!("CRITICAL: Remote has {} servers but Local is empty after merge! Aborting sync to prevent data loss.", remote_sync_config.servers.len());
             return Err("Merge integrity check failed: Servers missing after merge".to_string());
         }
@@ -62,8 +79,9 @@ impl SyncManager {
         // 3. Merge logic: Local -> Remote (only synced items)
         let mut new_remote_sync_config = remote_sync_config.clone();
         self.merge_local_to_remote(local_config, &mut new_remote_sync_config);
-        tracing::debug!("Merge complete. Local -> Remote: {} servers, {} snippets, {} channels", 
-            new_remote_sync_config.servers.len(), 
+        tracing::debug!(
+            "Merge complete. Local -> Remote: {} servers, {} snippets, {} channels",
+            new_remote_sync_config.servers.len(),
             new_remote_sync_config.snippets.len(),
             new_remote_sync_config.ai_channels.len()
         );
@@ -71,16 +89,27 @@ impl SyncManager {
         // 4. Upload new sync.json to WebDAV
         let sync_json = serde_json::to_vec_pretty(&new_remote_sync_config)
             .map_err(|e| format!("Failed to serialize sync config: {}", e))?;
-        
-        self.client.upload("sync.json", &sync_json).await
+
+        self.client
+            .upload("sync.json", &sync_json)
+            .await
             .map_err(|e| format!("Failed to upload sync.json: {}", e))?;
-        
-        tracing::info!("Uploaded updated sync.json: {} servers, {} snippets", new_remote_sync_config.servers.len(), new_remote_sync_config.snippets.len());
+
+        tracing::info!(
+            "Uploaded updated sync.json: {} servers, {} snippets",
+            new_remote_sync_config.servers.len(),
+            new_remote_sync_config.snippets.len()
+        );
 
         Ok(())
     }
 
-    fn merge_remote_to_local(&self, local: &mut Config, remote: &SyncConfig, recently_removed_ids: &[String]) {
+    fn merge_remote_to_local(
+        &self,
+        local: &mut Config,
+        remote: &SyncConfig,
+        recently_removed_ids: &[String],
+    ) {
         // Handle removals first: if an ID is in removed_ids, disable sync locally
         for server in &mut local.servers {
             if remote.removed_ids.contains(&server.id) {
@@ -122,7 +151,8 @@ impl SyncManager {
         }
 
         // Merge Servers
-        let mut local_servers: HashMap<String, Server> = local.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut local_servers: HashMap<String, Server> =
+            local.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
         for remote_server in &remote.servers {
             if recently_removed_ids.contains(&remote_server.id) {
                 continue;
@@ -143,7 +173,11 @@ impl SyncManager {
         local.servers = local_servers.into_values().collect();
 
         // Merge Authentications
-        let mut local_auths: HashMap<String, Authentication> = local.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
+        let mut local_auths: HashMap<String, Authentication> = local
+            .authentications
+            .drain(..)
+            .map(|a| (a.id.clone(), a))
+            .collect();
         for remote_auth in &remote.authentications {
             if recently_removed_ids.contains(&remote_auth.id) {
                 continue;
@@ -162,7 +196,8 @@ impl SyncManager {
         local.authentications = local_auths.into_values().collect();
 
         // Merge Proxies
-        let mut local_proxies: HashMap<String, Proxy> = local.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
+        let mut local_proxies: HashMap<String, Proxy> =
+            local.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
         for remote_proxy in &remote.proxies {
             if recently_removed_ids.contains(&remote_proxy.id) {
                 continue;
@@ -181,7 +216,11 @@ impl SyncManager {
         local.proxies = local_proxies.into_values().collect();
 
         // Merge Snippets
-        let mut local_snippets: HashMap<String, Snippet> = local.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut local_snippets: HashMap<String, Snippet> = local
+            .snippets
+            .drain(..)
+            .map(|s| (s.id.clone(), s))
+            .collect();
         for remote_snippet in &remote.snippets {
             if recently_removed_ids.contains(&remote_snippet.id) {
                 continue;
@@ -200,7 +239,11 @@ impl SyncManager {
         local.snippets = local_snippets.into_values().collect();
 
         // Merge AI Channels
-        let mut local_channels: HashMap<String, AiChannel> = local.ai_channels.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut local_channels: HashMap<String, AiChannel> = local
+            .ai_channels
+            .drain(..)
+            .map(|c| (c.id.clone(), c))
+            .collect();
         for remote_channel in &remote.ai_channels {
             if recently_removed_ids.contains(&remote_channel.id) {
                 continue;
@@ -219,7 +262,11 @@ impl SyncManager {
         local.ai_channels = local_channels.into_values().collect();
 
         // Merge AI Models
-        let mut local_models: HashMap<String, AiModel> = local.ai_models.drain(..).map(|m| (m.id.clone(), m)).collect();
+        let mut local_models: HashMap<String, AiModel> = local
+            .ai_models
+            .drain(..)
+            .map(|m| (m.id.clone(), m))
+            .collect();
         for remote_model in &remote.ai_models {
             if recently_removed_ids.contains(&remote_model.id) {
                 continue;
@@ -238,7 +285,11 @@ impl SyncManager {
         local.ai_models = local_models.into_values().collect();
 
         // Merge SFTP Custom Commands
-        let mut local_commands: HashMap<String, SftpCustomCommand> = local.sftp_custom_commands.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut local_commands: HashMap<String, SftpCustomCommand> = local
+            .sftp_custom_commands
+            .drain(..)
+            .map(|c| (c.id.clone(), c))
+            .collect();
         for remote_command in &remote.sftp_custom_commands {
             if recently_removed_ids.contains(&remote_command.id) {
                 continue;
@@ -264,12 +315,12 @@ impl SyncManager {
             (Some(_), None) => {
                 // Only update if remote has a non-null value
                 remote.additional_prompt.is_some()
-            },
+            }
             (None, Some(_)) => false,
             (None, None) => {
                 // Both have no timestamps, only update if local is None and remote has a value
                 local.additional_prompt.is_none() && remote.additional_prompt.is_some()
-            },
+            }
         };
 
         if should_update {
@@ -281,15 +332,35 @@ impl SyncManager {
     fn merge_local_to_remote(&self, local: &Config, remote: &mut SyncConfig) {
         // 1. Identify what should be removed from remote
         // If an item exists in remote but is missing in local or has synced=false in local
-        let local_servers: HashMap<String, &Server> = local.servers.iter().map(|s| (s.id.clone(), s)).collect();
-        let local_auths: HashMap<String, &Authentication> = local.authentications.iter().map(|a| (a.id.clone(), a)).collect();
-        let local_proxies: HashMap<String, &Proxy> = local.proxies.iter().map(|p| (p.id.clone(), p)).collect();
-        let local_snippets: HashMap<String, &Snippet> = local.snippets.iter().map(|s| (s.id.clone(), s)).collect();
-        let local_channels: HashMap<String, &AiChannel> = local.ai_channels.iter().map(|c| (c.id.clone(), c)).collect();
-        let local_models: HashMap<String, &AiModel> = local.ai_models.iter().map(|m| (m.id.clone(), m)).collect();
-        let local_commands: HashMap<String, &SftpCustomCommand> = local.sftp_custom_commands.iter().map(|c| (c.id.clone(), c)).collect();
+        let local_servers: HashMap<String, &Server> =
+            local.servers.iter().map(|s| (s.id.clone(), s)).collect();
+        let local_auths: HashMap<String, &Authentication> = local
+            .authentications
+            .iter()
+            .map(|a| (a.id.clone(), a))
+            .collect();
+        let local_proxies: HashMap<String, &Proxy> =
+            local.proxies.iter().map(|p| (p.id.clone(), p)).collect();
+        let local_snippets: HashMap<String, &Snippet> =
+            local.snippets.iter().map(|s| (s.id.clone(), s)).collect();
+        let local_channels: HashMap<String, &AiChannel> = local
+            .ai_channels
+            .iter()
+            .map(|c| (c.id.clone(), c))
+            .collect();
+        let local_models: HashMap<String, &AiModel> =
+            local.ai_models.iter().map(|m| (m.id.clone(), m)).collect();
+        let local_commands: HashMap<String, &SftpCustomCommand> = local
+            .sftp_custom_commands
+            .iter()
+            .map(|c| (c.id.clone(), c))
+            .collect();
 
-        let mut remote_servers: HashMap<String, Server> = remote.servers.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut remote_servers: HashMap<String, Server> = remote
+            .servers
+            .drain(..)
+            .map(|s| (s.id.clone(), s))
+            .collect();
         let mut to_remove_servers = Vec::new();
         for id in remote_servers.keys() {
             match local_servers.get(id) {
@@ -305,7 +376,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_auths: HashMap<String, Authentication> = remote.authentications.drain(..).map(|a| (a.id.clone(), a)).collect();
+        let mut remote_auths: HashMap<String, Authentication> = remote
+            .authentications
+            .drain(..)
+            .map(|a| (a.id.clone(), a))
+            .collect();
         let mut to_remove_auths = Vec::new();
         for id in remote_auths.keys() {
             match local_auths.get(id) {
@@ -321,7 +396,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_proxies: HashMap<String, Proxy> = remote.proxies.drain(..).map(|p| (p.id.clone(), p)).collect();
+        let mut remote_proxies: HashMap<String, Proxy> = remote
+            .proxies
+            .drain(..)
+            .map(|p| (p.id.clone(), p))
+            .collect();
         let mut to_remove_proxies = Vec::new();
         for id in remote_proxies.keys() {
             match local_proxies.get(id) {
@@ -337,7 +416,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_snippets: HashMap<String, Snippet> = remote.snippets.drain(..).map(|s| (s.id.clone(), s)).collect();
+        let mut remote_snippets: HashMap<String, Snippet> = remote
+            .snippets
+            .drain(..)
+            .map(|s| (s.id.clone(), s))
+            .collect();
         let mut to_remove_snippets = Vec::new();
         for id in remote_snippets.keys() {
             match local_snippets.get(id) {
@@ -353,7 +436,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_channels: HashMap<String, AiChannel> = remote.ai_channels.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut remote_channels: HashMap<String, AiChannel> = remote
+            .ai_channels
+            .drain(..)
+            .map(|c| (c.id.clone(), c))
+            .collect();
         let mut to_remove_channels = Vec::new();
         for id in remote_channels.keys() {
             match local_channels.get(id) {
@@ -369,7 +456,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_models: HashMap<String, AiModel> = remote.ai_models.drain(..).map(|m| (m.id.clone(), m)).collect();
+        let mut remote_models: HashMap<String, AiModel> = remote
+            .ai_models
+            .drain(..)
+            .map(|m| (m.id.clone(), m))
+            .collect();
         let mut to_remove_models = Vec::new();
         for id in remote_models.keys() {
             match local_models.get(id) {
@@ -385,7 +476,11 @@ impl SyncManager {
             }
         }
 
-        let mut remote_commands: HashMap<String, SftpCustomCommand> = remote.sftp_custom_commands.drain(..).map(|c| (c.id.clone(), c)).collect();
+        let mut remote_commands: HashMap<String, SftpCustomCommand> = remote
+            .sftp_custom_commands
+            .drain(..)
+            .map(|c| (c.id.clone(), c))
+            .collect();
         let mut to_remove_commands = Vec::new();
         for id in remote_commands.keys() {
             match local_commands.get(id) {
@@ -403,10 +498,12 @@ impl SyncManager {
 
         // 2. Add/Update from local
         for local_server in &local.servers {
-            if !local_server.synced { continue; }
+            if !local_server.synced {
+                continue;
+            }
             // If we are syncing it, ensure it's not in removed_ids
             remote.removed_ids.retain(|id| id != &local_server.id);
-            
+
             if let Some(remote_server) = remote_servers.get_mut(&local_server.id) {
                 if is_newer(&local_server.updated_at, &remote_server.updated_at) {
                     *remote_server = local_server.clone();
@@ -418,7 +515,9 @@ impl SyncManager {
         remote.servers = remote_servers.into_values().collect();
 
         for local_auth in &local.authentications {
-            if !local_auth.synced { continue; }
+            if !local_auth.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_auth.id);
 
             if let Some(remote_auth) = remote_auths.get_mut(&local_auth.id) {
@@ -432,7 +531,9 @@ impl SyncManager {
         remote.authentications = remote_auths.into_values().collect();
 
         for local_proxy in &local.proxies {
-            if !local_proxy.synced { continue; }
+            if !local_proxy.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_proxy.id);
 
             if let Some(remote_proxy) = remote_proxies.get_mut(&local_proxy.id) {
@@ -446,7 +547,9 @@ impl SyncManager {
         remote.proxies = remote_proxies.into_values().collect();
 
         for local_snippet in &local.snippets {
-            if !local_snippet.synced { continue; }
+            if !local_snippet.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_snippet.id);
 
             if let Some(remote_snippet) = remote_snippets.get_mut(&local_snippet.id) {
@@ -460,7 +563,9 @@ impl SyncManager {
         remote.snippets = remote_snippets.into_values().collect();
 
         for local_channel in &local.ai_channels {
-            if !local_channel.synced { continue; }
+            if !local_channel.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_channel.id);
 
             if let Some(remote_channel) = remote_channels.get_mut(&local_channel.id) {
@@ -474,7 +579,9 @@ impl SyncManager {
         remote.ai_channels = remote_channels.into_values().collect();
 
         for local_model in &local.ai_models {
-            if !local_model.synced { continue; }
+            if !local_model.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_model.id);
 
             if let Some(remote_model) = remote_models.get_mut(&local_model.id) {
@@ -488,7 +595,9 @@ impl SyncManager {
         remote.ai_models = remote_models.into_values().collect();
 
         for local_command in &local.sftp_custom_commands {
-            if !local_command.synced { continue; }
+            if !local_command.synced {
+                continue;
+            }
             remote.removed_ids.retain(|id| id != &local_command.id);
 
             if let Some(remote_command) = remote_commands.get_mut(&local_command.id) {
@@ -507,9 +616,15 @@ impl SyncManager {
 }
 
 fn is_newer(a: &str, b: &str) -> bool {
-    if a == b { return false; }
-    let dt_a = DateTime::parse_from_rfc3339(a).map(|dt| dt.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now());
-    let dt_b = DateTime::parse_from_rfc3339(b).map(|dt| dt.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now() - chrono::Duration::days(365 * 10)); // Very old date
+    if a == b {
+        return false;
+    }
+    let dt_a = DateTime::parse_from_rfc3339(a)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let dt_b = DateTime::parse_from_rfc3339(b)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now() - chrono::Duration::days(365 * 10)); // Very old date
     dt_a > dt_b
 }
 
@@ -531,8 +646,9 @@ mod tests {
                 }
             ]
         }"#;
-        
-        let config_no_date = serde_json::from_str::<SyncConfig>(json_no_date).expect("Failed to parse no date JSON");
+
+        let config_no_date =
+            serde_json::from_str::<SyncConfig>(json_no_date).expect("Failed to parse no date JSON");
         assert_eq!(config_no_date.snippets.len(), 1);
         // We can't easily check the value of date since it's "now", but we know it parsed.
 
@@ -547,7 +663,8 @@ mod tests {
                 }
             ]
         }"#;
-        let config_body: SyncConfig = serde_json::from_str(json_body).expect("Failed to parse body JSON");
+        let config_body: SyncConfig =
+            serde_json::from_str(json_body).expect("Failed to parse body JSON");
         assert_eq!(config_body.snippets[0].content, "echo body");
     }
 }

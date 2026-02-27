@@ -1,13 +1,13 @@
+use crate::sftp_manager::{SftpManager, TransferProgress};
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use crate::sftp_manager::{SftpManager, TransferProgress};
-use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 const EDIT_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
@@ -42,7 +42,7 @@ impl SftpEditManager {
                             let files = watched_files_clone.lock().unwrap();
                             files.contains_key(&path)
                         };
-                        
+
                         if is_watched {
                             // Delay upload by 500ms to allow atomic writes to complete
                             pending_updates.insert(path, tokio::time::Instant::now() + Duration::from_millis(500));
@@ -51,7 +51,7 @@ impl SftpEditManager {
                     _ = check_interval.tick() => {
                         let now = tokio::time::Instant::now();
                         let mut ready_paths = Vec::new();
-                        
+
                         pending_updates.retain(|path, deadline| {
                             if now >= *deadline {
                                 ready_paths.push(path.clone());
@@ -70,7 +70,7 @@ impl SftpEditManager {
                             if let Some((session_id, remote_path)) = info {
                                 let app_inner = app_clone.clone();
                                 let path_inner = path.clone();
-                                
+
                                 tokio::spawn(async move {
                                     info!("Uploading modified file {:?} to remote {}", path_inner, remote_path);
 
@@ -129,16 +129,18 @@ impl SftpEditManager {
         });
 
         let tx_clone = tx.clone();
-        let watcher = RecommendedWatcher::new(move |res: Result<notify::Event, notify::Error>| {
-            match res {
+        let watcher = RecommendedWatcher::new(
+            move |res: Result<notify::Event, notify::Error>| match res {
                 Ok(event) => {
                     for path in event.paths {
                         let _ = tx_clone.blocking_send(path);
                     }
-                },
+                }
                 Err(e) => error!("Watch error: {:?}", e),
-            }
-        }, Config::default().with_poll_interval(Duration::from_secs(1))).ok();
+            },
+            Config::default().with_poll_interval(Duration::from_secs(1)),
+        )
+        .ok();
 
         if watcher.is_none() {
             error!("Failed to create file watcher");
@@ -153,9 +155,14 @@ impl SftpEditManager {
         }
     }
 
-    pub fn watch_file(&self, local_path: PathBuf, session_id: String, remote_path: String) -> Result<(), String> {
+    pub fn watch_file(
+        &self,
+        local_path: PathBuf,
+        session_id: String,
+        remote_path: String,
+    ) -> Result<(), String> {
         let mut files = self.watched_files.lock().unwrap();
-        
+
         // If already watching, just update info
         let is_new = !files.contains_key(&local_path);
         files.insert(local_path.clone(), (session_id, remote_path));
@@ -165,7 +172,7 @@ impl SftpEditManager {
                 let mut dirs = self.watched_directories.lock().unwrap();
                 let count = dirs.entry(parent.to_path_buf()).or_insert(0);
                 *count += 1;
-                
+
                 if *count == 1 {
                     let mut watcher_guard = self.watcher.lock().unwrap();
                     if let Some(watcher) = watcher_guard.as_mut() {
@@ -174,7 +181,9 @@ impl SftpEditManager {
                             error!("Failed to watch directory {:?}: {}", parent, e);
                             // Cleanup if failed
                             *count -= 1;
-                            if *count == 0 { dirs.remove(parent); }
+                            if *count == 0 {
+                                dirs.remove(parent);
+                            }
                             files.remove(&local_path);
                             return Err(format!("Failed to watch directory: {}", e));
                         }
@@ -182,7 +191,7 @@ impl SftpEditManager {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -211,14 +220,18 @@ impl SftpEditManager {
     pub fn stop_watching_remote(&self, session_id: &str, remote_path: &str) {
         let to_remove = {
             let files = self.watched_files.lock().unwrap();
-            files.iter()
+            files
+                .iter()
                 .filter(|(_, (sid, rp))| sid == session_id && rp == remote_path)
                 .map(|(lp, _)| lp.clone())
                 .collect::<Vec<_>>()
         };
 
         for lp in to_remove {
-            info!("Stopping existing watch for remote file {} in session {}", remote_path, session_id);
+            info!(
+                "Stopping existing watch for remote file {} in session {}",
+                remote_path, session_id
+            );
             self.stop_watching(&lp);
             // Clean up the old temp directory
             if let Some(parent) = lp.parent() {
@@ -232,7 +245,8 @@ impl SftpEditManager {
     pub fn cleanup_session(&self, session_id: &str) {
         let to_remove = {
             let files = self.watched_files.lock().unwrap();
-            files.iter()
+            files
+                .iter()
                 .filter(|(_, (sid, _))| sid == session_id)
                 .map(|(lp, _)| lp.clone())
                 .collect::<Vec<_>>()
@@ -241,7 +255,7 @@ impl SftpEditManager {
         for path in to_remove {
             info!("Cleaning up edit session for file: {:?}", path);
             self.stop_watching(&path);
-            
+
             if let Some(parent) = path.parent() {
                 if parent.to_string_lossy().contains("resh_sftp") {
                     let _ = std::fs::remove_dir_all(parent);
@@ -250,30 +264,49 @@ impl SftpEditManager {
         }
     }
 
-    async fn upload_modified_file(session_id: &str, local_path: &Path, remote_path: &str) -> Result<u64, String> {
-        let mut local_file = tokio::fs::File::open(local_path).await.map_err(|e| e.to_string())?;
-        let total_bytes = local_file.metadata().await.map_err(|e| e.to_string())?.len();
+    async fn upload_modified_file(
+        session_id: &str,
+        local_path: &Path,
+        remote_path: &str,
+    ) -> Result<u64, String> {
+        let mut local_file = tokio::fs::File::open(local_path)
+            .await
+            .map_err(|e| e.to_string())?;
+        let total_bytes = local_file
+            .metadata()
+            .await
+            .map_err(|e| e.to_string())?
+            .len();
         let sftp = SftpManager::get_session(session_id).await?;
-        let handle = sftp.open(
-            remote_path,
-            russh_sftp::protocol::OpenFlags::CREATE
-                | russh_sftp::protocol::OpenFlags::TRUNCATE
-                | russh_sftp::protocol::OpenFlags::WRITE,
-            russh_sftp::protocol::FileAttributes::default(),
-        ).await.map_err(|e| e.to_string())?.handle;
+        let handle = sftp
+            .open(
+                remote_path,
+                russh_sftp::protocol::OpenFlags::CREATE
+                    | russh_sftp::protocol::OpenFlags::TRUNCATE
+                    | russh_sftp::protocol::OpenFlags::WRITE,
+                russh_sftp::protocol::FileAttributes::default(),
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .handle;
 
         let upload_result: Result<(), String> = async {
             let mut offset = 0u64;
 
             while offset < total_bytes {
-                let chunk_size = std::cmp::min(EDIT_UPLOAD_CHUNK_SIZE as u64, total_bytes - offset) as usize;
+                let chunk_size =
+                    std::cmp::min(EDIT_UPLOAD_CHUNK_SIZE as u64, total_bytes - offset) as usize;
                 let mut chunk = vec![0u8; chunk_size];
-                local_file.read_exact(&mut chunk).await.map_err(|e| e.to_string())?;
+                local_file
+                    .read_exact(&mut chunk)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
                 let write_result = tokio::time::timeout(
                     Duration::from_secs(EDIT_UPLOAD_CHUNK_TIMEOUT_SECS),
                     sftp.write(&handle, offset, chunk),
-                ).await;
+                )
+                .await;
 
                 match write_result {
                     Ok(res) => {
@@ -282,8 +315,7 @@ impl SftpEditManager {
                     Err(_) => {
                         return Err(format!(
                             "Chunk upload timeout ({}s) at offset {}",
-                            EDIT_UPLOAD_CHUNK_TIMEOUT_SECS,
-                            offset
+                            EDIT_UPLOAD_CHUNK_TIMEOUT_SECS, offset
                         ));
                     }
                 }
@@ -292,7 +324,8 @@ impl SftpEditManager {
             }
 
             Ok(())
-        }.await;
+        }
+        .await;
 
         let _ = sftp.close(handle).await;
         upload_result.map(|_| total_bytes)
