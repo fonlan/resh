@@ -733,6 +733,114 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
         .collect()
 }
 
+fn truncate_dialog_messages_for_history(
+    mut dialog_messages: Vec<ChatMessage>,
+    max_history: usize,
+) -> Vec<ChatMessage> {
+    if dialog_messages.is_empty() || max_history == 0 {
+        return Vec::new();
+    }
+
+    let len = dialog_messages.len();
+    let tentative_start = len.saturating_sub(max_history);
+
+    let safe_start = dialog_messages
+        .iter()
+        .enumerate()
+        .skip(tentative_start)
+        .find(|(_, msg)| msg.role == "user")
+        .map(|(idx, _)| idx)
+        .or_else(|| {
+            if tentative_start == 0 {
+                None
+            } else {
+                dialog_messages[..tentative_start]
+                    .iter()
+                    .enumerate()
+                    .rev()
+                    .find(|(_, msg)| msg.role == "user")
+                    .map(|(idx, _)| idx)
+            }
+        });
+
+    let Some(start_idx) = safe_start else {
+        tracing::warn!(
+            "[AI] No user message found in history window; dropping dialog history to avoid invalid tool-call turn ordering."
+        );
+        return Vec::new();
+    };
+
+    if start_idx != tentative_start {
+        tracing::debug!(
+            "[AI] Adjusted history window start from {} to {} to preserve user-turn boundary.",
+            tentative_start,
+            start_idx
+        );
+    }
+
+    dialog_messages.split_off(start_idx)
+}
+
+#[cfg(test)]
+mod history_window_tests {
+    use super::*;
+
+    fn msg(role: &str) -> ChatMessage {
+        ChatMessage {
+            role: role.to_string(),
+            content: Some(format!("{}-content", role)),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }
+    }
+
+    #[test]
+    fn truncate_moves_start_to_next_user_within_window() {
+        let messages = vec![
+            msg("user"),
+            msg("assistant"),
+            msg("user"),
+            msg("assistant"),
+            msg("tool"),
+            msg("user"),
+            msg("assistant"),
+        ];
+
+        let truncated = truncate_dialog_messages_for_history(messages, 4);
+        let roles: Vec<&str> = truncated.iter().map(|m| m.role.as_str()).collect();
+
+        assert_eq!(roles, vec!["user", "assistant"]);
+    }
+
+    #[test]
+    fn truncate_falls_back_to_previous_user_when_window_tail_has_no_user() {
+        let messages = vec![
+            msg("user"),
+            msg("assistant"),
+            msg("user"),
+            msg("assistant"),
+            msg("tool"),
+        ];
+
+        let truncated = truncate_dialog_messages_for_history(messages, 2);
+        let roles: Vec<&str> = truncated.iter().map(|m| m.role.as_str()).collect();
+
+        assert_eq!(roles, vec!["user", "assistant", "tool"]);
+    }
+
+    #[test]
+    fn truncate_returns_empty_when_no_user_exists() {
+        let messages = vec![msg("assistant"), msg("tool"), msg("assistant")];
+
+        let truncated = truncate_dialog_messages_for_history(messages, 3);
+
+        assert!(truncated.is_empty());
+    }
+}
+
 async fn load_history(
     state: &Arc<AppState>,
     session_id: &str,
@@ -775,7 +883,7 @@ async fn load_history(
                 "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
                 FROM ai_messages 
                 WHERE session_id = ?1 
-                ORDER BY created_at ASC",
+                ORDER BY created_at ASC, rowid ASC",
             )
             .map_err(|e| e.to_string())?;
 
@@ -824,11 +932,7 @@ async fn load_history(
             .filter(|m| m.role != "system")
             .collect();
 
-        if dialog_messages.len() > max_history {
-            dialog_messages[dialog_messages.len() - max_history..].to_vec()
-        } else {
-            dialog_messages
-        }
+        truncate_dialog_messages_for_history(dialog_messages, max_history)
     };
 
     let mut messages: Vec<ChatMessage> = Vec::new();
