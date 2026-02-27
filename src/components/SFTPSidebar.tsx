@@ -875,10 +875,69 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       handleCloseContextMenu();
   };
 
+  const normalizeRemotePath = (path: string): string => {
+    const normalized = path.replace(/\\/g, '/').replace(/\/+/g, '/');
+    if (normalized === '') return '/';
+    if (normalized.length > 1 && normalized.endsWith('/')) {
+      return normalized.slice(0, -1);
+    }
+    return normalized;
+  };
+
   const getParentPath = (path: string): string => {
-    const normalized = path.replace(/\\/g, '/');
+    const normalized = normalizeRemotePath(path);
+    if (normalized === '/' || normalized === '.') return '/';
     const lastSlash = normalized.lastIndexOf('/');
     return lastSlash <= 0 ? '/' : normalized.substring(0, lastSlash);
+  };
+
+  const joinRemotePath = (parentPath: string, itemName: string): string => {
+    const normalizedParentPath = normalizeRemotePath(parentPath);
+    const normalizedItemName = itemName.replace(/^\/+/, '').replace(/\/+$/, '');
+    if (normalizedParentPath === '/') {
+      return `/${normalizedItemName}`;
+    }
+    return `${normalizedParentPath}/${normalizedItemName}`;
+  };
+
+  const remapExpandedPathsAfterRename = (
+    expandedPaths: Set<string>,
+    oldPath: string,
+    newPath: string
+  ): Set<string> => {
+    const normalizedOldPath = normalizeRemotePath(oldPath);
+    const normalizedNewPath = normalizeRemotePath(newPath);
+    const nextExpandedPaths = new Set<string>();
+
+    expandedPaths.forEach(path => {
+      const normalizedPath = normalizeRemotePath(path);
+      if (normalizedPath === normalizedOldPath) {
+        nextExpandedPaths.add(normalizedNewPath);
+        return;
+      }
+      if (normalizedPath.startsWith(`${normalizedOldPath}/`)) {
+        nextExpandedPaths.add(`${normalizedNewPath}${normalizedPath.slice(normalizedOldPath.length)}`);
+        return;
+      }
+      nextExpandedPaths.add(normalizedPath);
+    });
+
+    return nextExpandedPaths;
+  };
+
+  const filterExpandedPathsBySubtree = (expandedPaths: Set<string>, basePath: string): Set<string> => {
+    const normalizedBasePath = normalizeRemotePath(basePath);
+    if (normalizedBasePath === '/') {
+      return expandedPaths;
+    }
+
+    const subtreeExpandedPaths = new Set<string>();
+    expandedPaths.forEach(path => {
+      if (path === normalizedBasePath || path.startsWith(`${normalizedBasePath}/`)) {
+        subtreeExpandedPaths.add(path);
+      }
+    });
+    return subtreeExpandedPaths;
   };
 
   const isDirectory = (entry: FileEntry): boolean => {
@@ -893,6 +952,25 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     } else {
       await loadDirectory(parentPath, sessionId, undefined, sortState);
     }
+  };
+
+  const refreshRenamedTreeNode = async (oldPath: string, newPath: string) => {
+    if (!sessionId) return;
+    const currentSessionState = sessions[sessionId];
+    const currentSortState = currentSessionState?.sortState || sortState;
+    const parentPath = getParentPath(newPath);
+    const normalizedParentPath = parentPath === '.' ? '/' : parentPath;
+
+    if (!currentSessionState) {
+      await loadDirectory(normalizedParentPath, sessionId, undefined, currentSortState);
+      return;
+    }
+
+    const expandedPaths = getAllExpandedPaths(currentSessionState.rootFiles);
+    const remappedExpandedPaths = remapExpandedPathsAfterRename(expandedPaths, oldPath, newPath);
+    const subtreeExpandedPaths = filterExpandedPathsBySubtree(remappedExpandedPaths, normalizedParentPath);
+
+    await refreshDirectoryTree(sessionId, normalizedParentPath, subtreeExpandedPaths, currentSortState);
   };
 
   const permissionsToOctal = (perm: number | undefined): string => {
@@ -975,10 +1053,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     }
 
     try {
-      const parentPath = getParentPath(renameModal.entry.path);
-      const newPath = `${parentPath}/${newItemName.trim()}`;
-      await invoke('sftp_rename', { sessionId, oldPath: renameModal.entry.path, newPath });
-      await reloadParentDirectory(renameModal.entry);
+      const oldPath = normalizeRemotePath(renameModal.entry.path);
+      const parentPath = getParentPath(oldPath);
+      const newPath = joinRemotePath(parentPath, newItemName.trim());
+      await invoke('sftp_rename', { sessionId, oldPath, newPath });
+      await refreshRenamedTreeNode(oldPath, newPath);
     } catch (e) {
       console.error('Rename failed', e);
     }
