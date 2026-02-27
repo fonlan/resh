@@ -4,6 +4,7 @@ use russh_sftp::ser;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use std::io::SeekFrom;
+use std::path::Path;
 use tokio::io::AsyncSeekExt;
 use futures::FutureExt;
 use std::collections::{HashMap, VecDeque};
@@ -109,6 +110,7 @@ pub struct PendingTask {
 
 const COPY_DATA_EXTENSION_NAME: &str = "copy-data";
 const COPY_DATA_EXTENSION_VERSION: &str = "1";
+const COPY_TRANSFER_TYPE: &str = "copy";
 
 #[derive(Serialize)]
 struct CopyDataExtension {
@@ -122,6 +124,15 @@ struct CopyDataExtension {
 enum ServerSideCopyError {
     Unsupported,
     Other(String),
+}
+
+struct CopyProgressContext<'a> {
+    app: &'a AppHandle,
+    task_id: &'a str,
+    session_id: &'a str,
+    file_name: &'a str,
+    source: &'a str,
+    destination: &'a str,
 }
 
 lazy_static! {
@@ -1476,19 +1487,104 @@ impl SftpManager {
         Ok(())
     }
 
-    pub async fn copy_item(session_id: &str, source_path: &str, dest_path: &str) -> Result<(), String> {
+    pub async fn copy_item(
+        app: AppHandle,
+        session_id: &str,
+        source_path: &str,
+        dest_path: &str,
+        task_id: Option<String>,
+    ) -> Result<(), String> {
         let sftp = Self::get_session(session_id).await?;
-
         let metadata = sftp.stat(source_path).await.map_err(|e| e.to_string())?.attrs;
         let is_dir = metadata.is_dir();
+        let total_bytes = if is_dir { 0 } else { metadata.size.unwrap_or(0) };
+        let copy_task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let file_name = Path::new(source_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
 
-        if is_dir {
-            Self::copy_dir_recursive(session_id, &sftp, source_path, dest_path).await?;
+        let progress_context = CopyProgressContext {
+            app: &app,
+            task_id: &copy_task_id,
+            session_id,
+            file_name: &file_name,
+            source: source_path,
+            destination: dest_path,
+        };
+
+        Self::emit_copy_progress(&progress_context, total_bytes, 0, 0.0, None, "queued", None);
+        Self::emit_copy_progress(
+            &progress_context,
+            total_bytes,
+            0,
+            0.0,
+            None,
+            "transferring",
+            None,
+        );
+
+        let result = if is_dir {
+            Self::copy_dir_recursive(session_id, &sftp, source_path, dest_path).await
         } else {
-            Self::copy_file(session_id, &sftp, source_path, dest_path).await?;
-        }
+            Self::copy_file(session_id, &sftp, source_path, dest_path, Some(&progress_context)).await
+        };
 
-        Ok(())
+        match result {
+            Ok(()) => {
+                Self::emit_copy_progress(
+                    &progress_context,
+                    total_bytes,
+                    total_bytes,
+                    0.0,
+                    Some(0),
+                    "completed",
+                    None,
+                );
+                Ok(())
+            }
+            Err(error) => {
+                Self::emit_copy_progress(
+                    &progress_context,
+                    total_bytes,
+                    0,
+                    0.0,
+                    None,
+                    "failed",
+                    Some(error.clone()),
+                );
+                Err(error)
+            }
+        }
+    }
+
+    fn emit_copy_progress(
+        context: &CopyProgressContext<'_>,
+        total_bytes: u64,
+        transferred_bytes: u64,
+        speed: f64,
+        eta: Option<u64>,
+        status: &str,
+        error: Option<String>,
+    ) {
+        let _ = context.app.emit(
+            "transfer-progress",
+            TransferProgress {
+                task_id: context.task_id.to_string(),
+                type_: COPY_TRANSFER_TYPE.to_string(),
+                session_id: context.session_id.to_string(),
+                file_name: context.file_name.to_string(),
+                source: context.source.to_string(),
+                destination: context.destination.to_string(),
+                total_bytes,
+                transferred_bytes,
+                speed,
+                eta,
+                status: status.to_string(),
+                error,
+            },
+        );
     }
 
     fn is_copy_data_unsupported_status(status: &Status) -> bool {
@@ -1516,7 +1612,13 @@ impl SftpManager {
         support.insert(session_id.to_string(), false);
     }
 
-    async fn copy_file(session_id: &str, sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+    async fn copy_file(
+        session_id: &str,
+        sftp: &Arc<RawSftpSession>,
+        source: &str,
+        dest: &str,
+        progress_context: Option<&CopyProgressContext<'_>>,
+    ) -> Result<(), String> {
         if Self::session_supports_copy_data(session_id).await {
             match Self::copy_file_server_side(sftp, source, dest).await {
                 Ok(()) => return Ok(()),
@@ -1527,7 +1629,7 @@ impl SftpManager {
             }
         }
 
-        Self::copy_file_streaming(sftp, source, dest).await
+        Self::copy_file_streaming(sftp, source, dest, progress_context).await
     }
 
     async fn copy_file_server_side(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), ServerSideCopyError> {
@@ -1596,7 +1698,12 @@ impl SftpManager {
         result
     }
 
-    async fn copy_file_streaming(sftp: &Arc<RawSftpSession>, source: &str, dest: &str) -> Result<(), String> {
+    async fn copy_file_streaming(
+        sftp: &Arc<RawSftpSession>,
+        source: &str,
+        dest: &str,
+        progress_context: Option<&CopyProgressContext<'_>>,
+    ) -> Result<(), String> {
         let handle = sftp.open(source, OpenFlags::READ, FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
 
         let mut attrs = FileAttributes::default();
@@ -1608,6 +1715,9 @@ impl SftpManager {
 
         let total_bytes = sftp.fstat(&handle).await.map_err(|e| e.to_string())?.attrs.size.unwrap_or(0);
         let chunk_size = 256 * 1024;
+        let start_time = Instant::now();
+        let mut last_emit = Instant::now();
+        let mut transferred_bytes = 0u64;
 
         let mut futures = FuturesUnordered::new();
         let mut next_offset = 0u64;
@@ -1629,7 +1739,39 @@ impl SftpManager {
 
         while let Some((offset, result)) = futures.next().await {
             let data = result.map_err(|e| e.to_string())?.data;
+            transferred_bytes = transferred_bytes.saturating_add(data.len() as u64);
             sftp.write(&dest_handle, offset, data).await.map_err(|e| e.to_string())?;
+
+            if last_emit.elapsed().as_millis() > 500 {
+                if let Some(context) = progress_context {
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        transferred_bytes as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    let eta = if speed > 0.0 {
+                        Some(
+                            ((total_bytes.saturating_sub(transferred_bytes)) as f64 / speed)
+                                .max(0.0) as u64,
+                        )
+                    } else {
+                        None
+                    };
+
+                    Self::emit_copy_progress(
+                        context,
+                        total_bytes,
+                        transferred_bytes,
+                        speed,
+                        eta,
+                        "transferring",
+                        None,
+                    );
+                }
+
+                last_emit = Instant::now();
+            }
 
             if next_offset < total_bytes {
                 let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
@@ -1670,7 +1812,7 @@ impl SftpManager {
                             Box::pin(Self::copy_dir_recursive(session_id, sftp, &source_path, &dest_path)).await?;
                         } else {
                             Box::pin(async {
-                                Self::copy_file(session_id, sftp, &source_path, &dest_path).await
+                                Self::copy_file(session_id, sftp, &source_path, &dest_path, None).await
                             }).await?;
                         }
                     }

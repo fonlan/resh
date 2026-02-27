@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { useTransferStore } from '../stores/transferStore';
 import { invoke } from '@tauri-apps/api/core';
-import { X, ArrowDown, ArrowUp } from 'lucide-react';
+import { X, ArrowDown, ArrowUp, Copy } from 'lucide-react';
 import { useTranslation } from '../i18n';
 
 export const TransferStatusPanel: React.FC = () => {
@@ -57,7 +57,11 @@ export const TransferStatusPanel: React.FC = () => {
                 {tasks.map(task => (
                     <div key={task.task_id} className="flex items-center px-3 py-2 border-b border-[var(--border-color,#333)] gap-2">
                         <div className="text-[var(--accent-color,#3c8ce7)] flex items-center">
-                            {task.type_ === 'download' ? <ArrowDown size={16} /> : <ArrowUp size={16} />}
+                            {task.type_ === 'download'
+                                ? <ArrowDown size={16} />
+                                : task.type_ === 'upload'
+                                    ? <ArrowUp size={16} />
+                                    : <Copy size={16} />}
                         </div>
                         <div className="flex-1 overflow-hidden min-w-0">
                             <div className="whitespace-nowrap overflow-hidden text-ellipsis mb-1 text-[var(--text-color,#fff)]" title={task.file_name}>
@@ -87,13 +91,15 @@ export const TransferStatusPanel: React.FC = () => {
                                 />
                             </div>
                         </div>
-                        <button
-                            type="button"
-                            className="bg-none border-none cursor-pointer text-[var(--text-muted,#888)] p-1 flex items-center justify-center transition-colors duration-200 hover:text-[var(--text-color,#fff)] hover:bg-[rgba(255,255,255,0.1)] rounded"
-                            onClick={() => handleCancel(task.task_id)}
-                        >
-                            <X size={14} />
-                        </button>
+                        {task.type_ !== 'copy' && (
+                            <button
+                                type="button"
+                                className="bg-none border-none cursor-pointer text-[var(--text-muted,#888)] p-1 flex items-center justify-center transition-colors duration-200 hover:text-[var(--text-color,#fff)] hover:bg-[rgba(255,255,255,0.1)] rounded"
+                                onClick={() => handleCancel(task.task_id)}
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
                     </div>
                 ))}
             </div>

@@ -4,7 +4,7 @@ export type ConflictResolution = "overwrite" | "skip" | "cancel";
 
 export interface TransferTask {
     task_id: string;
-    type_: "download" | "upload";
+    type_: "download" | "upload" | "copy";
     session_id: string;
     file_name: string;
     source: string;

@@ -122,6 +122,12 @@ pub async fn sftp_rename(session_id: String, old_path: String, new_path: String)
 }
 
 #[tauri::command]
-pub async fn sftp_copy(session_id: String, source_path: String, dest_path: String) -> Result<(), String> {
-    SftpManager::copy_item(&session_id, &source_path, &dest_path).await
+pub async fn sftp_copy(
+    app: AppHandle,
+    session_id: String,
+    source_path: String,
+    dest_path: String,
+    task_id: Option<String>,
+) -> Result<(), String> {
+    SftpManager::copy_item(app, &session_id, &source_path, &dest_path, task_id).await
 }

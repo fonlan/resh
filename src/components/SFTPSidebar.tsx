@@ -1164,10 +1164,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           newPath: destPath
         });
       } else {
+        const taskId = uuidv4();
         await invoke('sftp_copy', {
           sessionId,
           sourcePath: clipboard.sourcePath,
-          destPath
+          destPath,
+          taskId
         });
       }
 
