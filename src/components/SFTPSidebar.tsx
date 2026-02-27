@@ -70,8 +70,12 @@ const FileTreeItem: React.FC<{
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void;
   onDragStart: (e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => void;
   clipboardSourcePath?: string;
-}> = ({ entry, depth, onToggle, onContextMenu, onDragStart, clipboardSourcePath }) => {
+  clipboardIsCut?: boolean;
+}> = ({ entry, depth, onToggle, onContextMenu, onDragStart, clipboardSourcePath, clipboardIsCut }) => {
   const isInClipboard = clipboardSourcePath === entry.path;
+  const clipboardTextClass = isInClipboard
+    ? (clipboardIsCut ? 'line-through opacity-60' : 'italic opacity-60')
+    : '';
   return (
     <div>
       <button
@@ -111,7 +115,7 @@ const FileTreeItem: React.FC<{
           <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
         )}
 
-        <span className={`ml-0.25 flex-1 whitespace-nowrap ${isInClipboard ? 'line-through opacity-60' : ''}`}>
+        <span className={`ml-0.25 flex-1 whitespace-nowrap ${clipboardTextClass}`}>
           {entry.name}
           {entry.link_target && (
             <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
@@ -138,6 +142,7 @@ const FileTreeItem: React.FC<{
               onContextMenu={onContextMenu}
               onDragStart={onDragStart}
               clipboardSourcePath={clipboardSourcePath}
+              clipboardIsCut={clipboardIsCut}
             />
           ))}
         </div>
@@ -1286,6 +1291,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                 onContextMenu={handleContextMenu}
                 onDragStart={handleTreeItemDragStart}
                 clipboardSourcePath={clipboard?.sourcePath}
+                clipboardIsCut={clipboard?.isCut}
               />
           ))}
           {rootFiles.length === 0 && !isLoading && (
