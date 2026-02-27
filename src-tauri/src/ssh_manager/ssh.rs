@@ -915,30 +915,15 @@ impl SSHClient {
     /// Send interrupt signal (Ctrl+C) to the terminal
     pub async fn send_interrupt(session_id: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
-        let result = session
+        session
             .data(channel_id, russh::CryptoVec::from_slice(&[3u8][..]))
-            .await; // 3 = ETX (Ctrl+C)
-
-        if result.is_err() {
-            info!(
-                "[SSH] Send interrupt failed, attempting to reconnect session {}...",
-                session_id
-            );
-            if let Err(e) = Self::reconnect(session_id).await {
-                error!("[SSH] Reconnection failed: {}", e);
-                return Err(format!("Connection lost and reconnection failed: {}", e));
-            }
-
-            // Retry sending
-            let (session, channel_id) = Self::get_session_route(session_id)
-                .await
-                .map_err(|_| "Session lost during reconnect".to_string())?;
-
-            session
-                .data(channel_id, russh::CryptoVec::from_slice(&[3u8][..]))
-                .await
-                .map_err(|_| "Failed to send interrupt after reconnect".to_string())?;
-        }
+            .await
+            .map_err(|e| {
+                // Do not auto-reconnect here: replacing the foreground PTY during TUI interaction
+                // can leave the UI on a stale alternate-screen frame that looks "frozen".
+                error!("[SSH] Failed to send interrupt to {}: {:?}", session_id, e);
+                format!("Failed to send interrupt: {:?}", e)
+            })?; // 3 = ETX (Ctrl+C)
 
         Ok(())
     }
@@ -946,30 +931,18 @@ impl SSHClient {
     /// Send arbitrary input (characters, escape sequences) to the terminal
     pub async fn send_terminal_input(session_id: &str, input: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
-        let result = session
+        session
             .data(channel_id, russh::CryptoVec::from_slice(input.as_bytes()))
-            .await;
-
-        if result.is_err() {
-            info!(
-                "[SSH] Send input failed, attempting to reconnect session {}...",
-                session_id
-            );
-            if let Err(e) = Self::reconnect(session_id).await {
-                error!("[SSH] Reconnection failed: {}", e);
-                return Err(format!("Connection lost and reconnection failed: {}", e));
-            }
-
-            // Retry sending
-            let (session, channel_id) = Self::get_session_route(session_id)
-                .await
-                .map_err(|_| "Session lost during reconnect".to_string())?;
-
-            session
-                .data(channel_id, russh::CryptoVec::from_slice(input.as_bytes()))
-                .await
-                .map_err(|_| "Failed to send input after reconnect".to_string())?;
-        }
+            .await
+            .map_err(|e| {
+                // Do not auto-reconnect for interactive key input: reconnecting here can detach
+                // from the currently running TUI process and make the terminal appear stuck.
+                error!(
+                    "[SSH] Failed to send terminal input to {}: {:?} (input={:?})",
+                    session_id, e, input
+                );
+                format!("Failed to send terminal input: {:?}", e)
+            })?;
 
         Ok(())
     }
