@@ -74,6 +74,98 @@ fn extract_command(arguments: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+#[derive(Debug)]
+struct ExecChannelCommandResult {
+    output: String,
+    exit_status: Option<u32>,
+    timed_out: bool,
+}
+
+fn build_run_in_terminal_timeout_failure_message(timeout_seconds: u64, partial_output: &str) -> String {
+    let base = format!(
+        "Error: run_in_terminal timed out after {}s without detecting command completion. Treat this as a failed foreground execution. Use run_in_background to check whether the process is still running and terminate it if needed.",
+        timeout_seconds
+    );
+
+    if partial_output.trim().is_empty() {
+        base
+    } else {
+        format!("{}\n\n[Partial output]\n{}", base, partial_output.trim())
+    }
+}
+
+async fn execute_command_in_exec_channel(
+    session_id: &str,
+    command: &str,
+    timeout_seconds: u64,
+    cancellation_token: Option<&CancellationToken>,
+) -> Result<ExecChannelCommandResult, String> {
+    let timeout = timeout_seconds.max(1);
+    let timeout_ms = timeout * 1000;
+
+    let ssh_session = SSHClient::get_session_handle(session_id)
+        .await
+        .ok_or_else(|| "Session not found".to_string())?;
+
+    let mut channel = ssh_session
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("Failed to open background exec channel: {}", e))?;
+
+    channel
+        .exec(true, command)
+        .await
+        .map_err(|e| format!("Failed to execute background command: {}", e))?;
+
+    let mut output = String::new();
+    let mut exit_status: Option<u32> = None;
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    let mut elapsed = 0u64;
+    let mut timed_out = false;
+
+    loop {
+        if cancellation_token
+            .map(|token| token.is_cancelled())
+            .unwrap_or(false)
+        {
+            return Err("CANCELLED".to_string());
+        }
+
+        tokio::select! {
+            msg = channel.wait() => {
+                match msg {
+                    Some(russh::ChannelMsg::Data { ref data }) => {
+                        output.push_str(&String::from_utf8_lossy(data));
+                    }
+                    Some(russh::ChannelMsg::ExtendedData { ref data, .. }) => {
+                        output.push_str(&String::from_utf8_lossy(data));
+                    }
+                    Some(russh::ChannelMsg::ExitStatus { exit_status: status }) => {
+                        exit_status = Some(status);
+                    }
+                    Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
+                        break;
+                    }
+                    Some(_) => {}
+                }
+            }
+            _ = interval.tick() => {
+                elapsed += 100;
+                if elapsed >= timeout_ms {
+                    timed_out = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    Ok(ExecChannelCommandResult {
+        output,
+        exit_status,
+        timed_out,
+    })
+}
+
 const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;
 const READ_FILE_MAX_BYTES: usize = 128 * 1024;
@@ -298,6 +390,28 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                         "command": {
                             "type": "string",
                             "description": "The shell command to execute"
+                        },
+                        "timeoutSeconds": {
+                            "type": "integer",
+                            "description": "Timeout in seconds (default: 30). Maximum time to wait for command completion."
+                        }
+                    },
+                    "required": ["command"]
+                }),
+            },
+        });
+
+        tools.push(ToolDefinition {
+            tool_type: "function".to_string(),
+            function: FunctionDefinition {
+                name: "run_in_background".to_string(),
+                description: "Execute a command through a separate SSH exec channel without using the foreground terminal. Prefer run_in_terminal first. Use this only when the foreground terminal is blocked/busy or when an immediate parallel diagnostic/recovery command is required (for example process check/kill).".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The shell command to execute in background channel"
                         },
                         "timeoutSeconds": {
                             "type": "integer",
@@ -708,9 +822,9 @@ async fn execute_tools_and_save(
                             tracing::debug!("[execute_tools] Command '{}' sent, timeout={}s", cmd, timeout);
 
                             let cmd_nl = format!("{}\n", cmd);
-                            if let Err(_e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                            if let Err(e) = SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
                                 let _ = SSHClient::stop_command_recording(ssh_id).await;
-                                break;
+                                return Err(format!("Failed to send command: {}", e));
                             }
 
                             let marker = "\x1b\x1b\n";
@@ -720,6 +834,8 @@ async fn execute_tools_and_save(
                                 tokio::time::interval(tokio::time::Duration::from_millis(100));
                             let mut elapsed = 0u64;
                             let timeout_ms = timeout * 1000;
+                            let mut completion_detected = false;
+                            let mut timed_out = false;
 
                             loop {
                                 if cancellation_token.is_cancelled() {
@@ -729,15 +845,17 @@ async fn execute_tools_and_save(
                                 interval.tick().await;
                                 elapsed += 100;
 
-                                if elapsed >= timeout_ms {
-                                    tracing::warn!("[execute_tools] Timeout reached at {}ms for command '{}'", elapsed, cmd);
-                                    break;
-                                }
-
                                 let is_completed =
                                     SSHClient::check_command_completed(ssh_id).await?;
                                 if is_completed {
+                                    completion_detected = true;
                                     tracing::debug!("[execute_tools] Command '{}' completed at {}ms", cmd, elapsed);
+                                    break;
+                                }
+
+                                if elapsed >= timeout_ms {
+                                    tracing::warn!("[execute_tools] Timeout reached at {}ms for command '{}'", elapsed, cmd);
+                                    timed_out = true;
                                     break;
                                 }
                             }
@@ -748,13 +866,78 @@ async fn execute_tools_and_save(
                                         &strip_ansi_escapes::strip(output.as_bytes()),
                                     )
                                     .to_string();
-                                    if clean_output.is_empty() {
-                                        "Command timed out or produced no output".to_string()
+                                    if timed_out && !completion_detected {
+                                        build_run_in_terminal_timeout_failure_message(timeout, &clean_output)
+                                    } else if clean_output.trim().is_empty() {
+                                        "Command produced no output".to_string()
                                     } else {
                                         clean_output
                                     }
                                 }
                                 Err(e) => format!("Error getting output: {}", e),
+                            }
+                        } else {
+                            "Error: Missing 'command' argument".to_string()
+                        }
+                    } else {
+                        "Error: Invalid arguments JSON".to_string()
+                    }
+                } else {
+                    "Error: No active terminal session linked to this chat.".to_string()
+                }
+            }
+            "run_in_background" => {
+                if let Some(ssh_id) = ssh_session_id {
+                    if let Ok(args) =
+                        serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+                    {
+                        if let Some(cmd) = args["command"].as_str() {
+                            let timeout = args
+                                .get("timeoutSeconds")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(30);
+
+                            match execute_command_in_exec_channel(ssh_id, cmd, timeout, Some(&cancellation_token)).await {
+                                Ok(exec_result) => {
+                                    let clean_output = String::from_utf8_lossy(
+                                        &strip_ansi_escapes::strip(exec_result.output.as_bytes()),
+                                    )
+                                    .to_string();
+
+                                    if exec_result.timed_out {
+                                        if clean_output.trim().is_empty() {
+                                            format!("Error: run_in_background timed out after {}s.", timeout)
+                                        } else {
+                                            format!(
+                                                "Error: run_in_background timed out after {}s.\n\n[Partial output]\n{}",
+                                                timeout,
+                                                clean_output.trim()
+                                            )
+                                        }
+                                    } else if let Some(status) = exec_result.exit_status {
+                                        if status != 0 {
+                                            if clean_output.trim().is_empty() {
+                                                format!("Error: run_in_background command exited with status {}.", status)
+                                            } else {
+                                                format!("Error: run_in_background command exited with status {}.\n\n{}", status, clean_output)
+                                            }
+                                        } else if clean_output.trim().is_empty() {
+                                            "Command completed successfully with no output".to_string()
+                                        } else {
+                                            clean_output
+                                        }
+                                    } else if clean_output.trim().is_empty() {
+                                        "Command completed with no output".to_string()
+                                    } else {
+                                        clean_output
+                                    }
+                                }
+                                Err(e) => {
+                                    if e == "CANCELLED" {
+                                        return Err(e);
+                                    }
+                                    format!("Error: {}", e)
+                                }
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -1754,9 +1937,11 @@ pub async fn execute_agent_tools(
 
     if !is_agent_mode {
         for call in &tools_filtered {
-            if call.function.name == "run_in_terminal" {
+            if call.function.name == "run_in_terminal"
+                || call.function.name == "run_in_background"
+            {
                 return Err(
-                    "Execution denied: run_in_terminal is only allowed in Agent mode.".to_string(),
+                    "Execution denied: run_in_terminal/run_in_background are only allowed in Agent mode.".to_string(),
                 );
             }
         }
@@ -1849,35 +2034,85 @@ pub async fn run_in_terminal(
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
+    let mut completion_detected = false;
+    let mut timed_out = false;
 
     loop {
         interval.tick().await;
         elapsed += 100;
 
-        if elapsed >= timeout_ms {
-            let _ = SSHClient::send_interrupt(&session_id).await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-            break;
-        }
-
         match SSHClient::check_command_completed(&session_id).await {
             Ok(true) => {
+                completion_detected = true;
                 break;
             }
-            Ok(false) => {
-                continue;
-            }
-            Err(_) => {
-                continue;
-            }
+            Ok(false) => {}
+            Err(_) => {}
+        }
+
+        if elapsed >= timeout_ms {
+            timed_out = true;
+            break;
         }
     }
 
     let output = SSHClient::stop_command_recording(&session_id).await?;
     let clean_output = String::from_utf8_lossy(&strip_ansi_escapes::strip(&output.as_bytes())).to_string();
 
-    if clean_output.trim().is_empty() || clean_output.contains("Command timed out") {
-        return Err("Command timed out or produced no output".to_string());
+    if timed_out && !completion_detected {
+        return Err(build_run_in_terminal_timeout_failure_message(timeout, &clean_output));
+    }
+
+    if clean_output.trim().is_empty() {
+        return Err("Command produced no output".to_string());
+    }
+
+    Ok(clean_output)
+}
+
+#[tauri::command]
+pub async fn run_in_background(
+    session_id: String,
+    command: String,
+    timeout_seconds: Option<u64>,
+) -> Result<String, String> {
+    let timeout = timeout_seconds.unwrap_or(30);
+    let exec_result = execute_command_in_exec_channel(&session_id, &command, timeout, None).await?;
+    let clean_output =
+        String::from_utf8_lossy(&strip_ansi_escapes::strip(exec_result.output.as_bytes()))
+            .to_string();
+
+    if exec_result.timed_out {
+        if clean_output.trim().is_empty() {
+            return Err(format!(
+                "run_in_background timed out after {}s.",
+                timeout
+            ));
+        }
+        return Err(format!(
+            "run_in_background timed out after {}s.\n\n[Partial output]\n{}",
+            timeout,
+            clean_output.trim()
+        ));
+    }
+
+    if let Some(status) = exec_result.exit_status {
+        if status != 0 {
+            if clean_output.trim().is_empty() {
+                return Err(format!(
+                    "run_in_background command exited with status {}.",
+                    status
+                ));
+            }
+            return Err(format!(
+                "run_in_background command exited with status {}.\n\n{}",
+                status, clean_output
+            ));
+        }
+    }
+
+    if clean_output.trim().is_empty() {
+        return Ok("Command completed with no output".to_string());
     }
 
     Ok(clean_output)

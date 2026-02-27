@@ -44,7 +44,7 @@ interface RenderableMessage {
   modelName: string | null;
 }
 
-interface RunInTerminalArgs {
+interface CommandExecutionToolArgs {
   command?: unknown
   timeoutSeconds?: unknown
 }
@@ -59,12 +59,12 @@ const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   containIntrinsicSize: '180px'
 }
 
-const parseRunInTerminalToolArgs = (rawArguments: string) => {
+const parseCommandExecutionToolArgs = (rawArguments: string) => {
   let displayCommand = rawArguments
   let timeoutSeconds = DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS
 
   try {
-    const args = JSON.parse(rawArguments) as RunInTerminalArgs
+    const args = JSON.parse(rawArguments) as CommandExecutionToolArgs
 
     if (typeof args.command === 'string' && args.command.length > 0) {
       displayCommand = args.command
@@ -291,6 +291,21 @@ const HIDDEN_TOOL_CALL_NAMES = new Set([
   'read_file'
 ])
 
+const COMMAND_EXECUTION_TOOL_NAMES = new Set([
+  'run_in_terminal',
+  'run_in_background'
+])
+
+const getToolDisplayName = (toolName: string, t: any) => {
+  if (toolName === 'run_in_terminal') {
+    return t.ai.tool.executeCommand
+  }
+  if (toolName === 'run_in_background') {
+    return t.ai.tool.executeBackgroundCommand
+  }
+  return toolName
+}
+
 const normalizeAiErrorMessage = (error: unknown): string => {
   const rawMessage =
     typeof error === 'string'
@@ -390,8 +405,8 @@ const ToolConfirmation = ({
     let sensitive = false;
 
     toolCalls.forEach(call => {
-      if (call.function.name === 'run_in_terminal') {
-        const { displayCommand: originalCommand } = parseRunInTerminalToolArgs(call.function.arguments)
+      if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
+        const { displayCommand: originalCommand } = parseCommandExecutionToolArgs(call.function.arguments)
         if (originalCommand) {
           // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
           let cleanCommand = originalCommand.replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, ' ');
@@ -455,15 +470,15 @@ const ToolConfirmation = ({
         {toolCalls.map(call => {
           let displayArgs = call.function.arguments;
           let timeoutSeconds: number | null = null;
-          if (call.function.name === 'run_in_terminal') {
-             const parsedArgs = parseRunInTerminalToolArgs(call.function.arguments)
+          if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
+             const parsedArgs = parseCommandExecutionToolArgs(call.function.arguments)
              displayArgs = parsedArgs.displayCommand
              timeoutSeconds = parsedArgs.timeoutSeconds
           }
           return (
             <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
               <span className="font-mono text-xs opacity-70">
-                {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
+                {getToolDisplayName(call.function.name, t)}
               </span>
               <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
               {timeoutSeconds !== null && (
@@ -604,15 +619,15 @@ const MessageBubble = React.memo(({
                 {visibleToolCalls.map((call: ToolCall) => {
                   let displayArgs = call.function.arguments;
                   let timeoutSeconds: number | null = null;
-                  if (call.function.name === 'run_in_terminal') {
-                    const parsedArgs = parseRunInTerminalToolArgs(call.function.arguments)
+                  if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
+                    const parsedArgs = parseCommandExecutionToolArgs(call.function.arguments)
                     displayArgs = parsedArgs.displayCommand
                     timeoutSeconds = parsedArgs.timeoutSeconds
                   }
                    return (
                      <div key={call.id} className="bg-black/20 p-2 rounded-md border border-white/10">
                        <span className="font-mono text-xs opacity-70 block">
-                        {call.function.name === 'run_in_terminal' ? t.ai.tool.executeCommand : call.function.name}
+                        {getToolDisplayName(call.function.name, t)}
                       </span>
                       <code className="block mt-1 w-full max-w-full text-sm bg-black/20 p-1 rounded font-mono whitespace-pre overflow-x-auto overflow-y-hidden">{displayArgs}</code>
                       {timeoutSeconds !== null && (

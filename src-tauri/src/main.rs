@@ -248,6 +248,7 @@ async fn main() {
             commands::ai::cancel_ai_chat,
             commands::ai::get_terminal_output,
             commands::ai::run_in_terminal,
+            commands::ai::run_in_background,
             commands::ai::send_interrupt,
             commands::ai::send_terminal_input,
             commands::ai::execute_agent_tools,

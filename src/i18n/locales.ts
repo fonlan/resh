@@ -313,6 +313,7 @@ export const locales = {
         copyCode: 'Copy code',
         insertToTerminal: 'Insert to terminal',
         executeCommand: 'Execute Command',
+        executeBackgroundCommand: 'Execute Background Command',
         timeoutSeconds: 'Timeout: {seconds}s'
       }
     },
@@ -728,6 +729,7 @@ export const locales = {
           copyCode: '复制代码',
           insertToTerminal: '插入终端',
           executeCommand: '执行命令',
+          executeBackgroundCommand: '后台执行命令',
           timeoutSeconds: '超时时间: {seconds}秒'
         }
       },
