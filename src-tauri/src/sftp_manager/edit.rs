@@ -3,11 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use crate::sftp_manager::{SftpManager, TransferProgress};
 use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
+
+const EDIT_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
+const EDIT_UPLOAD_CHUNK_TIMEOUT_SECS: u64 = 30;
 
 pub struct SftpEditManager {
     watched_files: Arc<Mutex<HashMap<PathBuf, (String, String)>>>,
@@ -72,6 +76,7 @@ impl SftpEditManager {
 
                                     let task_id = Uuid::new_v4().to_string();
                                     let file_name = path_inner.file_name().unwrap_or_default().to_string_lossy().to_string();
+                                    let initial_total_bytes = tokio::fs::metadata(&path_inner).await.map(|m| m.len()).unwrap_or(0);
 
                                     // 1. Emit Initial Progress
                                     let _ = app_inner.emit("transfer-progress", TransferProgress {
@@ -81,7 +86,7 @@ impl SftpEditManager {
                                         file_name: file_name.clone(),
                                         source: path_inner.to_string_lossy().to_string(),
                                         destination: remote_path.clone(),
-                                        total_bytes: 0,
+                                        total_bytes: initial_total_bytes,
                                         transferred_bytes: 0,
                                         speed: 0.0,
                                         eta: None,
@@ -90,24 +95,14 @@ impl SftpEditManager {
                                     });
 
                                     // Perform upload
-                                    let result = async {
-                                        let content = tokio::fs::read(&path_inner).await.map_err(|e| e.to_string())?;
-                                        let total_bytes = content.len() as u64;
-                                        
-                                        let sftp = SftpManager::get_session(&session_id).await?;
-                                        let handle = sftp.open(&remote_path, russh_sftp::protocol::OpenFlags::CREATE | russh_sftp::protocol::OpenFlags::TRUNCATE | russh_sftp::protocol::OpenFlags::WRITE, russh_sftp::protocol::FileAttributes::default()).await.map_err(|e| e.to_string())?.handle;
-                                        sftp.write(&handle, 0, content).await.map_err(|e| e.to_string())?;
-                                        let _ = sftp.close(handle).await;
-                                        
-                                        Ok(total_bytes)
-                                    }.await;
+                                    let result = Self::upload_modified_file(&session_id, &path_inner, &remote_path).await;
 
                                     // 2. Emit Final Progress
-                                    let (final_status, final_error, total_bytes) = match result {
-                                        Ok(bytes) => ("completed".to_string(), None, bytes),
+                                    let (final_status, final_error, total_bytes, transferred_bytes) = match result {
+                                        Ok(bytes) => ("completed".to_string(), None, bytes, bytes),
                                         Err(e) => {
                                             error!("Upload failed: {}", e);
-                                            ("failed".to_string(), Some(e), 0)
+                                            ("failed".to_string(), Some(e), initial_total_bytes, 0)
                                         }
                                     };
 
@@ -119,7 +114,7 @@ impl SftpEditManager {
                                         source: path_inner.to_string_lossy().to_string(),
                                         destination: remote_path,
                                         total_bytes,
-                                        transferred_bytes: total_bytes,
+                                        transferred_bytes,
                                         speed: 0.0,
                                         eta: None,
                                         status: final_status,
@@ -253,5 +248,53 @@ impl SftpEditManager {
                 }
             }
         }
+    }
+
+    async fn upload_modified_file(session_id: &str, local_path: &Path, remote_path: &str) -> Result<u64, String> {
+        let mut local_file = tokio::fs::File::open(local_path).await.map_err(|e| e.to_string())?;
+        let total_bytes = local_file.metadata().await.map_err(|e| e.to_string())?.len();
+        let sftp = SftpManager::get_session(session_id).await?;
+        let handle = sftp.open(
+            remote_path,
+            russh_sftp::protocol::OpenFlags::CREATE
+                | russh_sftp::protocol::OpenFlags::TRUNCATE
+                | russh_sftp::protocol::OpenFlags::WRITE,
+            russh_sftp::protocol::FileAttributes::default(),
+        ).await.map_err(|e| e.to_string())?.handle;
+
+        let upload_result: Result<(), String> = async {
+            let mut offset = 0u64;
+
+            while offset < total_bytes {
+                let chunk_size = std::cmp::min(EDIT_UPLOAD_CHUNK_SIZE as u64, total_bytes - offset) as usize;
+                let mut chunk = vec![0u8; chunk_size];
+                local_file.read_exact(&mut chunk).await.map_err(|e| e.to_string())?;
+
+                let write_result = tokio::time::timeout(
+                    Duration::from_secs(EDIT_UPLOAD_CHUNK_TIMEOUT_SECS),
+                    sftp.write(&handle, offset, chunk),
+                ).await;
+
+                match write_result {
+                    Ok(res) => {
+                        let _ = res.map_err(|e| e.to_string())?;
+                    }
+                    Err(_) => {
+                        return Err(format!(
+                            "Chunk upload timeout ({}s) at offset {}",
+                            EDIT_UPLOAD_CHUNK_TIMEOUT_SECS,
+                            offset
+                        ));
+                    }
+                }
+
+                offset += chunk_size as u64;
+            }
+
+            Ok(())
+        }.await;
+
+        let _ = sftp.close(handle).await;
+        upload_result.map(|_| total_bytes)
     }
 }
