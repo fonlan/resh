@@ -170,6 +170,175 @@ const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;
 const READ_FILE_MAX_BYTES: usize = 128 * 1024;
 const MAX_TAGGED_FILES_PER_MESSAGE: usize = 8;
+const THINK_OPEN_TAG: &str = "<think>";
+const THINK_CLOSE_TAG: &str = "</think>";
+
+fn trailing_tag_prefix_len(buffer: &str, tag: &str) -> usize {
+    if buffer.is_empty() {
+        return 0;
+    }
+
+    let max_len = buffer.len().min(tag.len().saturating_sub(1));
+    (1..=max_len)
+        .rev()
+        .find(|&len| buffer.ends_with(&tag[..len]))
+        .unwrap_or(0)
+}
+
+fn extract_think_segments(
+    parser_buffer: &mut String,
+    in_think_block: &mut bool,
+) -> Vec<(bool, String)> {
+    let mut segments = Vec::new();
+
+    loop {
+        if *in_think_block {
+            if let Some(close_idx) = parser_buffer.find(THINK_CLOSE_TAG) {
+                if close_idx > 0 {
+                    segments.push((true, parser_buffer[..close_idx].to_string()));
+                }
+                parser_buffer.drain(..close_idx + THINK_CLOSE_TAG.len());
+                *in_think_block = false;
+                continue;
+            }
+
+            let hold_len = trailing_tag_prefix_len(parser_buffer, THINK_CLOSE_TAG);
+            let emit_len = parser_buffer.len().saturating_sub(hold_len);
+            if emit_len == 0 {
+                break;
+            }
+
+            segments.push((true, parser_buffer[..emit_len].to_string()));
+            parser_buffer.drain(..emit_len);
+            break;
+        }
+
+        if let Some(open_idx) = parser_buffer.find(THINK_OPEN_TAG) {
+            if open_idx > 0 {
+                segments.push((false, parser_buffer[..open_idx].to_string()));
+            }
+            parser_buffer.drain(..open_idx + THINK_OPEN_TAG.len());
+            *in_think_block = true;
+            continue;
+        }
+
+        let hold_len = trailing_tag_prefix_len(parser_buffer, THINK_OPEN_TAG);
+        let emit_len = parser_buffer.len().saturating_sub(hold_len);
+        if emit_len == 0 {
+            break;
+        }
+
+        segments.push((false, parser_buffer[..emit_len].to_string()));
+        parser_buffer.drain(..emit_len);
+        break;
+    }
+
+    segments
+}
+
+fn append_response_stream_text(
+    window: &Window,
+    response_event: &str,
+    reasoning_event: &str,
+    reasoning_end_event: &str,
+    text: &str,
+    full_content: &mut String,
+    response_emit_buffer: &mut String,
+    reasoning_emit_buffer: &mut String,
+    has_pending_reasoning: &mut bool,
+    last_emit_at: &mut Instant,
+) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    if *has_pending_reasoning {
+        flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
+        window.emit(reasoning_end_event, "end").map_err(|e| e.to_string())?;
+        *has_pending_reasoning = false;
+        *last_emit_at = Instant::now();
+    }
+
+    full_content.push_str(text);
+    response_emit_buffer.push_str(text);
+
+    if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+        flush_response_buffer(window, response_event, response_emit_buffer)?;
+        *last_emit_at = Instant::now();
+    }
+
+    Ok(())
+}
+
+fn append_reasoning_stream_text(
+    window: &Window,
+    reasoning_event: &str,
+    text: &str,
+    full_reasoning: &mut String,
+    reasoning_emit_buffer: &mut String,
+    has_pending_reasoning: &mut bool,
+    last_emit_at: &mut Instant,
+) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    *has_pending_reasoning = true;
+    full_reasoning.push_str(text);
+    reasoning_emit_buffer.push_str(text);
+
+    if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
+        flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
+        *last_emit_at = Instant::now();
+    }
+
+    Ok(())
+}
+
+fn flush_think_parser_remainder(
+    window: &Window,
+    response_event: &str,
+    reasoning_event: &str,
+    reasoning_end_event: &str,
+    parser_buffer: &mut String,
+    in_think_block: bool,
+    full_content: &mut String,
+    full_reasoning: &mut String,
+    response_emit_buffer: &mut String,
+    reasoning_emit_buffer: &mut String,
+    has_pending_reasoning: &mut bool,
+    last_emit_at: &mut Instant,
+) -> Result<(), String> {
+    if parser_buffer.is_empty() {
+        return Ok(());
+    }
+
+    let remaining = std::mem::take(parser_buffer);
+    if in_think_block {
+        append_reasoning_stream_text(
+            window,
+            reasoning_event,
+            &remaining,
+            full_reasoning,
+            reasoning_emit_buffer,
+            has_pending_reasoning,
+            last_emit_at,
+        )
+    } else {
+        append_response_stream_text(
+            window,
+            response_event,
+            reasoning_event,
+            reasoning_end_event,
+            &remaining,
+            full_content,
+            response_emit_buffer,
+            reasoning_emit_buffer,
+            has_pending_reasoning,
+            last_emit_at,
+        )
+    }
+}
 
 fn is_path_trailing_punctuation(character: char) -> bool {
     matches!(
@@ -1192,6 +1361,8 @@ pub fn run_ai_turn(
         let mut has_pending_reasoning = false;
         let mut response_emit_buffer = String::new();
         let mut reasoning_emit_buffer = String::new();
+        let mut think_parser_buffer = String::new();
+        let mut in_think_block = false;
         let mut last_emit_at = Instant::now();
 
         let response_event = format!("ai-response-{}", session_id);
@@ -1201,6 +1372,20 @@ pub fn run_ai_turn(
 
         while let Some(event_result) = stream.next().await {
             if cancellation_token.is_cancelled() {
+                flush_think_parser_remainder(
+                    &window,
+                    &response_event,
+                    &reasoning_event,
+                    &reasoning_end_event,
+                    &mut think_parser_buffer,
+                    in_think_block,
+                    &mut full_content,
+                    &mut full_reasoning,
+                    &mut response_emit_buffer,
+                    &mut reasoning_emit_buffer,
+                    &mut has_pending_reasoning,
+                    &mut last_emit_at,
+                )?;
                 flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
                 flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
                 if has_pending_reasoning {
@@ -1212,32 +1397,61 @@ pub fn run_ai_turn(
                 Ok(event) => {
                     match event {
                         ChatStreamEvent::Chunk(chunk) => {
-                            if has_pending_reasoning {
-                                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
-                                window.emit(&reasoning_end_event, "end").map_err(|e| e.to_string())?;
-                                has_pending_reasoning = false;
-                                last_emit_at = Instant::now();
-                            }
-
-                            full_content.push_str(&chunk.content);
-                            response_emit_buffer.push_str(&chunk.content);
-
-                            if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
-                                flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                                last_emit_at = Instant::now();
+                            think_parser_buffer.push_str(&chunk.content);
+                            let segments = extract_think_segments(&mut think_parser_buffer, &mut in_think_block);
+                            for (is_reasoning, segment) in segments {
+                                if is_reasoning {
+                                    append_reasoning_stream_text(
+                                        &window,
+                                        &reasoning_event,
+                                        &segment,
+                                        &mut full_reasoning,
+                                        &mut reasoning_emit_buffer,
+                                        &mut has_pending_reasoning,
+                                        &mut last_emit_at,
+                                    )?;
+                                } else {
+                                    append_response_stream_text(
+                                        &window,
+                                        &response_event,
+                                        &reasoning_event,
+                                        &reasoning_end_event,
+                                        &segment,
+                                        &mut full_content,
+                                        &mut response_emit_buffer,
+                                        &mut reasoning_emit_buffer,
+                                        &mut has_pending_reasoning,
+                                        &mut last_emit_at,
+                                    )?;
+                                }
                             }
                         }
                         ChatStreamEvent::ReasoningChunk(chunk) => {
-                            has_pending_reasoning = true;
-                            full_reasoning.push_str(&chunk.content);
-                            reasoning_emit_buffer.push_str(&chunk.content);
-
-                            if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL {
-                                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
-                                last_emit_at = Instant::now();
-                            }
+                            append_reasoning_stream_text(
+                                &window,
+                                &reasoning_event,
+                                &chunk.content,
+                                &mut full_reasoning,
+                                &mut reasoning_emit_buffer,
+                                &mut has_pending_reasoning,
+                                &mut last_emit_at,
+                            )?;
                         }
                         ChatStreamEvent::ToolCallChunk(chunk) => {
+                            flush_think_parser_remainder(
+                                &window,
+                                &response_event,
+                                &reasoning_event,
+                                &reasoning_end_event,
+                                &mut think_parser_buffer,
+                                in_think_block,
+                                &mut full_content,
+                                &mut full_reasoning,
+                                &mut response_emit_buffer,
+                                &mut reasoning_emit_buffer,
+                                &mut has_pending_reasoning,
+                                &mut last_emit_at,
+                            )?;
                             flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
                             flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
                             last_emit_at = Instant::now();
@@ -1286,6 +1500,20 @@ pub fn run_ai_turn(
                             }
                         }
                         ChatStreamEvent::End(end) => {
+                            flush_think_parser_remainder(
+                                &window,
+                                &response_event,
+                                &reasoning_event,
+                                &reasoning_end_event,
+                                &mut think_parser_buffer,
+                                in_think_block,
+                                &mut full_content,
+                                &mut full_reasoning,
+                                &mut response_emit_buffer,
+                                &mut reasoning_emit_buffer,
+                                &mut has_pending_reasoning,
+                                &mut last_emit_at,
+                            )?;
                             if has_pending_reasoning {
                                 window.emit(&format!("ai-reasoning-end-{}", session_id), "end").map_err(|e| e.to_string())?;
                                 has_pending_reasoning = false;
@@ -1353,6 +1581,20 @@ pub fn run_ai_turn(
                     }
                 }
                 Err(e) => {
+                    flush_think_parser_remainder(
+                        &window,
+                        &response_event,
+                        &reasoning_event,
+                        &reasoning_end_event,
+                        &mut think_parser_buffer,
+                        in_think_block,
+                        &mut full_content,
+                        &mut full_reasoning,
+                        &mut response_emit_buffer,
+                        &mut reasoning_emit_buffer,
+                        &mut has_pending_reasoning,
+                        &mut last_emit_at,
+                    )?;
                     flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
                     flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
 
@@ -1367,6 +1609,20 @@ pub fn run_ai_turn(
             }
         }
 
+        flush_think_parser_remainder(
+            &window,
+            &response_event,
+            &reasoning_event,
+            &reasoning_end_event,
+            &mut think_parser_buffer,
+            in_think_block,
+            &mut full_content,
+            &mut full_reasoning,
+            &mut response_emit_buffer,
+            &mut reasoning_emit_buffer,
+            &mut has_pending_reasoning,
+            &mut last_emit_at,
+        )?;
         flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
         flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
 
