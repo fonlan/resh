@@ -803,24 +803,28 @@ impl SSHClient {
     pub async fn check_command_completed(session_id: &str) -> Result<bool, String> {
         let sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get(session_id) {
-            if session_data.command_recorder.is_none() {
+            let Some(recorder) = session_data.command_recorder.as_ref() else {
                 tracing::debug!(
                     "[check_command_completed] {} - no recorder, returning true",
                     session_id
                 );
                 return Ok(true);
-            }
-
-            let current_buffer = &session_data.terminal_buffer;
-            let recording_start = session_data.last_output_len;
-            let new_content = if current_buffer.len() > recording_start {
-                &current_buffer[recording_start..]
-            } else {
-                ""
             };
 
-            tracing::debug!("[check_command_completed] {} - buffer_len={}, start={}, content_len={}, content={:?}",
-                session_id, current_buffer.len(), recording_start, new_content.len(), new_content.chars().take(50).collect::<String>());
+            // Completion detection must use recorder data because terminal_buffer is rolling
+            // and can be truncated when it hits MAX_BUFFER_SIZE.
+            let new_content = recorder.as_str();
+            let recording_start = session_data.last_output_len;
+            let current_buffer_len = session_data.terminal_buffer.len();
+
+            tracing::debug!(
+                "[check_command_completed] {} - buffer_len={}, start={}, recorder_len={}, content={:?}",
+                session_id,
+                current_buffer_len,
+                recording_start,
+                new_content.len(),
+                new_content.chars().take(50).collect::<String>()
+            );
 
             // Priority 1: Completion marker detection (pure control chars)
             // The marker is: \x1b\x1b (double ESC, completely invisible)
