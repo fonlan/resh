@@ -10,6 +10,7 @@ use reqwest::Client;
 use rusqlite::params;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State, Window};
@@ -81,6 +82,103 @@ fn extract_wait_finish(arguments: &str) -> Option<bool> {
         .ok()?
         .get("wait_finish")
         .and_then(|v| v.as_bool())
+}
+
+fn accumulate_streamed_tool_call_chunk(
+    accumulated_tool_calls: &mut Vec<ToolCall>,
+    tool_call_id_aliases: &mut HashMap<String, String>,
+    call_id: &str,
+    fn_name: &str,
+    args: &str,
+) {
+    let effective_id = tool_call_id_aliases
+        .get(call_id)
+        .cloned()
+        .unwrap_or_else(|| call_id.to_string());
+
+    if let Some(existing) = accumulated_tool_calls
+        .iter_mut()
+        .find(|tc| tc.id == effective_id)
+    {
+        existing.function.arguments.push_str(args);
+        if existing.function.name.is_empty() && !fn_name.is_empty() {
+            existing.function.name = fn_name.to_string();
+        }
+        return;
+    }
+
+    if fn_name.is_empty() && args.is_empty() {
+        return;
+    }
+
+    // Some providers emit the function name and arguments under different call ids.
+    // Route nameless argument chunks to the most recent named call and remember the alias.
+    if fn_name.is_empty() && !args.is_empty() {
+        if let Some(existing) = accumulated_tool_calls
+            .iter_mut()
+            .rev()
+            .find(|tc| !tc.function.name.is_empty())
+        {
+            existing.function.arguments.push_str(args);
+            tool_call_id_aliases.insert(call_id.to_string(), existing.id.clone());
+            return;
+        }
+    }
+
+    accumulated_tool_calls.push(ToolCall {
+        id: effective_id.clone(),
+        tool_type: "function".to_string(),
+        function: FunctionCall {
+            name: fn_name.to_string(),
+            arguments: args.to_string(),
+        },
+    });
+    tool_call_id_aliases.insert(call_id.to_string(), effective_id);
+}
+
+fn normalize_streamed_tool_calls(tool_calls: Vec<ToolCall>) -> Vec<ToolCall> {
+    let mut normalized: Vec<ToolCall> = Vec::with_capacity(tool_calls.len());
+
+    for call in tool_calls {
+        let has_name = !call.function.name.trim().is_empty();
+        let has_args = !call.function.arguments.trim().is_empty();
+
+        if has_name {
+            normalized.push(call);
+            continue;
+        }
+
+        if !has_args {
+            tracing::debug!(
+                "[AI] Dropping empty streamed tool-call fragment: id={}",
+                call.id
+            );
+            continue;
+        }
+
+        if let Some(existing) = normalized
+            .iter_mut()
+            .rev()
+            .find(|tc| !tc.function.name.trim().is_empty())
+        {
+            tracing::warn!(
+                "[AI] Merging nameless streamed tool-call fragment id={} into id={}",
+                call.id,
+                existing.id
+            );
+            existing
+                .function
+                .arguments
+                .push_str(&call.function.arguments);
+        } else {
+            tracing::warn!(
+                "[AI] Dropping nameless streamed tool-call id={} because no named call exists",
+                call.id
+            );
+        }
+    }
+
+    normalized
 }
 
 #[derive(Debug)]
@@ -700,37 +798,83 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
 }
 
 fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
-    history
-        .into_iter()
-        .map(|msg| match msg.role.as_str() {
-            "system" => GenaiMessage::system(msg.content.unwrap_or_default()),
-            "user" => GenaiMessage::user(msg.content.unwrap_or_default()),
+    let mut messages = Vec::with_capacity(history.len());
+
+    for msg in history {
+        match msg.role.as_str() {
+            "system" => messages.push(GenaiMessage::system(msg.content.unwrap_or_default())),
+            "user" => messages.push(GenaiMessage::user(msg.content.unwrap_or_default())),
             "assistant" => {
                 let content = msg.content.unwrap_or_default();
                 if let Some(tool_calls) = msg.tool_calls {
                     let genai_tool_calls: Vec<genai::chat::ToolCall> = tool_calls
                         .into_iter()
-                        .map(|tc| genai::chat::ToolCall {
-                            call_id: tc.id,
-                            fn_name: tc.function.name,
-                            fn_arguments: serde_json::from_str(&tc.function.arguments)
-                                .unwrap_or(serde_json::Value::Null),
-                            thought_signatures: None,
+                        .filter_map(|tc| {
+                            if tc.function.name.trim().is_empty() {
+                                tracing::warn!(
+                                    "[AI] Dropping persisted tool_call with empty function name: id={}",
+                                    tc.id
+                                );
+                                return None;
+                            }
+
+                            let parsed_args =
+                                match serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                                {
+                                    Ok(value) if value.is_object() => value,
+                                    Ok(value) => {
+                                        tracing::warn!(
+                                            "[AI] Dropping persisted tool_call with non-object args: id={}, name={}, args={}",
+                                            tc.id,
+                                            tc.function.name,
+                                            value
+                                        );
+                                        return None;
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "[AI] Dropping persisted tool_call with invalid args JSON: id={}, name={}, err={}",
+                                            tc.id,
+                                            tc.function.name,
+                                            e
+                                        );
+                                        return None;
+                                    }
+                                };
+
+                            Some(genai::chat::ToolCall {
+                                call_id: tc.id,
+                                fn_name: tc.function.name,
+                                fn_arguments: parsed_args,
+                                thought_signatures: None,
+                            })
                         })
                         .collect();
 
-                    GenaiMessage::assistant(genai_tool_calls)
-                } else {
-                    GenaiMessage::assistant(content)
+                    if !genai_tool_calls.is_empty() {
+                        messages.push(GenaiMessage::assistant(genai_tool_calls));
+                        continue;
+                    }
                 }
+
+                if content.is_empty() {
+                    tracing::warn!(
+                        "[AI] Dropping empty assistant message after tool-call sanitization to avoid invalid payload."
+                    );
+                    continue;
+                }
+
+                messages.push(GenaiMessage::assistant(content));
             }
-            "tool" => GenaiMessage::from(genai::chat::ToolResponse::new(
+            "tool" => messages.push(GenaiMessage::from(genai::chat::ToolResponse::new(
                 msg.tool_call_id.unwrap_or_default(),
                 msg.content.unwrap_or_default(),
-            )),
-            _ => GenaiMessage::user(msg.content.unwrap_or_default()),
-        })
-        .collect()
+            ))),
+            _ => messages.push(GenaiMessage::user(msg.content.unwrap_or_default())),
+        }
+    }
+
+    messages
 }
 
 fn truncate_dialog_messages_for_history(
@@ -838,6 +982,117 @@ mod history_window_tests {
         let truncated = truncate_dialog_messages_for_history(messages, 3);
 
         assert!(truncated.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod streamed_tool_call_tests {
+    use super::*;
+
+    fn new_call(id: &str, name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            tool_type: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn accumulate_streamed_tool_call_chunk_merges_split_alias_fragments() {
+        let mut calls: Vec<ToolCall> = Vec::new();
+        let mut aliases: HashMap<String, String> = HashMap::new();
+
+        accumulate_streamed_tool_call_chunk(
+            &mut calls,
+            &mut aliases,
+            "tooluse_primary",
+            "run_in_terminal",
+            "",
+        );
+        accumulate_streamed_tool_call_chunk(&mut calls, &mut aliases, "call_1", "", "{\"com");
+        accumulate_streamed_tool_call_chunk(
+            &mut calls,
+            &mut aliases,
+            "call_1",
+            "",
+            "mand\":\"pwd\"}",
+        );
+
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "tooluse_primary");
+        assert_eq!(calls[0].function.name, "run_in_terminal");
+        assert_eq!(calls[0].function.arguments, "{\"command\":\"pwd\"}");
+        assert_eq!(
+            aliases.get("call_1").map(String::as_str),
+            Some("tooluse_primary")
+        );
+    }
+
+    #[test]
+    fn normalize_streamed_tool_calls_drops_orphan_nameless_call() {
+        let calls = vec![
+            new_call("call_1", "", "{\"command\":\"whoami\"}"),
+            new_call(
+                "tooluse_primary",
+                "run_in_terminal",
+                "{\"command\":\"pwd\"}",
+            ),
+        ];
+
+        let normalized = normalize_streamed_tool_calls(calls);
+
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].id, "tooluse_primary");
+        assert_eq!(normalized[0].function.name, "run_in_terminal");
+        assert_eq!(normalized[0].function.arguments, "{\"command\":\"pwd\"}");
+    }
+
+    #[test]
+    fn to_genai_messages_skips_empty_assistant_after_invalid_tool_cleanup() {
+        let history = vec![ChatMessage {
+            role: "assistant".to_string(),
+            content: None,
+            reasoning_content: None,
+            tool_calls: Some(vec![new_call("call_1", "", "{\"command\":\"pwd\"}")]),
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }];
+
+        let messages = to_genai_messages(history);
+
+        assert!(messages.is_empty());
+    }
+
+    #[test]
+    fn to_genai_messages_keeps_only_valid_tool_calls() {
+        let history = vec![ChatMessage {
+            role: "assistant".to_string(),
+            content: None,
+            reasoning_content: None,
+            tool_calls: Some(vec![
+                new_call("call_1", "", "{\"command\":\"pwd\"}"),
+                new_call(
+                    "tooluse_ok",
+                    "run_in_terminal",
+                    "{\"command\":\"pwd\",\"timeoutSeconds\":30}",
+                ),
+            ]),
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }];
+
+        let messages = to_genai_messages(history);
+
+        assert_eq!(messages.len(), 1);
+        let tool_calls = messages[0].content.tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].call_id, "tooluse_ok");
+        assert_eq!(tool_calls[0].fn_name, "run_in_terminal");
     }
 }
 
@@ -1581,6 +1836,7 @@ pub fn run_ai_turn(
         let mut full_reasoning = String::new();
         let mut final_tool_calls: Option<Vec<ToolCall>> = None;
         let mut accumulated_tool_calls: Vec<ToolCall> = Vec::new();
+        let mut tool_call_id_aliases: HashMap<String, String> = HashMap::new();
         let mut has_pending_reasoning = false;
         let mut response_emit_buffer = String::new();
         let mut reasoning_emit_buffer = String::new();
@@ -1701,51 +1957,46 @@ pub fn run_ai_turn(
 
                         tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
 
-                        if let Some(existing) = accumulated_tool_calls
-                            .iter_mut()
-                            .find(|tc| tc.id == chunk.tool_call.call_id)
-                        {
-                            existing.function.arguments.push_str(&args);
-
-                            if existing.function.name.is_empty()
-                                && !chunk.tool_call.fn_name.is_empty()
-                            {
-                                existing.function.name = chunk.tool_call.fn_name.clone();
-                            }
-
-                            tracing::debug!("[AI] ToolCallChunk (append by id): id={}, name={}, args_len={}, total_len={}",
-                                    chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
-                        } else if chunk.tool_call.call_id == "call_0"
-                            && accumulated_tool_calls.len() == 1
-                        {
-                            let existing = &mut accumulated_tool_calls[0];
-                            existing.function.arguments.push_str(&args);
-
-                            if existing.function.name.is_empty()
-                                && !chunk.tool_call.fn_name.is_empty()
-                            {
-                                existing.function.name = chunk.tool_call.fn_name.clone();
-                            }
-
-                            tracing::debug!("[AI] ToolCallChunk (append by fallback): original_id={}, fallback_id={}, name={}, args_len={}, total_len={}",
-                                    existing.id, chunk.tool_call.call_id, existing.function.name, args.len(), existing.function.arguments.len());
-                        } else if !chunk.tool_call.fn_name.is_empty() || !args.is_empty() {
-                            accumulated_tool_calls.push(ToolCall {
-                                id: chunk.tool_call.call_id.clone(),
-                                tool_type: "function".to_string(),
-                                function: FunctionCall {
-                                    name: chunk.tool_call.fn_name.clone(),
-                                    arguments: args.clone(),
-                                },
-                            });
-                            tracing::debug!(
-                                "[AI] ToolCallChunk (new): id={}, name={}, args=\"{}\"",
-                                chunk.tool_call.call_id,
-                                chunk.tool_call.fn_name,
-                                args
-                            );
-                        } else {
+                        if chunk.tool_call.fn_name.is_empty() && args.is_empty() {
                             tracing::debug!("[AI] ToolCallChunk (skipped): empty fn_name and args");
+                        } else {
+                            let before_len = accumulated_tool_calls.len();
+                            accumulate_streamed_tool_call_chunk(
+                                &mut accumulated_tool_calls,
+                                &mut tool_call_id_aliases,
+                                &chunk.tool_call.call_id,
+                                &chunk.tool_call.fn_name,
+                                &args,
+                            );
+
+                            if let Some(alias_target) =
+                                tool_call_id_aliases.get(&chunk.tool_call.call_id)
+                            {
+                                if let Some(existing) = accumulated_tool_calls
+                                    .iter()
+                                    .find(|tc| tc.id == alias_target.as_str())
+                                {
+                                    if accumulated_tool_calls.len() > before_len {
+                                        tracing::debug!(
+                                            "[AI] ToolCallChunk (new): src_id={}, mapped_id={}, name={}, args_len={}, total_len={}",
+                                            chunk.tool_call.call_id,
+                                            alias_target,
+                                            existing.function.name,
+                                            args.len(),
+                                            existing.function.arguments.len()
+                                        );
+                                    } else {
+                                        tracing::debug!(
+                                            "[AI] ToolCallChunk (merged): src_id={}, mapped_id={}, name={}, args_len={}, total_len={}",
+                                            chunk.tool_call.call_id,
+                                            alias_target,
+                                            existing.function.name,
+                                            args.len(),
+                                            existing.function.arguments.len()
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                     ChatStreamEvent::End(end) => {
@@ -1824,6 +2075,8 @@ pub fn run_ai_turn(
                             }
                             accumulated_tool_calls.clone()
                         };
+
+                        let tool_calls = normalize_streamed_tool_calls(tool_calls);
 
                         for call in &tool_calls {
                             let timeout = extract_timeout(&call.function.arguments);
