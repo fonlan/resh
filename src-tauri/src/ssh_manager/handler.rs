@@ -1,11 +1,15 @@
+use crate::ssh_manager::ssh::SSHClient;
+use async_trait::async_trait;
 use russh::client;
+use russh_keys::key;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+use tracing::debug;
 
 pub struct ClientHandler {
     pub session_id: Option<String>,
-    pub tx: Option<mpsc::Sender<(String, Vec<u8>)>>,
+    pub tx: Option<mpsc::UnboundedSender<(String, Vec<u8>)>>,
     pub shell_channel_id: Arc<Mutex<Option<russh::ChannelId>>>,
 }
 
@@ -20,7 +24,7 @@ impl ClientHandler {
 
     pub fn with_channel(
         session_id: String,
-        tx: mpsc::Sender<(String, Vec<u8>)>,
+        tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
         shell_channel_id: Arc<Mutex<Option<russh::ChannelId>>>,
     ) -> Self {
         Self {
@@ -31,12 +35,13 @@ impl ClientHandler {
     }
 }
 
+#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        _server_public_key: &key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true) // Accept all keys
     }
@@ -62,7 +67,18 @@ impl client::Handler for ClientHandler {
 
         if should_forward {
             if let (Some(session_id), Some(tx)) = (&self.session_id, &self.tx) {
-                let _ = tx.send((session_id.clone(), data.to_vec())).await;
+                let text = String::from_utf8_lossy(data);
+                if let Err(e) =
+                    SSHClient::append_command_recorder_chunk(session_id, text.as_ref()).await
+                {
+                    if e != "Session not found" {
+                        debug!(
+                            "[SSH] Failed to append recorder chunk for {}: {}",
+                            session_id, e
+                        );
+                    }
+                }
+                let _ = tx.send((session_id.clone(), data.to_vec()));
             }
         }
         Ok(())

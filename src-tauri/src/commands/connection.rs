@@ -22,19 +22,29 @@ async fn flush_terminal_output(window: &Window, session_id: &str, pending_output
     }
 
     let text = std::mem::take(pending_output);
+    let mut text_for_emit = text.clone();
 
-    if let Err(e) = SSHClient::update_terminal_buffer(session_id, &text).await {
-        if e == "Session not found" {
-            tracing::debug!(
-                "Skipping terminal buffer update for {} before session registration",
-                session_id
-            );
-        } else {
-            tracing::error!("Failed to update terminal buffer: {}", e);
+    match SSHClient::update_terminal_buffer(session_id, &text).await {
+        Ok(filtered) => {
+            text_for_emit = filtered;
+        }
+        Err(e) => {
+            if e == "Session not found" {
+                tracing::debug!(
+                    "Skipping terminal buffer update for {} before session registration",
+                    session_id
+                );
+            } else {
+                tracing::error!("Failed to update terminal buffer: {}", e);
+            }
         }
     }
 
-    if let Err(e) = window.emit(&format!("terminal-output:{}", session_id), text) {
+    if text_for_emit.is_empty() {
+        return;
+    }
+
+    if let Err(e) = window.emit(&format!("terminal-output:{}", session_id), text_for_emit) {
         tracing::debug!("Failed to emit terminal event for {}: {}", session_id, e);
     }
 }
@@ -69,7 +79,7 @@ pub async fn connect_to_server(
     state: State<'_, Arc<AppState>>,
 ) -> Result<ConnectResponse, String> {
     // Create channel for receiving SSH data
-    let (tx, mut rx) = mpsc::channel::<(String, Vec<u8>)>(100);
+    let (tx, mut rx) = mpsc::unbounded_channel::<(String, Vec<u8>)>();
 
     // Spawn a task to forward SSH data to frontend events
     let window_clone = window.clone();

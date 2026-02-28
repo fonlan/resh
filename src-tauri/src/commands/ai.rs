@@ -204,6 +204,140 @@ fn build_run_in_terminal_timeout_failure_message(
     }
 }
 
+const TIMEOUT_RECOVERY_POLL_MS: u64 = 100;
+const TIMEOUT_RECOVERY_GRACE_MS: u64 = 2000;
+const START_MARKER_EXPECT_MS: u64 = 1500;
+const AI_STREAM_IDLE_TIMEOUT_SECS: u64 = 45;
+
+async fn try_recover_terminal_after_timeout(
+    ssh_session_id: &str,
+    command: &str,
+    log_scope: &str,
+) -> bool {
+    if let Ok(diag) = SSHClient::get_command_recording_diagnostics(ssh_session_id, 160).await {
+        tracing::warn!(
+            "[{}] Timeout diagnostics for command '{}': {}",
+            log_scope,
+            command,
+            diag
+        );
+    }
+
+    if let Err(e) = SSHClient::send_interrupt(ssh_session_id).await {
+        tracing::warn!(
+            "[{}] Timeout recovery interrupt failed for command '{}': {}",
+            log_scope,
+            command,
+            e
+        );
+        return false;
+    }
+    tracing::warn!(
+        "[{}] Timeout recovery interrupt sent for command '{}'",
+        log_scope,
+        command
+    );
+
+    let mut interval =
+        tokio::time::interval(tokio::time::Duration::from_millis(TIMEOUT_RECOVERY_POLL_MS));
+    let mut elapsed = 0u64;
+    while elapsed < TIMEOUT_RECOVERY_GRACE_MS {
+        interval.tick().await;
+        elapsed += TIMEOUT_RECOVERY_POLL_MS;
+        match SSHClient::check_command_completed(ssh_session_id).await {
+            Ok(true) => {
+                tracing::warn!(
+                    "[{}] Terminal recovered after timeout for command '{}' ({}ms after interrupt)",
+                    log_scope,
+                    command,
+                    elapsed
+                );
+                return true;
+            }
+            Ok(false) => {}
+            Err(e) => {
+                tracing::debug!(
+                    "[{}] Timeout recovery check failed for command '{}': {}",
+                    log_scope,
+                    command,
+                    e
+                );
+                break;
+            }
+        }
+    }
+
+    false
+}
+
+async fn try_reconnect_terminal_after_timeout(
+    ssh_session_id: &str,
+    command: &str,
+    log_scope: &str,
+) -> bool {
+    match SSHClient::reconnect(ssh_session_id).await {
+        Ok(_) => {
+            tracing::warn!(
+                "[{}] Timeout fallback reconnect succeeded for command '{}'",
+                log_scope,
+                command
+            );
+            true
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[{}] Timeout fallback reconnect failed for command '{}': {}",
+                log_scope,
+                command,
+                e
+            );
+            false
+        }
+    }
+}
+
+async fn build_recording_input_payload(
+    ssh_session_id: &str,
+    command: &str,
+    log_scope: &str,
+) -> String {
+    let cmd_nl = format!("{}\n", command);
+    let start_marker = SSHClient::get_recording_start_marker_command(ssh_session_id).await;
+    let done_marker = SSHClient::get_recording_marker_command(ssh_session_id).await;
+
+    match (start_marker, done_marker) {
+        (Ok(start), Ok(done)) => format!("{}{}{}", start, cmd_nl, done),
+        (Err(start_err), Ok(done)) => {
+            tracing::debug!(
+                "[{}] Start marker unavailable for '{}': {}",
+                log_scope,
+                command,
+                start_err
+            );
+            format!("{}{}", cmd_nl, done)
+        }
+        (Ok(start), Err(done_err)) => {
+            tracing::debug!(
+                "[{}] Completion marker unavailable for '{}': {}",
+                log_scope,
+                command,
+                done_err
+            );
+            format!("{}{}", start, cmd_nl)
+        }
+        (Err(start_err), Err(done_err)) => {
+            tracing::debug!(
+                "[{}] Start+completion markers unavailable for '{}': start={}, done={}",
+                log_scope,
+                command,
+                start_err,
+                done_err
+            );
+            cmd_nl
+        }
+    }
+}
+
 async fn execute_command_in_exec_channel(
     session_id: &str,
     command: &str,
@@ -1412,16 +1546,16 @@ async fn execute_tools_and_save(
                                     timeout
                                 );
 
-                                let cmd_nl = format!("{}\n", cmd);
+                                let input_payload =
+                                    build_recording_input_payload(ssh_id, cmd, "execute_tools")
+                                        .await;
+
                                 if let Err(e) =
-                                    SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await
+                                    SSHClient::send_input(ssh_id, input_payload.as_bytes()).await
                                 {
                                     let _ = SSHClient::stop_command_recording(ssh_id).await;
                                     return Err(format!("Failed to send command: {}", e));
                                 }
-
-                                let marker = "\x1b\x1b\n";
-                                let _ = SSHClient::send_input(ssh_id, marker.as_bytes()).await;
 
                                 let mut interval =
                                     tokio::time::interval(tokio::time::Duration::from_millis(100));
@@ -1429,6 +1563,7 @@ async fn execute_tools_and_save(
                                 let timeout_ms = timeout * 1000;
                                 let mut completion_detected = false;
                                 let mut timed_out = false;
+                                let mut start_marker_seen = false;
 
                                 loop {
                                     if cancellation_token.is_cancelled() {
@@ -1437,6 +1572,13 @@ async fn execute_tools_and_save(
                                     }
                                     interval.tick().await;
                                     elapsed += 100;
+
+                                    if !start_marker_seen {
+                                        start_marker_seen =
+                                            SSHClient::is_recording_start_marker_seen(ssh_id)
+                                                .await
+                                                .unwrap_or(false);
+                                    }
 
                                     let is_completed =
                                         SSHClient::check_command_completed(ssh_id).await?;
@@ -1450,6 +1592,16 @@ async fn execute_tools_and_save(
                                         break;
                                     }
 
+                                    if elapsed >= START_MARKER_EXPECT_MS && !start_marker_seen {
+                                        tracing::warn!(
+                                            "[execute_tools] Start marker not observed within {}ms for command '{}'; treating foreground channel as stalled",
+                                            START_MARKER_EXPECT_MS,
+                                            cmd
+                                        );
+                                        timed_out = true;
+                                        break;
+                                    }
+
                                     if elapsed >= timeout_ms {
                                         tracing::warn!(
                                             "[execute_tools] Timeout reached at {}ms for command '{}'",
@@ -1458,6 +1610,28 @@ async fn execute_tools_and_save(
                                         );
                                         timed_out = true;
                                         break;
+                                    }
+                                }
+
+                                if timed_out && !completion_detected {
+                                    let recovered = try_recover_terminal_after_timeout(
+                                        ssh_id,
+                                        cmd,
+                                        "execute_tools",
+                                    )
+                                    .await;
+                                    if !recovered {
+                                        tracing::warn!(
+                                            "[execute_tools] Terminal not recovered within {}ms grace after timeout for command '{}'",
+                                            TIMEOUT_RECOVERY_GRACE_MS,
+                                            cmd
+                                        );
+                                        let _ = try_reconnect_terminal_after_timeout(
+                                            ssh_id,
+                                            cmd,
+                                            "execute_tools",
+                                        )
+                                        .await;
                                     }
                                 }
 
@@ -1849,31 +2023,84 @@ pub fn run_ai_turn(
         let reasoning_end_event = format!("ai-reasoning-end-{}", session_id);
         let error_event = format!("ai-error-{}", session_id);
 
-        while let Some(event_result) = stream.next().await {
-            if cancellation_token.is_cancelled() {
-                flush_think_parser_remainder(
-                    &window,
-                    &response_event,
-                    &reasoning_event,
-                    &reasoning_end_event,
-                    &mut think_parser_buffer,
-                    in_think_block,
-                    &mut full_content,
-                    &mut full_reasoning,
-                    &mut response_emit_buffer,
-                    &mut reasoning_emit_buffer,
-                    &mut has_pending_reasoning,
-                    &mut last_emit_at,
-                )?;
-                flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
-                if has_pending_reasoning {
-                    window
-                        .emit(&reasoning_end_event, "end")
-                        .map_err(|e| e.to_string())?;
+        loop {
+            let next_event = tokio::select! {
+                _ = cancellation_token.cancelled() => {
+                    flush_think_parser_remainder(
+                        &window,
+                        &response_event,
+                        &reasoning_event,
+                        &reasoning_end_event,
+                        &mut think_parser_buffer,
+                        in_think_block,
+                        &mut full_content,
+                        &mut full_reasoning,
+                        &mut response_emit_buffer,
+                        &mut reasoning_emit_buffer,
+                        &mut has_pending_reasoning,
+                        &mut last_emit_at,
+                    )?;
+                    flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                    flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                    if has_pending_reasoning {
+                        window
+                            .emit(&reasoning_end_event, "end")
+                            .map_err(|e| e.to_string())?;
+                    }
+                    return Err("CANCELLED".to_string());
                 }
-                return Err("CANCELLED".to_string());
-            }
+                maybe_event = tokio::time::timeout(
+                    Duration::from_secs(AI_STREAM_IDLE_TIMEOUT_SECS),
+                    stream.next()
+                ) => {
+                    match maybe_event {
+                        Ok(event) => event,
+                        Err(_) => {
+                            flush_think_parser_remainder(
+                                &window,
+                                &response_event,
+                                &reasoning_event,
+                                &reasoning_end_event,
+                                &mut think_parser_buffer,
+                                in_think_block,
+                                &mut full_content,
+                                &mut full_reasoning,
+                                &mut response_emit_buffer,
+                                &mut reasoning_emit_buffer,
+                                &mut has_pending_reasoning,
+                                &mut last_emit_at,
+                            )?;
+                            flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                            flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                            if has_pending_reasoning {
+                                window
+                                    .emit(&reasoning_end_event, "end")
+                                    .map_err(|e| e.to_string())?;
+                            }
+
+                            let err_msg = format!(
+                                "AI stream stalled for {} seconds without new events.",
+                                AI_STREAM_IDLE_TIMEOUT_SECS
+                            );
+                            tracing::warn!(
+                                "[AI] {} session_id={}, pending_tool_fragments={}",
+                                err_msg,
+                                session_id,
+                                accumulated_tool_calls.len()
+                            );
+                            window
+                                .emit(&error_event, err_msg.clone())
+                                .map_err(|e| e.to_string())?;
+                            return Err(err_msg);
+                        }
+                    }
+                }
+            };
+
+            let Some(event_result) = next_event else {
+                break;
+            };
+
             match event_result {
                 Ok(event) => match event {
                     ChatStreamEvent::Chunk(chunk) => {
@@ -2869,23 +3096,29 @@ pub async fn run_in_terminal(
 
     SSHClient::start_command_recording(&session_id).await?;
 
-    let cmd_nl = format!("{}\n", command);
-    if let Err(e) = SSHClient::send_input(&session_id, cmd_nl.as_bytes()).await {
+    let input_payload =
+        build_recording_input_payload(&session_id, &command, "run_in_terminal").await;
+
+    if let Err(e) = SSHClient::send_input(&session_id, input_payload.as_bytes()).await {
         let _ = SSHClient::stop_command_recording(&session_id).await;
         return Err(format!("Failed to send command: {}", e));
     }
-
-    let marker = "\x1b\x1b\n";
-    let _ = SSHClient::send_input(&session_id, marker.as_bytes()).await;
 
     let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
     let mut elapsed = 0u64;
     let mut completion_detected = false;
     let mut timed_out = false;
+    let mut start_marker_seen = false;
 
     loop {
         interval.tick().await;
         elapsed += 100;
+
+        if !start_marker_seen {
+            start_marker_seen = SSHClient::is_recording_start_marker_seen(&session_id)
+                .await
+                .unwrap_or(false);
+        }
 
         match SSHClient::check_command_completed(&session_id).await {
             Ok(true) => {
@@ -2896,9 +3129,33 @@ pub async fn run_in_terminal(
             Err(_) => {}
         }
 
+        if elapsed >= START_MARKER_EXPECT_MS && !start_marker_seen {
+            tracing::warn!(
+                "[run_in_terminal] Start marker not observed within {}ms for '{}'; treating foreground channel as stalled",
+                START_MARKER_EXPECT_MS,
+                command
+            );
+            timed_out = true;
+            break;
+        }
+
         if elapsed >= timeout_ms {
             timed_out = true;
             break;
+        }
+    }
+
+    if timed_out && !completion_detected {
+        let recovered =
+            try_recover_terminal_after_timeout(&session_id, &command, "run_in_terminal").await;
+        if !recovered {
+            tracing::warn!(
+                "[run_in_terminal] Terminal not recovered within {}ms grace after timeout for '{}'",
+                TIMEOUT_RECOVERY_GRACE_MS,
+                command
+            );
+            let _ = try_reconnect_terminal_after_timeout(&session_id, &command, "run_in_terminal")
+                .await;
         }
     }
 
@@ -3063,7 +3320,21 @@ pub async fn generate_session_title(
         .stream_chat(&channel, &model, title_messages, None, proxy)
         .await?;
     let mut title = String::new();
-    while let Some(event_result) = stream.next().await {
+    loop {
+        let next_event = tokio::time::timeout(
+            Duration::from_secs(AI_STREAM_IDLE_TIMEOUT_SECS),
+            stream.next(),
+        )
+        .await
+        .map_err(|_| {
+            format!(
+                "AI title stream stalled for {} seconds.",
+                AI_STREAM_IDLE_TIMEOUT_SECS
+            )
+        })?;
+        let Some(event_result) = next_event else {
+            break;
+        };
         match event_result {
             Ok(ChatStreamEvent::Chunk(chunk)) => {
                 title.push_str(&chunk.content);

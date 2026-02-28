@@ -4,13 +4,20 @@ use crate::ssh_manager::handler::ClientHandler;
 use base64::prelude::*;
 use lazy_static::lazy_static;
 use russh::client;
+use russh_keys;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use tokio::net::lookup_host;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+
+const COMPLETION_MARKER_PREFIX: &str = "RESH_CMD_DONE_";
+const START_MARKER_PREFIX: &str = "RESH_CMD_START_";
+const COMPLETION_MARKER_HISTORY_LIMIT: usize = 24;
+const PROMPT_DETECTION_TAIL_BYTES: usize = 4096;
+const PROMPT_MATCH_STREAK_REQUIRED: u8 = 2;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectParams {
@@ -48,7 +55,7 @@ struct SessionData {
     session: Arc<russh::client::Handle<ClientHandler>>,
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
     config: ConnectParams,
-    tx: mpsc::Sender<(String, Vec<u8>)>,
+    tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
     cols: u32,
     rows: u32,
     terminal_buffer: String,
@@ -56,9 +63,14 @@ struct SessionData {
     command_recorder: Option<String>,
     last_output_len: usize,
     recording_prompt: Option<String>,
+    recording_start_marker: Option<String>,
+    recording_completion_marker: Option<String>,
+    recent_completion_markers: VecDeque<String>,
     command_finished: bool,
     last_exit_code: Option<i32>,
     last_completion_check_state: Option<CompletionCheckState>,
+    last_completion_probe_recorder_len: usize,
+    prompt_match_streak: u8,
     pub system_info: Option<SystemInfo>,
 }
 
@@ -104,7 +116,7 @@ impl SSHClient {
 
     pub async fn connect(
         params: ConnectParams,
-        tx: mpsc::Sender<(String, Vec<u8>)>,
+        tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
     ) -> Result<String, String> {
         let session_id = uuid::Uuid::new_v4().to_string();
         let initial_cols = 80;
@@ -136,9 +148,14 @@ impl SSHClient {
                     command_recorder: None,
                     last_output_len: 0,
                     recording_prompt: None,
+                    recording_start_marker: None,
+                    recording_completion_marker: None,
+                    recent_completion_markers: VecDeque::new(),
                     command_finished: false,
                     last_exit_code: None,
                     last_completion_check_state: None,
+                    last_completion_probe_recorder_len: 0,
+                    prompt_match_streak: 0,
                     system_info: None,
                 },
             );
@@ -150,7 +167,7 @@ impl SSHClient {
     async fn establish_connection(
         session_id: String,
         params: &ConnectParams,
-        tx: mpsc::Sender<(String, Vec<u8>)>,
+        tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
         cols: u32,
         rows: u32,
     ) -> Result<
@@ -207,17 +224,15 @@ impl SSHClient {
 
         let mut session = if let Some(p) = proxy_for_direct_target {
             info!("[SSH] Using {} proxy: {}:{}", p.proxy_type, p.host, p.port);
-            let _ = tx
-                .send((
-                    session_id.clone(),
-                    format!(
-                        "Connecting via {} proxy {}:{}...\r\n",
-                        p.proxy_type, p.host, p.port
-                    )
-                    .as_bytes()
-                    .to_vec(),
-                ))
-                .await;
+            let _ = tx.send((
+                session_id.clone(),
+                format!(
+                    "Connecting via {} proxy {}:{}...\r\n",
+                    p.proxy_type, p.host, p.port
+                )
+                .as_bytes()
+                .to_vec(),
+            ));
             if p.proxy_type == "socks5" {
                 use tokio_socks::tcp::Socks5Stream;
                 let has_auth = p.username.as_ref().map(|u| !u.is_empty()).unwrap_or(false);
@@ -286,12 +301,10 @@ impl SSHClient {
                 "[SSH] Using jumphost: {}:{} as {}",
                 j.host, j.port, j.username
             );
-            let _ = tx
-                .send((
-                    session_id.clone(),
-                    "Connecting to jump host...\r\n".as_bytes().to_vec(),
-                ))
-                .await;
+            let _ = tx.send((
+                session_id.clone(),
+                "Connecting to jump host...\r\n".as_bytes().to_vec(),
+            ));
 
             let jh_handler = ClientHandler::new();
 
@@ -302,17 +315,15 @@ impl SSHClient {
                     p.proxy_type, p.host, p.port, j.host, j.port
                 );
                 info!("[SSH] Target server: {}:{}", params.host, params.port);
-                let _ = tx
-                    .send((
-                        session_id.clone(),
-                        format!(
-                            "Connecting via {} proxy {}:{} to jumphost {}:{}...\r\n",
-                            p.proxy_type, p.host, p.port, j.host, j.port
-                        )
-                        .as_bytes()
-                        .to_vec(),
-                    ))
-                    .await;
+                let _ = tx.send((
+                    session_id.clone(),
+                    format!(
+                        "Connecting via {} proxy {}:{} to jumphost {}:{}...\r\n",
+                        p.proxy_type, p.host, p.port, j.host, j.port
+                    )
+                    .as_bytes()
+                    .to_vec(),
+                ));
 
                 if p.proxy_type == "socks5" {
                     info!("[SSH] Attempting SOCKS5 connection to jumphost via proxy...");
@@ -443,12 +454,10 @@ impl SSHClient {
             };
 
             info!("[SSH] Connected to jumphost successfully, now authenticating...");
-            let _ = tx
-                .send((
-                    session_id.clone(),
-                    "Authenticating jump host...\r\n".as_bytes().to_vec(),
-                ))
-                .await;
+            let _ = tx.send((
+                session_id.clone(),
+                "Authenticating jump host...\r\n".as_bytes().to_vec(),
+            ));
             info!(
                 "[SSH] Jumphost auth: username={}, password={}, private_key={}",
                 j.username,
@@ -473,14 +482,12 @@ impl SSHClient {
                 "[SSH] Opening tunnel to target {}:{}",
                 params.host, params.port
             );
-            let _ = tx
-                .send((
-                    session_id.clone(),
-                    format!("Tunneling to {}:{}...\r\n", params.host, params.port)
-                        .as_bytes()
-                        .to_vec(),
-                ))
-                .await;
+            let _ = tx.send((
+                session_id.clone(),
+                format!("Tunneling to {}:{}...\r\n", params.host, params.port)
+                    .as_bytes()
+                    .to_vec(),
+            ));
             let channel = jh_session
                 .channel_open_direct_tcpip(&params.host, params.port as u32, "127.0.0.1", 22222)
                 .await
@@ -501,14 +508,12 @@ impl SSHClient {
             e.to_string()
         })?;
 
-        let _ = tx
-            .send((
-                session_id.clone(),
-                format!("Authenticating as {}...\r\n", params.username)
-                    .as_bytes()
-                    .to_vec(),
-            ))
-            .await;
+        let _ = tx.send((
+            session_id.clone(),
+            format!("Authenticating as {}...\r\n", params.username)
+                .as_bytes()
+                .to_vec(),
+        ));
         Self::authenticate_session(
             &mut session,
             &params.username,
@@ -558,56 +563,20 @@ impl SSHClient {
                 username,
                 passphrase.is_some()
             );
-            let key = russh::keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(
+            let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(
                 |e| {
                     error!("[SSH] Failed to decode private key: {}", e);
                     format!("Failed to decode private key: {}", e)
                 },
             )?;
-
-            let key = Arc::new(key);
-            let mut hash_candidates = vec![None];
-
-            if key.algorithm().is_rsa() {
-                hash_candidates.clear();
-                match session.best_supported_rsa_hash().await {
-                    Ok(Some(hash_alg)) => hash_candidates.push(hash_alg),
-                    Ok(None) => {}
-                    Err(e) => {
-                        warn!(
-                            "[SSH] Failed to query server RSA signature algorithms, using fallback order: {}",
-                            e
-                        );
-                    }
+            let key_pair = Arc::new(key);
+            match session.authenticate_publickey(username, key_pair).await {
+                Ok(true) => {
+                    authenticated = true;
+                    info!("[SSH] Publickey authentication successful.");
                 }
-
-                for candidate in [
-                    Some(russh::keys::HashAlg::Sha512),
-                    Some(russh::keys::HashAlg::Sha256),
-                    None,
-                ] {
-                    if !hash_candidates.contains(&candidate) {
-                        hash_candidates.push(candidate);
-                    }
-                }
-            }
-
-            for hash_alg in hash_candidates {
-                let key_pair = russh::keys::PrivateKeyWithHashAlg::new(key.clone(), hash_alg);
-                match session.authenticate_publickey(username, key_pair).await {
-                    Ok(result) if result.success() => {
-                        authenticated = true;
-                        info!("[SSH] Publickey authentication successful.");
-                        break;
-                    }
-                    Ok(_) => warn!(
-                        "[SSH] Publickey authentication rejected{}.",
-                        hash_alg
-                            .map(|alg| format!(" (rsa hash: {:?})", alg))
-                            .unwrap_or_default()
-                    ),
-                    Err(e) => error!("[SSH] Publickey authentication error: {}", e),
-                }
+                Ok(false) => warn!("[SSH] Publickey authentication rejected."),
+                Err(e) => error!("[SSH] Publickey authentication error: {}", e),
             }
         }
 
@@ -615,11 +584,11 @@ impl SSHClient {
             if let Some(pwd) = password {
                 info!("[SSH] Attempting password auth for user: '{}'...", username);
                 match session.authenticate_password(username, &pwd).await {
-                    Ok(result) if result.success() => {
+                    Ok(true) => {
                         authenticated = true;
                         info!("[SSH] Password authentication successful.");
                     }
-                    Ok(_) => warn!("[SSH] Password authentication failed."),
+                    Ok(false) => warn!("[SSH] Password authentication failed."),
                     Err(e) => error!("[SSH] Password authentication error: {}", e),
                 }
             }
@@ -684,14 +653,12 @@ impl SSHClient {
         SftpManager::remove_session(session_id).await;
 
         // Notify user about reconnection attempt
-        let _ = tx
-            .send((
-                session_id.to_string(),
-                "\r\n[Resh] Connection lost. Reconnecting...\r\n"
-                    .as_bytes()
-                    .to_vec(),
-            ))
-            .await;
+        let _ = tx.send((
+            session_id.to_string(),
+            "\r\n[Resh] Connection lost. Reconnecting...\r\n"
+                .as_bytes()
+                .to_vec(),
+        ));
 
         match Self::establish_connection(session_id.to_string(), &config, tx.clone(), cols, rows)
             .await
@@ -707,8 +674,13 @@ impl SSHClient {
                     data.command_recorder = None;
                     data.last_output_len = 0;
                     data.recording_prompt = None;
+                    data.recording_start_marker = None;
+                    data.recording_completion_marker = None;
+                    data.recent_completion_markers.clear();
                     data.command_finished = false;
                     data.last_completion_check_state = None;
+                    data.last_completion_probe_recorder_len = 0;
+                    data.prompt_match_streak = 0;
                     info!("[SSH] Reconnection successful for {}", session_id);
                     Ok(())
                 } else {
@@ -716,14 +688,12 @@ impl SSHClient {
                 }
             }
             Err(e) => {
-                let _ = tx
-                    .send((
-                        session_id.to_string(),
-                        format!("\r\n[Resh] Reconnection failed: {}\r\n", e)
-                            .as_bytes()
-                            .to_vec(),
-                    ))
-                    .await;
+                let _ = tx.send((
+                    session_id.to_string(),
+                    format!("\r\n[Resh] Reconnection failed: {}\r\n", e)
+                        .as_bytes()
+                        .to_vec(),
+                ));
                 Err(e)
             }
         }
@@ -805,9 +775,28 @@ impl SSHClient {
             session_data.last_output_len = session_data.terminal_buffer.len();
             session_data.recording_prompt =
                 Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
+            let start_marker = format!("{}{}", START_MARKER_PREFIX, uuid::Uuid::new_v4().simple());
+            let completion_marker = format!(
+                "{}{}",
+                COMPLETION_MARKER_PREFIX,
+                uuid::Uuid::new_v4().simple()
+            );
+            session_data.recording_start_marker = Some(start_marker.clone());
+            session_data.recording_completion_marker = Some(completion_marker.clone());
+            session_data
+                .recent_completion_markers
+                .push_back(start_marker);
+            session_data
+                .recent_completion_markers
+                .push_back(completion_marker);
+            while session_data.recent_completion_markers.len() > COMPLETION_MARKER_HISTORY_LIMIT {
+                session_data.recent_completion_markers.pop_front();
+            }
             session_data.command_finished = false;
             session_data.last_exit_code = None;
             session_data.last_completion_check_state = None;
+            session_data.last_completion_probe_recorder_len = 0;
+            session_data.prompt_match_streak = 0;
 
             Ok(())
         } else {
@@ -815,31 +804,105 @@ impl SSHClient {
         }
     }
 
+    /// Build a queued marker command for completion detection.
+    /// The marker is removed from terminal display output before emitting to frontend.
+    pub async fn get_recording_start_marker_command(session_id: &str) -> Result<String, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            if let Some(marker) = session_data.recording_start_marker.as_ref() {
+                Ok(format!("printf '\\033]633;{}\\007'\n", marker))
+            } else {
+                Err("No active command recording start marker".to_string())
+            }
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Build a queued done-marker command for completion detection.
+    /// The marker is removed from terminal display output before emitting to frontend.
+    pub async fn get_recording_marker_command(session_id: &str) -> Result<String, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            if let Some(marker) = session_data.recording_completion_marker.as_ref() {
+                Ok(format!("printf '\\033]633;{}\\007'\n", marker))
+            } else {
+                Err("No active command recording marker".to_string())
+            }
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
     /// Extract the last N characters from buffer for prompt suffix comparison
     fn extract_prompt_suffix(buffer: &str, n: usize) -> Option<String> {
-        let trimmed = buffer.trim_end();
+        if buffer.is_empty() {
+            return None;
+        }
+
+        let tail = if buffer.len() > PROMPT_DETECTION_TAIL_BYTES {
+            let mut start = buffer.len() - PROMPT_DETECTION_TAIL_BYTES;
+            while start < buffer.len() && !buffer.is_char_boundary(start) {
+                start += 1;
+            }
+            &buffer[start..]
+        } else {
+            buffer
+        };
+
+        let normalized =
+            String::from_utf8_lossy(&strip_ansi_escapes::strip(tail.as_bytes())).to_string();
+        let trimmed = normalized.trim_end();
         if trimmed.is_empty() {
             return None;
         }
-        let lines: Vec<&str> = trimmed.lines().collect();
-        if let Some(last_line) = lines.last() {
-            let trimmed_line = last_line.trim_end();
-            if trimmed_line.len() >= n {
-                Some(trimmed_line[trimmed_line.len() - n..].to_string())
-            } else {
-                Some(trimmed_line.to_string())
-            }
-        } else {
+
+        let last_line = trimmed
+            .rsplit('\n')
+            .next()
+            .unwrap_or(trimmed)
+            .trim_end_matches('\r')
+            .trim_end();
+        if last_line.is_empty() {
             None
+        } else {
+            Some(
+                last_line
+                    .chars()
+                    .rev()
+                    .take(n)
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect(),
+            )
         }
+    }
+
+    fn strip_completion_marker_artifacts(text: &str, marker: &str) -> String {
+        let osc_bell = format!("\x1b]633;{}\x07", marker);
+        let osc_st = format!("\x1b]633;{}\x1b\\", marker);
+        let cmd_echo_single = format!("printf '\\033]633;{}\\007'", marker);
+        let cmd_echo_double = format!("printf \"\\033]633;{}\\007\"", marker);
+        text.replace(&osc_bell, "")
+            .replace(&osc_st, "")
+            .replace(&cmd_echo_single, "")
+            .replace(&cmd_echo_double, "")
     }
 
     /// Stop recording and get the recorded output since start_command_recording was called
     pub async fn stop_command_recording(session_id: &str) -> Result<String, String> {
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
-            let recorded = session_data.command_recorder.take().unwrap_or_default();
+            let mut recorded = session_data.command_recorder.take().unwrap_or_default();
+            for marker in session_data.recent_completion_markers.iter() {
+                recorded = Self::strip_completion_marker_artifacts(&recorded, marker);
+            }
+            session_data.recording_start_marker = None;
+            session_data.recording_completion_marker = None;
             session_data.last_completion_check_state = None;
+            session_data.last_completion_probe_recorder_len = 0;
+            session_data.prompt_match_streak = 0;
             Ok(recorded)
         } else {
             Err("Session not found".to_string())
@@ -856,7 +919,20 @@ impl SSHClient {
         }
     }
 
-    /// Check if command execution appears completed (prompt detected or completion marker)
+    pub async fn is_recording_start_marker_seen(session_id: &str) -> Result<bool, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            let recorder = session_data.command_recorder.as_deref().unwrap_or("");
+            Ok(session_data
+                .recording_start_marker
+                .as_ref()
+                .is_some_and(|marker| recorder.contains(marker)))
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    /// Check if command execution appears completed (completion marker or prompt detected).
     pub async fn check_command_completed(session_id: &str) -> Result<bool, String> {
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
@@ -871,27 +947,53 @@ impl SSHClient {
                 let new_content = recorder.as_str();
                 recorder_len = new_content.len();
                 preview = new_content.chars().take(50).collect::<String>();
-
-                // Priority 1: Completion marker detection (pure control chars)
-                // The marker is: \x1b\x1b (double ESC, completely invisible)
-                if new_content.contains("\x1b\x1b") {
+                let marker_completed = session_data
+                    .recording_completion_marker
+                    .as_ref()
+                    .is_some_and(|marker| new_content.contains(marker));
+                if marker_completed {
+                    session_data.prompt_match_streak = 0;
                     CompletionCheckState::CompletedByMarker
-                } else if let Some(recorded) = session_data.recording_prompt.as_ref() {
+                } else if let Some(recorded_prompt) = session_data.recording_prompt.clone() {
                     // Priority 2: Prompt suffix comparison
                     // Record prompt suffix before command, compare after command
                     // Simple and works with any shell/theme
-                    let new_suffix = Self::extract_prompt_suffix(new_content, 3);
-                    if new_suffix.as_deref() == Some(recorded.as_str()) {
+                    let recorder_suffix = Self::extract_prompt_suffix(new_content, 3);
+                    let terminal_suffix =
+                        Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
+                    let prompt_matched = recorder_suffix.as_deref()
+                        == Some(recorded_prompt.as_str())
+                        || terminal_suffix.as_deref() == Some(recorded_prompt.as_str());
+                    let has_new_output = recorder_len > 0 || current_buffer_len > recording_start;
+
+                    if has_new_output && prompt_matched {
+                        if session_data.last_completion_probe_recorder_len == recorder_len {
+                            session_data.prompt_match_streak =
+                                session_data.prompt_match_streak.saturating_add(1);
+                        } else {
+                            session_data.prompt_match_streak = 1;
+                        }
+                    } else {
+                        session_data.prompt_match_streak = 0;
+                    }
+
+                    if has_new_output
+                        && prompt_matched
+                        && session_data.prompt_match_streak >= PROMPT_MATCH_STREAK_REQUIRED
+                    {
                         CompletionCheckState::CompletedByPrompt
                     } else {
                         CompletionCheckState::Waiting
                     }
                 } else {
+                    session_data.prompt_match_streak = 0;
                     CompletionCheckState::Waiting
                 }
             } else {
+                session_data.prompt_match_streak = 0;
                 CompletionCheckState::NoRecorder
             };
+            session_data.last_completion_probe_recorder_len = recorder_len;
 
             if session_data.last_completion_check_state != Some(state) {
                 tracing::debug!(
@@ -907,6 +1009,47 @@ impl SSHClient {
             }
 
             Ok(state.is_completed())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
+    pub async fn get_command_recording_diagnostics(
+        session_id: &str,
+        tail_chars: usize,
+    ) -> Result<String, String> {
+        let sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get(session_id) {
+            let recorder = session_data.command_recorder.as_deref().unwrap_or("");
+            let start_marker = session_data.recording_start_marker.clone();
+            let marker = session_data.recording_completion_marker.clone();
+            let start_marker_seen = start_marker.as_ref().is_some_and(|m| recorder.contains(m));
+            let marker_seen = marker.as_ref().is_some_and(|m| recorder.contains(m));
+            let recorder_tail: String = recorder
+                .chars()
+                .rev()
+                .take(tail_chars)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            let clean_tail =
+                String::from_utf8_lossy(&strip_ansi_escapes::strip(recorder_tail.as_bytes()))
+                    .to_string();
+
+            Ok(format!(
+                "recorder_len={}, start_marker_set={}, start_marker_seen={}, marker_set={}, marker_seen={}, prompt_expected={:?}, prompt_recorder={:?}, prompt_terminal={:?}, prompt_streak={}, recorder_tail={:?}",
+                recorder.len(),
+                start_marker.is_some(),
+                start_marker_seen,
+                marker.is_some(),
+                marker_seen,
+                session_data.recording_prompt.clone(),
+                Self::extract_prompt_suffix(recorder, 3),
+                Self::extract_prompt_suffix(&session_data.terminal_buffer, 3),
+                session_data.prompt_match_streak,
+                clean_tail
+            ))
         } else {
             Err("Session not found".to_string())
         }
@@ -947,13 +1090,31 @@ impl SSHClient {
         Ok(())
     }
 
+    /// Append raw terminal bytes to command recorder as early as possible at SSH ingress.
+    /// This keeps completion detection independent from frontend emission backpressure.
+    pub async fn append_command_recorder_chunk(session_id: &str, data: &str) -> Result<(), String> {
+        let mut sessions = SESSIONS.lock().await;
+        if let Some(session_data) = sessions.get_mut(session_id) {
+            if let Some(recorder) = session_data.command_recorder.as_mut() {
+                recorder.push_str(data);
+            }
+            Ok(())
+        } else {
+            Err("Session not found".to_string())
+        }
+    }
+
     /// Update the terminal buffer with new data
-    pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<(), String> {
+    pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<String, String> {
         const MAX_BUFFER_SIZE: usize = 100_000;
 
         let mut sessions = SESSIONS.lock().await;
         if let Some(session_data) = sessions.get_mut(session_id) {
-            session_data.terminal_buffer.push_str(data);
+            let mut display_data = data.to_string();
+            for marker in session_data.recent_completion_markers.iter() {
+                display_data = Self::strip_completion_marker_artifacts(&display_data, marker);
+            }
+            session_data.terminal_buffer.push_str(&display_data);
 
             if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
                 let mut cut_off = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
@@ -965,11 +1126,7 @@ impl SSHClient {
                 session_data.terminal_buffer = session_data.terminal_buffer[cut_off..].to_string();
             }
 
-            if let Some(recorder) = session_data.command_recorder.as_mut() {
-                recorder.push_str(data);
-            }
-
-            Ok(())
+            Ok(display_data)
         } else {
             Err("Session not found".to_string())
         }
