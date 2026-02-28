@@ -426,7 +426,7 @@ export const locales = {
     about: {
       tabTitle: "About",
       description:
-        "A modern, secure multi-tab SSH client built with Tauri 2 + React.",
+        "A modern, secure multi-tab SSH client built with Tauri 2 + React 19.",
       version: "Version",
       author: "Author",
       github: "GitHub Repository",
@@ -856,7 +856,7 @@ export const locales = {
     about: {
       tabTitle: "关于",
       description:
-        "一款基于 Tauri 2 + React 构建的现代、安全的多标签 SSH 客户端。",
+        "一款基于 Tauri 2 + React 19 构建的现代、安全的多标签 SSH 客户端。",
       version: "版本",
       author: "作者",
       github: "GitHub 仓库",

@@ -450,7 +450,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 p-6 overflow-y-auto bg-[var(--bg-secondary)]">
+          <div
+            className={`flex-1 p-6 bg-[var(--bg-secondary)] ${activeTab === "about" ? "overflow-y-hidden" : "overflow-y-auto"}`}
+          >
             {error && (
               <div className="bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.2)] text-[var(--color-danger)] px-4 py-3 rounded mb-5 text-[13px]">
                 {error}
