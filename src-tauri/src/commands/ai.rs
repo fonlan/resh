@@ -418,15 +418,30 @@ const THINK_OPEN_TAG: &str = "<think>";
 const THINK_CLOSE_TAG: &str = "</think>";
 
 fn trailing_tag_prefix_len(buffer: &str, tag: &str) -> usize {
-    if buffer.is_empty() {
+    if buffer.is_empty() || tag.is_empty() {
         return 0;
     }
 
     let max_len = buffer.len().min(tag.len().saturating_sub(1));
-    (1..=max_len)
-        .rev()
-        .find(|&len| buffer.ends_with(&tag[..len]))
-        .unwrap_or(0)
+    if max_len == 0 {
+        return 0;
+    }
+
+    let mut char_boundary_prefix_lens: Vec<usize> = tag
+        .char_indices()
+        .skip(1)
+        .map(|(idx, _)| idx)
+        .filter(|&idx| idx <= max_len)
+        .collect();
+    char_boundary_prefix_lens.reverse();
+
+    for len in char_boundary_prefix_lens {
+        if buffer.ends_with(&tag[..len]) {
+            return len;
+        }
+    }
+
+    0
 }
 
 fn extract_think_segments(
@@ -3348,8 +3363,8 @@ pub async fn generate_session_title(
         .trim_matches('"')
         .trim_matches('\'')
         .to_string();
-    let title = if title.len() > 50 {
-        format!("{}...", &title[..47])
+    let title = if title.chars().count() > 50 {
+        format!("{}...", title.chars().take(47).collect::<String>())
     } else {
         title
     };
