@@ -163,8 +163,9 @@ async fn main() {
 
             // Fallback: avoid permanently hidden window if ready event is missed.
             let app_handle_for_fallback = app.handle().clone();
+            let fallback_delay_ms = if cfg!(debug_assertions) { 30000 } else { 8000 };
             tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(8000)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(fallback_delay_ms)).await;
                 if let Some(window) = app_handle_for_fallback.get_webview_window("main") {
                     if !window.is_visible().unwrap_or(false) {
                         let _ = window.show();

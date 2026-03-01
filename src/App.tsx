@@ -9,14 +9,6 @@ const MainWindow = lazy(() =>
   })),
 )
 
-const AppReadySignal = () => {
-  useEffect(() => {
-    void emit("resh-app-ready").catch(() => {})
-  }, [])
-
-  return null
-}
-
 const NON_TEXT_INPUT_TYPES = new Set([
   "button",
   "checkbox",
@@ -57,6 +49,10 @@ function App() {
   useTheme(theme)
 
   useEffect(() => {
+    void emit("resh-app-ready").catch(() => {})
+  }, [])
+
+  useEffect(() => {
     const handleGlobalContextMenu = (event: MouseEvent) => {
       if (isNativeContextMenuAllowedTarget(event.target)) {
         return
@@ -78,7 +74,6 @@ function App() {
   return (
     <Suspense fallback={null}>
       <div className="w-full h-screen flex flex-col">
-        <AppReadySignal />
         <MainWindow />
       </div>
     </Suspense>

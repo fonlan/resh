@@ -106,7 +106,6 @@ npm run tauri-build      # Build production Tauri app
 npm run tauri            # Direct access to Tauri CLI
 ```
 
-Startup keeps `main` hidden until the frontend emits ready, then shows the window to avoid initial white-flash exposure.
 
 ### Adding New Features
 
