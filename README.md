@@ -106,11 +106,7 @@ npm run tauri-build      # Build production Tauri app
 npm run tauri            # Direct access to Tauri CLI
 ```
 
-### Development Workflow
-
-1. Run `npm run tauri-dev` for hot-reload development
-2. Frontend changes auto-reload via Vite
-3. Rust changes require restart (Cargo rebuilds automatically)
+Startup keeps `main` hidden until the frontend emits ready, then shows the window to avoid initial white-flash exposure.
 
 ### Adding New Features
 

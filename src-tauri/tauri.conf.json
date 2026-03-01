@@ -28,18 +28,6 @@
         "label": "main",
         "visible": false,
         "dragDropEnabled": false
-      },
-      {
-        "title": "Resh SSH Client",
-        "width": 420,
-        "height": 240,
-        "resizable": false,
-        "fullscreen": false,
-        "decorations": false,
-        "label": "splash",
-        "center": true,
-        "alwaysOnTop": true,
-        "url": "tauri-splash.html"
       }
     ]
   },
