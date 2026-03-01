@@ -134,6 +134,7 @@ async fn main() {
                 ai_manager: resh::ai::manager::AiManager::new(),
                 sftp_edit_manager: SftpEditManager::new(app.handle().clone()),
             });
+            app.manage(state.clone());
 
             // Apply window state
             if let Some(window) = app.get_webview_window("main") {
@@ -158,6 +159,9 @@ async fn main() {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
+                if let Some(splash) = app_handle.get_webview_window("splash") {
+                    let _ = splash.close();
+                }
             });
 
             // Fallback: ensure window is shown even if ready event is missed
@@ -171,7 +175,14 @@ async fn main() {
                 }
             });
 
-            app.manage(state.clone());
+            // Final fallback: close splash after an upper bound timeout
+            let app_handle_for_splash_fallback = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(8000)).await;
+                if let Some(splash) = app_handle_for_splash_fallback.get_webview_window("splash") {
+                    let _ = splash.close();
+                }
+            });
 
             // Listen for window events to save state
             if let Some(window) = app.get_webview_window("main") {

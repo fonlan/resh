@@ -6,7 +6,7 @@ use crate::db::DatabaseManager;
 use crate::master_password::MasterPasswordManager;
 use crate::sftp_manager::edit::SftpEditManager;
 use std::sync::Arc;
-use tauri::{Emitter, State, Window};
+use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tokio::sync::Mutex;
 
 use dashmap::DashMap;
@@ -22,10 +22,23 @@ pub struct AppState {
     pub sftp_edit_manager: SftpEditManager,
 }
 
+fn resolve_app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let default_app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    Ok(default_app_data_dir
+        .parent()
+        .map(|p| p.join("Resh"))
+        .unwrap_or_else(|| default_app_data_dir.join("Resh")))
+}
+
 #[tauri::command]
-pub async fn get_config(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
-    let config = state.config.lock().await;
-    Ok(config.clone())
+pub async fn get_config(app: AppHandle) -> Result<Config, String> {
+    let app_data_dir = resolve_app_data_dir(&app)?;
+    let config_manager = ConfigManager::new(app_data_dir);
+    config_manager.load_local_config()
 }
 
 #[tauri::command]
@@ -187,12 +200,6 @@ pub async fn log_event(level: String, message: String) {
 }
 
 #[tauri::command]
-pub async fn get_app_data_dir(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    Ok(state
-        .config_manager
-        .local_config_path()
-        .parent()
-        .unwrap()
-        .to_string_lossy()
-        .to_string())
+pub async fn get_app_data_dir(app: AppHandle) -> Result<String, String> {
+    Ok(resolve_app_data_dir(&app)?.to_string_lossy().to_string())
 }

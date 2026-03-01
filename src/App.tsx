@@ -9,16 +9,13 @@ const MainWindow = lazy(() =>
   })),
 )
 
-const AppBootFallback = ({ message }: { message: string }) => (
-  <div className="w-full h-screen flex items-center justify-center bg-[var(--bg-primary)]">
-    <div className="px-5 py-4 rounded-xl border border-[var(--glass-border)] bg-[var(--bg-secondary)] text-center">
-      <div className="text-sm font-semibold text-[var(--text-primary)]">
-        Resh
-      </div>
-      <div className="text-xs text-[var(--text-secondary)] mt-1">{message}</div>
-    </div>
-  </div>
-)
+const AppReadySignal = () => {
+  useEffect(() => {
+    void emit("resh-app-ready").catch(() => {})
+  }, [])
+
+  return null
+}
 
 const NON_TEXT_INPUT_TYPES = new Set([
   "button",
@@ -60,11 +57,6 @@ function App() {
   useTheme(theme)
 
   useEffect(() => {
-    window.dispatchEvent(new Event("resh-app-ready"))
-    void emit("resh-app-ready").catch(() => {})
-  }, [])
-
-  useEffect(() => {
     const handleGlobalContextMenu = (event: MouseEvent) => {
       if (isNativeContextMenuAllowedTarget(event.target)) {
         return
@@ -80,12 +72,13 @@ function App() {
   }, [])
 
   if (loading) {
-    return <AppBootFallback message="Loading workspace..." />
+    return null
   }
 
   return (
-    <Suspense fallback={<AppBootFallback message="Loading interface..." />}>
+    <Suspense fallback={null}>
       <div className="w-full h-screen flex flex-col">
+        <AppReadySignal />
         <MainWindow />
       </div>
     </Suspense>
