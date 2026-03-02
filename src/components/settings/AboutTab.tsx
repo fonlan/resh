@@ -9,9 +9,35 @@ import {
 } from "lucide-react"
 import { useTranslation } from "../../i18n"
 import { invoke } from "@tauri-apps/api/core"
+import { getVersion } from "@tauri-apps/api/app"
 
 export const AboutTab: React.FC = () => {
   const { t } = useTranslation()
+  const [appVersion, setAppVersion] = React.useState("...")
+
+  React.useEffect(() => {
+    let isMounted = true
+
+    const loadVersion = async () => {
+      try {
+        const version = await getVersion()
+        if (isMounted) {
+          setAppVersion(version)
+        }
+      } catch (err) {
+        console.error("Failed to load app version:", err)
+        if (isMounted) {
+          setAppVersion("Unknown")
+        }
+      }
+    }
+
+    void loadVersion()
+
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   const techStack = [
     "Tauri 2.0",
@@ -60,7 +86,7 @@ export const AboutTab: React.FC = () => {
           Resh
         </h1>
         <div className="font-mono text-[0.8rem] text-zinc-500 bg-white/5 px-3 py-1 rounded-full mt-2 border border-white/10">
-          {t.about.version} 0.1.0
+          {t.about.version} {appVersion}
         </div>
       </div>
 
