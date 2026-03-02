@@ -47,13 +47,13 @@ export const TransferStatusPanel: React.FC = () => {
   }
 
   return (
-    <div className="bg-[var(--sidebar-bg,#1e1e1e)] border-t border-[var(--border-color,#333)] max-h-[200px] overflow-y-auto text-[12px]">
-      <div className="px-3 py-2 font-bold bg-[rgba(0,0,0,0.1)] text-[var(--text-color,#ccc)]">
+    <div className="bg-[var(--sidebar-bg,#1e1e1e)] border-t border-[var(--border-color,#333)] max-h-[200px] text-[12px] flex flex-col">
+      <div className="px-3 py-2 font-bold bg-[rgba(0,0,0,0.1)] text-[var(--text-color,#ccc)] shrink-0">
         <span>
           {t.sftp.transfers} ({tasks.length})
         </span>
       </div>
-      <div className="flex flex-col">
+      <div className="flex flex-col overflow-y-auto min-h-0">
         {tasks.map((task) => (
           <div
             key={task.task_id}
