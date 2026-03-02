@@ -38,6 +38,9 @@ pub struct Server {
     #[serde(alias = "sftpCustomCommands", alias = "sftp_custom_commands")]
     pub sftp_custom_commands: Vec<SftpCustomCommand>,
     #[serde(default)]
+    #[serde(alias = "sftpFavoritePaths", alias = "sftp_favorite_paths")]
+    pub sftp_favorite_paths: Vec<String>,
+    #[serde(default)]
     #[serde(alias = "additionalPrompt", alias = "additional_prompt")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub additional_prompt: Option<String>,

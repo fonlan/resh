@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { createPortal } from "react-dom"
 import {
   X,
   Lock,
@@ -27,6 +28,7 @@ import {
   Edit,
   FileCode,
   Clipboard,
+  Heart,
 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
@@ -41,6 +43,7 @@ import { FormModal } from "./FormModal"
 import FileConflictDialog from "./FileConflictDialog"
 import { useTransferStore } from "../stores/transferStore"
 import type {
+  Config,
   ConflictResolution,
   FileConflict,
   TransferTask,
@@ -52,6 +55,7 @@ interface SFTPSidebarProps {
   onClose: () => void
   isLocked: boolean
   onToggleLock: () => void
+  serverId?: string
   sessionId?: string
   zIndex?: number
 }
@@ -272,16 +276,23 @@ interface SessionState {
   isLoading: boolean
 }
 
+interface FavoriteTarget {
+  serverId: string
+  serverName: string
+  path: string
+}
+
 export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   isOpen,
   onClose,
   isLocked,
   onToggleLock,
+  serverId,
   sessionId,
   zIndex,
 }) => {
   const { t } = useTranslation()
-  const { config } = useConfig()
+  const { config, saveConfig } = useConfig()
   const [width, setWidth] = useState(300)
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -323,6 +334,14 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
 
   const [showSortMenu, setShowSortMenu] = useState(false)
+  const [showFavoritesMenu, setShowFavoritesMenu] = useState(false)
+  const [favoriteError, setFavoriteError] = useState<string | null>(null)
+  const [favoritesMenuPosition, setFavoritesMenuPosition] = useState({
+    top: 0,
+    left: 0,
+    width: 280,
+  })
+  const favoritesButtonRef = useRef<HTMLButtonElement>(null)
 
   const [contextMenu, setContextMenu] = useState<{
     x: number
@@ -383,6 +402,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     }, 250)
   }, [isLocked])
 
+  useEffect(() => {
+    setShowFavoritesMenu(false)
+    setFavoriteError(null)
+  }, [serverId, sessionId])
+
   const updateSession = useCallback(
     (
       sid: string,
@@ -417,10 +441,50 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       ) {
         setShowSortMenu(false)
       }
+
+      if (
+        showFavoritesMenu &&
+        !(e.target as Element).closest(".sftp-favorites-menu") &&
+        !(e.target as Element).closest(".sftp-favorites-btn")
+      ) {
+        setShowFavoritesMenu(false)
+      }
     }
     window.addEventListener("click", handleClick)
     return () => window.removeEventListener("click", handleClick)
-  }, [showSortMenu])
+  }, [showSortMenu, showFavoritesMenu])
+
+  const updateFavoritesMenuPosition = useCallback(() => {
+    const button = favoritesButtonRef.current
+    if (!button) {
+      return
+    }
+
+    const rect = button.getBoundingClientRect()
+    const width = Math.max(120, Math.min(360, window.innerWidth - 16))
+    const left = Math.min(
+      Math.max(rect.right - width, 8),
+      Math.max(8, window.innerWidth - width - 8),
+    )
+    const top = Math.min(rect.bottom + 4, Math.max(8, window.innerHeight - 308))
+
+    setFavoritesMenuPosition({ top, left, width })
+  }, [])
+
+  useEffect(() => {
+    if (!showFavoritesMenu) {
+      return
+    }
+
+    updateFavoritesMenuPosition()
+    window.addEventListener("resize", updateFavoritesMenuPosition)
+    window.addEventListener("scroll", updateFavoritesMenuPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateFavoritesMenuPosition)
+      window.removeEventListener("scroll", updateFavoritesMenuPosition, true)
+    }
+  }, [showFavoritesMenu, updateFavoritesMenuPosition])
 
   const getAllExpandedPaths = (nodes: FileEntry[]): Set<string> => {
     const paths = new Set<string>()
@@ -480,9 +544,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             newRootFiles = sortedFiles
           } else {
             const targetPath = path.replace(/\\/g, "/")
+            let updatedTarget = false
             const updateNode = (nodes: FileEntry[]): FileEntry[] => {
               return nodes.map((node) => {
                 if (node.path.replace(/\\/g, "/") === targetPath) {
+                  updatedTarget = true
                   return { ...node, children: sortedFiles, isLoading: false }
                 }
                 if (node.children) {
@@ -491,7 +557,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                 return node
               })
             }
-            newRootFiles = updateNode(session?.rootFiles || [])
+            const updatedTree = updateNode(session?.rootFiles || [])
+            newRootFiles = updatedTarget ? updatedTree : sortedFiles
           }
 
           return {
@@ -500,9 +567,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               ...session,
               rootFiles: newRootFiles,
               currentPath:
-                path === "/" || path === "."
-                  ? path
-                  : session?.currentPath || "/",
+                path === "/" || path === "." ? path : path.replace(/\\/g, "/"),
               isLoading: false,
               sortState: requestedSort,
             },
@@ -1144,6 +1209,98 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     return `${normalizedParentPath}/${normalizedItemName}`
   }
 
+  const normalizeFavoritePaths = useCallback((paths: string[]): string[] => {
+    const deduped = new Set<string>()
+    const result: string[] = []
+
+    paths.forEach((path) => {
+      const normalizedPath = normalizeRemotePath(path)
+      if (deduped.has(normalizedPath)) {
+        return
+      }
+      deduped.add(normalizedPath)
+      result.push(normalizedPath)
+    })
+
+    return result
+  }, [])
+
+  const updateServerFavoritePaths = useCallback(
+    async (
+      targetServerId: string,
+      updater: (paths: string[]) => string[],
+    ): Promise<boolean> => {
+      try {
+        const latestConfig = await invoke<Config>("get_config")
+        const targetServer = latestConfig.servers.find(
+          (server) => server.id === targetServerId,
+        )
+        if (!targetServer) {
+          return false
+        }
+
+        const previousPaths = normalizeFavoritePaths(
+          targetServer.sftpFavoritePaths || [],
+        )
+        const nextPaths = normalizeFavoritePaths(updater(previousPaths))
+        const isUnchanged =
+          previousPaths.length === nextPaths.length &&
+          previousPaths.every((path, index) => path === nextPaths[index])
+
+        if (isUnchanged) {
+          return true
+        }
+
+        const updatedAt = new Date().toISOString()
+        const updatedServers = latestConfig.servers.map((server) =>
+          server.id === targetServerId
+            ? {
+                ...server,
+                sftpFavoritePaths: nextPaths,
+                updatedAt,
+              }
+            : server,
+        )
+
+        await saveConfig({
+          ...latestConfig,
+          servers: updatedServers,
+        })
+
+        return true
+      } catch (error) {
+        console.error("Failed to update favorite paths:", error)
+        return false
+      }
+    },
+    [normalizeFavoritePaths, saveConfig],
+  )
+
+  const favoriteTargets = useMemo<FavoriteTarget[]>(() => {
+    if (!config?.servers) {
+      return []
+    }
+
+    const targets = config.servers.flatMap((server) => {
+      const favoritePaths = normalizeFavoritePaths(
+        server.sftpFavoritePaths || [],
+      )
+      return favoritePaths.map((path) => ({
+        serverId: server.id,
+        serverName: server.name,
+        path,
+      }))
+    })
+
+    return targets.sort((a, b) => {
+      const serverCompare = a.serverName.localeCompare(b.serverName)
+      if (serverCompare !== 0) {
+        return serverCompare
+      }
+      return a.path.localeCompare(b.path)
+    })
+  }, [config?.servers, normalizeFavoritePaths])
+
   const quoteForShell = (input: string): string => {
     return `'${input.replace(/'/g, `'\"'\"'`)}'`
   }
@@ -1261,6 +1418,89 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       subtreeExpandedPaths,
       currentSortState,
     )
+  }
+
+  const handleAddDirectoryFavorite = async () => {
+    if (!contextMenu?.entry || !serverId) return
+    if (!isDirectory(contextMenu.entry)) return
+
+    const favoritePath = normalizeRemotePath(contextMenu.entry.path)
+    await updateServerFavoritePaths(serverId, (paths) => {
+      if (paths.includes(favoritePath)) {
+        return paths
+      }
+      return [...paths, favoritePath]
+    })
+    setFavoriteError(null)
+    handleCloseContextMenu()
+  }
+
+  const handleRemoveFavoritePath = async (
+    targetServerId: string,
+    favoritePath: string,
+  ) => {
+    await updateServerFavoritePaths(targetServerId, (paths) =>
+      paths.filter((path) => normalizeRemotePath(path) !== favoritePath),
+    )
+    setFavoriteError(null)
+  }
+
+  const handleJumpToFavorite = async (favorite: FavoriteTarget) => {
+    if (!serverId || !sessionId) {
+      return
+    }
+
+    if (favorite.serverId !== serverId) {
+      setFavoriteError(
+        t.sftp.favorites.serverMismatch.replace(
+          "{server}",
+          favorite.serverName,
+        ),
+      )
+      return
+    }
+
+    const normalizedPath = normalizeRemotePath(favorite.path)
+    const currentSessionState = sessions[sessionId]
+    const requestedSort = currentSessionState?.sortState || DEFAULT_SORT_STATE
+
+    updateSession(sessionId, { isLoading: true })
+    try {
+      const files = await invoke<FileEntry[]>("sftp_list_dir_sorted", {
+        sessionId,
+        path: normalizedPath,
+        sortType: requestedSort.type,
+        sortOrder: requestedSort.order,
+      })
+
+      setSessions((prev) => {
+        const session = prev[sessionId] || {
+          rootFiles: [],
+          currentPath: "/",
+          sortState: requestedSort,
+          isLoading: false,
+        }
+        return {
+          ...prev,
+          [sessionId]: {
+            ...session,
+            rootFiles: files,
+            currentPath: normalizedPath,
+            sortState: requestedSort,
+            isLoading: false,
+          },
+        }
+      })
+
+      setFavoriteError(null)
+      setShowFavoritesMenu(false)
+    } catch (error) {
+      console.error("Failed to jump to favorite path:", error)
+      updateSession(sessionId, { isLoading: false })
+      setFavoriteError(
+        t.sftp.favorites.pathNotFound.replace("{path}", normalizedPath),
+      )
+    }
   }
 
   const permissionsToOctal = (perm: number | undefined): string => {
@@ -1624,7 +1864,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             <div className="relative">
               <button
                 type="button"
-                className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                className="sftp-sort-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
                 onClick={() => setShowSortMenu(!showSortMenu)}
                 title={t.sftp.tooltips.sort}
               >
@@ -1632,7 +1872,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               </button>
               {showSortMenu && (
                 <div
-                  className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
+                  className="sftp-sort-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
                   style={{
                     position: "absolute",
                     top: "100%",
@@ -1665,6 +1905,83 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                   </button>
                 </div>
               )}
+            </div>
+            <div className="relative">
+              <button
+                ref={favoritesButtonRef}
+                type="button"
+                className="sftp-favorites-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                onClick={() => {
+                  setShowFavoritesMenu((prev) => {
+                    if (!prev) {
+                      updateFavoritesMenuPosition()
+                    }
+                    return !prev
+                  })
+                }}
+                title={t.sftp.tooltips.favorites}
+              >
+                <Heart size={16} />
+              </button>
+              {showFavoritesMenu &&
+                createPortal(
+                  <div
+                    className="sftp-favorites-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] max-h-[300px] p-1 z-[1001] overflow-y-auto backdrop-blur-xl animate-sftp-fade-in"
+                    style={{
+                      top: favoritesMenuPosition.top,
+                      left: favoritesMenuPosition.left,
+                      width: favoritesMenuPosition.width,
+                    }}
+                  >
+                    {favoriteTargets.length === 0 ? (
+                      <div className="px-3 py-2 text-[13px] text-[var(--text-muted)]">
+                        {t.sftp.favorites.empty}
+                      </div>
+                    ) : (
+                      favoriteTargets.map((favorite) => {
+                        const isActiveServerFavorite =
+                          favorite.serverId === serverId
+                        return (
+                          <div
+                            key={`${favorite.serverId}:${favorite.path}`}
+                            className="flex items-center gap-1"
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleJumpToFavorite(favorite)}
+                              className={`flex-1 min-w-0 px-3 py-2 border-0 bg-transparent cursor-pointer rounded text-left transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:translate-x-0.5 ${isActiveServerFavorite ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}
+                              title={favorite.path}
+                            >
+                              <div className="truncate text-[13px] font-medium">
+                                {favorite.path}
+                              </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                void handleRemoveFavoritePath(
+                                  favorite.serverId,
+                                  favorite.path,
+                                )
+                              }}
+                              className="shrink-0 p-1.5 border-0 bg-transparent text-[var(--text-muted)] cursor-pointer rounded transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]"
+                              title={t.sftp.favorites.remove}
+                            >
+                              <Trash size={13} />
+                            </button>
+                          </div>
+                        )
+                      })
+                    )}
+                    {favoriteError && (
+                      <div className="px-3 py-2 text-[12px] text-red-400">
+                        {favoriteError}
+                      </div>
+                    )}
+                  </div>,
+                  document.body,
+                )}
             </div>
             <button
               type="button"
@@ -1766,6 +2083,14 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                 className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
               >
                 <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
+              </button>
+              <button
+                type="button"
+                onClick={handleAddDirectoryFavorite}
+                disabled={!serverId}
+                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Heart size={14} /> {t.sftp.contextMenu.addFavorite}
               </button>
             </>
           )}

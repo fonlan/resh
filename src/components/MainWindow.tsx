@@ -856,6 +856,7 @@ export const MainWindow: React.FC = () => {
               onClose={() => setIsSFTPOpen(false)}
               isLocked={config?.general.sftpSidebarLocked || false}
               onToggleLock={handleToggleSFTPLock}
+              serverId={activeServerId}
               sessionId={
                 activeTabId ? tabSessions[activeTabId] || undefined : undefined
               }

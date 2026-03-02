@@ -11,6 +11,7 @@ export interface Server {
   keepAlive: number
   autoExecCommands: string[]
   snippets?: import("./snippet").Snippet[]
+  sftpFavoritePaths?: string[]
   additionalPrompt?: string | null
   synced: boolean
   updatedAt: string

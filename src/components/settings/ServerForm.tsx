@@ -1,5 +1,14 @@
 import { Ref, useState, useImperativeHandle } from "react"
-import { Settings, Network, Terminal, Code, Bot } from "lucide-react"
+import {
+  Settings,
+  Network,
+  Terminal,
+  Code,
+  Bot,
+  Heart,
+  Plus,
+  Trash2,
+} from "lucide-react"
 import { Server, Authentication, ProxyConfig, PortForward } from "../../types"
 import {
   validateRequired,
@@ -28,7 +37,13 @@ export interface ServerFormHandle {
   setSynced: (synced: boolean) => void
 }
 
-type TabId = "general" | "routing" | "advanced" | "snippets" | "ai"
+type TabId =
+  | "general"
+  | "routing"
+  | "advanced"
+  | "favorites"
+  | "snippets"
+  | "ai"
 
 export const ServerForm = ({
   server,
@@ -58,6 +73,7 @@ export const ServerForm = ({
         keepAlive: server.keepAlive || 0,
         autoExecCommands: server.autoExecCommands || [],
         snippets: server.snippets || [],
+        sftpFavoritePaths: server.sftpFavoritePaths || [],
         synced: server.synced !== undefined ? server.synced : true,
         updatedAt: server.updatedAt || new Date().toISOString(),
         additionalPrompt: server.additionalPrompt || "",
@@ -76,6 +92,7 @@ export const ServerForm = ({
       keepAlive: 0,
       autoExecCommands: [],
       snippets: [],
+      sftpFavoritePaths: [],
       synced: true,
       updatedAt: new Date().toISOString(),
       additionalPrompt: "",
@@ -90,6 +107,39 @@ export const ServerForm = ({
     local: "",
     remote: "",
   })
+  const [newFavoritePath, setNewFavoritePath] = useState("")
+
+  const normalizeFavoritePath = (path: string): string => {
+    const normalized = path.trim().replace(/\\/g, "/").replace(/\/+/g, "/")
+
+    if (!normalized) return ""
+
+    const withLeadingSlash = normalized.startsWith("/")
+      ? normalized
+      : `/${normalized}`
+
+    if (withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")) {
+      return withLeadingSlash.slice(0, -1)
+    }
+
+    return withLeadingSlash
+  }
+
+  const normalizeFavoritePaths = (paths: string[]): string[] => {
+    const deduped = new Set<string>()
+    const result: string[] = []
+
+    paths.forEach((path) => {
+      const normalized = normalizeFavoritePath(path)
+      if (!normalized || deduped.has(normalized)) {
+        return
+      }
+      deduped.add(normalized)
+      result.push(normalized)
+    })
+
+    return result
+  }
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {}
@@ -120,6 +170,9 @@ export const ServerForm = ({
     if (validateForm()) {
       const serverToSave = {
         ...formData,
+        sftpFavoritePaths: normalizeFavoritePaths(
+          formData.sftpFavoritePaths || [],
+        ),
         updatedAt: new Date().toISOString(),
       }
       onSave(serverToSave)
@@ -219,11 +272,76 @@ export const ServerForm = ({
     }))
   }
 
+  const addFavoritePath = () => {
+    const normalizedPath = normalizeFavoritePath(newFavoritePath)
+    if (!normalizedPath) {
+      return
+    }
+
+    setFormData((prev) => {
+      const currentPaths = prev.sftpFavoritePaths || []
+      if (currentPaths.includes(normalizedPath)) {
+        return prev
+      }
+      return {
+        ...prev,
+        sftpFavoritePaths: [...currentPaths, normalizedPath],
+      }
+    })
+    setNewFavoritePath("")
+  }
+
+  const removeFavoritePath = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      sftpFavoritePaths: (prev.sftpFavoritePaths || []).filter(
+        (_, i) => i !== index,
+      ),
+    }))
+  }
+
+  const updateFavoritePath = (index: number, value: string) => {
+    setFormData((prev) => {
+      const nextPaths = [...(prev.sftpFavoritePaths || [])]
+      nextPaths[index] = value
+      return {
+        ...prev,
+        sftpFavoritePaths: nextPaths,
+      }
+    })
+  }
+
+  const normalizeFavoritePathAtIndex = (index: number) => {
+    setFormData((prev) => {
+      const currentPaths = [...(prev.sftpFavoritePaths || [])]
+      const normalized = normalizeFavoritePath(currentPaths[index] || "")
+      if (!normalized) {
+        currentPaths.splice(index, 1)
+        return {
+          ...prev,
+          sftpFavoritePaths: currentPaths,
+        }
+      }
+
+      if (currentPaths.some((path, i) => i !== index && path === normalized)) {
+        currentPaths.splice(index, 1)
+      } else {
+        currentPaths[index] = normalized
+      }
+
+      return {
+        ...prev,
+        sftpFavoritePaths: currentPaths,
+      }
+    })
+  }
+
   const hasTabError = (tab: TabId) => {
     const fieldsByTab: Record<TabId, string[]> = {
       general: ["name", "host", "port", "username", "authId"],
       routing: ["proxyId", "jumphostId", "keepAlive"],
       advanced: ["portForwards", "autoExecCommands"],
+      favorites: [],
       snippets: [],
       ai: [],
     }
@@ -237,6 +355,11 @@ export const ServerForm = ({
       id: "advanced" as TabId,
       label: t.advanced,
       icon: <Terminal size={18} />,
+    },
+    {
+      id: "favorites" as TabId,
+      label: t.serverForm.favoritesTab,
+      icon: <Heart size={18} />,
     },
     {
       id: "snippets" as TabId,
@@ -644,6 +767,68 @@ export const ServerForm = ({
                   className="px-4 py-2 text-sm bg-zinc-700/30 text-white rounded-md border border-zinc-700/50 hover:bg-zinc-700/50 transition-all flex items-center justify-center whitespace-nowrap"
                 >
                   {t.serverForm.addCommand}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "favorites" && (
+            <div className="space-y-4">
+              <h3 className="text-sm font-medium text-zinc-300 mb-3 border-b border-zinc-700/50 pb-2">
+                {t.serverForm.sftpFavoritePathsTitle}
+              </h3>
+              <p className="text-xs text-zinc-500 mb-3">
+                {t.serverForm.sftpFavoritePathsHint}
+              </p>
+
+              {(formData.sftpFavoritePaths || []).length > 0 ? (
+                <div className="space-y-2 mb-3">
+                  {(formData.sftpFavoritePaths || []).map((path, index) => (
+                    <div key={`favorite-path-${index}`} className="flex gap-2">
+                      <input
+                        type="text"
+                        value={path}
+                        onChange={(e) =>
+                          updateFavoritePath(index, e.target.value)
+                        }
+                        onBlur={() => normalizeFavoritePathAtIndex(index)}
+                        placeholder={t.serverForm.sftpFavoritePathPlaceholder}
+                        className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeFavoritePath(index)}
+                        className="btn-icon icon-btn-delete"
+                        title={t.common.remove}
+                        aria-label={t.common.remove}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-zinc-500 mb-3">
+                  {t.serverForm.sftpFavoritePathsEmpty}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newFavoritePath}
+                  onChange={(e) => setNewFavoritePath(e.target.value)}
+                  placeholder={t.serverForm.sftpFavoritePathPlaceholder}
+                  className="flex-1 min-w-0 px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                />
+                <button
+                  type="button"
+                  onClick={addFavoritePath}
+                  className="btn-icon icon-btn-connect"
+                  title={t.common.add}
+                  aria-label={t.common.add}
+                >
+                  <Plus size={14} />
                 </button>
               </div>
             </div>
