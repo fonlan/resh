@@ -5,7 +5,7 @@ description = "Resh SSH Client"
 authors = [""]
 edition = "2021"
 rust-version = "1.60"
-license = ""
+license = "MIT"
 repository = ""
 default-run = "resh"
 

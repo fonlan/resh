@@ -194,3 +194,7 @@ Please report security vulnerabilities privately to the maintainers rather than 
 
 For issues and questions:
 - GitHub Issues: [Report a bug or request a feature](https://github.com/fonlan/resh/issues)
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
