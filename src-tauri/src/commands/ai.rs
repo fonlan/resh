@@ -10,7 +10,7 @@ use reqwest::Client;
 use rusqlite::params;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager, State, Window};
@@ -139,11 +139,19 @@ fn accumulate_streamed_tool_call_chunk(
 fn normalize_streamed_tool_calls(tool_calls: Vec<ToolCall>) -> Vec<ToolCall> {
     let mut normalized: Vec<ToolCall> = Vec::with_capacity(tool_calls.len());
 
-    for call in tool_calls {
+    for mut call in tool_calls {
         let has_name = !call.function.name.trim().is_empty();
         let has_args = !call.function.arguments.trim().is_empty();
 
         if has_name {
+            if !has_args {
+                tracing::warn!(
+                    "[AI] Empty arguments for streamed tool call id={}, name={}; normalizing to empty object",
+                    call.id,
+                    call.function.name
+                );
+                call.function.arguments = "{}".to_string();
+            }
             normalized.push(call);
             continue;
         }
@@ -179,6 +187,20 @@ fn normalize_streamed_tool_calls(tool_calls: Vec<ToolCall>) -> Vec<ToolCall> {
     }
 
     normalized
+}
+
+fn parse_tool_call_arguments(arguments: &str) -> Result<serde_json::Value, String> {
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+
+    match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(value) if value.is_object() => Ok(value),
+        Ok(serde_json::Value::String(s)) if s.trim().is_empty() => Ok(serde_json::json!({})),
+        Ok(value) => Err(format!("non-object JSON ({})", value)),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[derive(Debug)]
@@ -948,11 +970,18 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
 
 fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
     let mut messages = Vec::with_capacity(history.len());
+    let mut pending_tool_call_ids: HashSet<String> = HashSet::new();
 
     for msg in history {
         match msg.role.as_str() {
-            "system" => messages.push(GenaiMessage::system(msg.content.unwrap_or_default())),
-            "user" => messages.push(GenaiMessage::user(msg.content.unwrap_or_default())),
+            "system" => {
+                pending_tool_call_ids.clear();
+                messages.push(GenaiMessage::system(msg.content.unwrap_or_default()));
+            }
+            "user" => {
+                pending_tool_call_ids.clear();
+                messages.push(GenaiMessage::user(msg.content.unwrap_or_default()));
+            }
             "assistant" => {
                 let content = msg.content.unwrap_or_default();
                 if let Some(tool_calls) = msg.tool_calls {
@@ -967,29 +996,18 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
                                 return None;
                             }
 
-                            let parsed_args =
-                                match serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
-                                {
-                                    Ok(value) if value.is_object() => value,
-                                    Ok(value) => {
-                                        tracing::warn!(
-                                            "[AI] Dropping persisted tool_call with non-object args: id={}, name={}, args={}",
-                                            tc.id,
-                                            tc.function.name,
-                                            value
-                                        );
-                                        return None;
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "[AI] Dropping persisted tool_call with invalid args JSON: id={}, name={}, err={}",
-                                            tc.id,
-                                            tc.function.name,
-                                            e
-                                        );
-                                        return None;
-                                    }
-                                };
+                            let parsed_args = match parse_tool_call_arguments(&tc.function.arguments) {
+                                Ok(value) => value,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "[AI] Dropping persisted tool_call with invalid args JSON: id={}, name={}, err={}",
+                                        tc.id,
+                                        tc.function.name,
+                                        e
+                                    );
+                                    return None;
+                                }
+                            };
 
                             Some(genai::chat::ToolCall {
                                 call_id: tc.id,
@@ -1001,10 +1019,16 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
                         .collect();
 
                     if !genai_tool_calls.is_empty() {
+                        pending_tool_call_ids = genai_tool_calls
+                            .iter()
+                            .map(|call| call.call_id.clone())
+                            .collect();
                         messages.push(GenaiMessage::assistant(genai_tool_calls));
                         continue;
                     }
                 }
+
+                pending_tool_call_ids.clear();
 
                 if content.is_empty() {
                     tracing::warn!(
@@ -1015,11 +1039,31 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
 
                 messages.push(GenaiMessage::assistant(content));
             }
-            "tool" => messages.push(GenaiMessage::from(genai::chat::ToolResponse::new(
-                msg.tool_call_id.unwrap_or_default(),
-                msg.content.unwrap_or_default(),
-            ))),
-            _ => messages.push(GenaiMessage::user(msg.content.unwrap_or_default())),
+            "tool" => {
+                let call_id = msg.tool_call_id.unwrap_or_default();
+                if call_id.is_empty() {
+                    tracing::warn!("[AI] Dropping persisted tool message with empty tool_call_id");
+                    continue;
+                }
+
+                if !pending_tool_call_ids.contains(&call_id) {
+                    tracing::warn!(
+                        "[AI] Dropping persisted tool message with unmatched tool_call_id: {}",
+                        call_id
+                    );
+                    continue;
+                }
+
+                pending_tool_call_ids.remove(&call_id);
+                messages.push(GenaiMessage::from(genai::chat::ToolResponse::new(
+                    call_id,
+                    msg.content.unwrap_or_default(),
+                )));
+            }
+            _ => {
+                pending_tool_call_ids.clear();
+                messages.push(GenaiMessage::user(msg.content.unwrap_or_default()));
+            }
         }
     }
 
@@ -1200,6 +1244,16 @@ mod streamed_tool_call_tests {
     }
 
     #[test]
+    fn normalize_streamed_tool_calls_normalizes_empty_args_to_empty_object() {
+        let calls = vec![new_call("tooluse_1", "get_terminal_output", "")];
+
+        let normalized = normalize_streamed_tool_calls(calls);
+
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0].function.arguments, "{}");
+    }
+
+    #[test]
     fn to_genai_messages_skips_empty_assistant_after_invalid_tool_cleanup() {
         let history = vec![ChatMessage {
             role: "assistant".to_string(),
@@ -1242,6 +1296,56 @@ mod streamed_tool_call_tests {
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].call_id, "tooluse_ok");
         assert_eq!(tool_calls[0].fn_name, "run_in_terminal");
+    }
+
+    #[test]
+    fn to_genai_messages_keeps_empty_tool_args_as_empty_object() {
+        let history = vec![ChatMessage {
+            role: "assistant".to_string(),
+            content: None,
+            reasoning_content: None,
+            tool_calls: Some(vec![new_call("tooluse_1", "get_terminal_output", "")]),
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }];
+
+        let messages = to_genai_messages(history);
+
+        assert_eq!(messages.len(), 1);
+        let tool_calls = messages[0].content.tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].call_id, "tooluse_1");
+        assert_eq!(tool_calls[0].fn_name, "get_terminal_output");
+        assert_eq!(tool_calls[0].fn_arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn to_genai_messages_drops_unmatched_tool_message_after_sanitization() {
+        let history = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: None,
+                reasoning_content: None,
+                tool_calls: Some(vec![new_call("tooluse_bad", "get_terminal_output", "[]")]),
+                tool_call_id: None,
+                created_at: None,
+                model_id: None,
+            },
+            ChatMessage {
+                role: "tool".to_string(),
+                content: Some("output".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some("tooluse_bad".to_string()),
+                created_at: None,
+                model_id: None,
+            },
+        ];
+
+        let messages = to_genai_messages(history);
+
+        assert!(messages.is_empty());
     }
 }
 
