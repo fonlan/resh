@@ -95,6 +95,7 @@ export const locales = {
       addServer: "Add Server",
       editServer: "Edit Server",
       emptyState: "No servers configured. Add one to get started.",
+      defaultGroup: "Default Group",
       connectTooltip: "Connect to server",
       editTooltip: "Edit server",
       deleteTooltip: "Delete server",
@@ -137,6 +138,8 @@ export const locales = {
     serverForm: {
       nameLabel: "Server Name",
       namePlaceholder: "e.g., Production Server, AWS EC2",
+      groupLabel: "Group",
+      groupPlaceholder: "e.g., Production, Staging",
       hostPlaceholder: "e.g., example.com or 192.168.1.100",
       usernameLabel: "Username",
       usernamePlaceholder: "e.g., ubuntu",
@@ -264,6 +267,8 @@ export const locales = {
     newTabButton: {
       connectTo: "Connect to Server",
       manageServers: "Manage Servers",
+      collapseGroup: "Collapse group",
+      expandGroup: "Expand group",
     },
     ai: {
       sidebarTitle: "AI Assistant",
@@ -553,6 +558,7 @@ export const locales = {
       addServer: "添加服务器",
       editServer: "编辑服务器",
       emptyState: "暂无服务器。点击添加开始使用。",
+      defaultGroup: "默认分组",
       connectTooltip: "连接服务器",
       editTooltip: "编辑服务器",
       deleteTooltip: "删除服务器",
@@ -595,6 +601,8 @@ export const locales = {
     serverForm: {
       nameLabel: "服务器名称",
       namePlaceholder: "例如：生产服务器、AWS 实例",
+      groupLabel: "分组",
+      groupPlaceholder: "例如：生产环境、测试环境",
       hostPlaceholder: "例如：example.com 或 192.168.1.100",
       usernameLabel: "用户名",
       usernamePlaceholder: "例如：ubuntu",
@@ -721,6 +729,8 @@ export const locales = {
     newTabButton: {
       connectTo: "连接到服务器",
       manageServers: "服务器管理",
+      collapseGroup: "收起分组",
+      expandGroup: "展开分组",
     },
     ai: {
       sidebarTitle: "AI 助手",

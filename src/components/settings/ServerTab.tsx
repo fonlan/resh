@@ -12,6 +12,7 @@ import { ServerForm, ServerFormHandle } from "./ServerForm"
 import { generateId } from "../../utils/idGenerator"
 import { useTranslation } from "../../i18n"
 import { EmojiText } from "../EmojiText"
+import { groupServersByName } from "../../utils/serverGroups"
 
 interface ServerTabProps {
   servers: Server[]
@@ -121,9 +122,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({
     new Set(snippets.map((s) => s.group || t.snippetForm.defaultGroup)),
   )
 
-  const sortedServers = [...servers].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  )
+  const groupedServers = groupServersByName(servers, t.serverTab.defaultGroup)
 
   return (
     <div className="space-y-4">
@@ -141,79 +140,93 @@ export const ServerTab: React.FC<ServerTabProps> = ({
         </button>
       </div>
 
-      {sortedServers.length === 0 ? (
+      {groupedServers.length === 0 ? (
         <div className="empty-state-mini">
           <p>{t.serverTab.emptyState}</p>
         </div>
       ) : (
-        <div className="item-list">
-          {sortedServers.map((server) => {
-            const auth = authentications.find((a) => a.id === server.authId)
-            const proxy = proxies.find((p) => p.id === server.proxyId)
-            const jumphost = servers.find((s) => s.id === server.jumphostId)
-
-            return (
-              <div key={server.id} className="item-card">
-                <div className="item-info">
-                  <p className="item-name">
-                    <EmojiText text={server.name} />
-                  </p>
-                  <p className="item-detail">
-                    {server.username ? `${server.username}@` : ""}
-                    {server.host}:{server.port}
-                  </p>
-                  {(auth || proxy || jumphost) && (
-                    <div className="item-tags">
-                      {auth && (
-                        <span className="tag">
-                          {t.auth}: <EmojiText text={auth.name} />
-                        </span>
-                      )}
-                      {proxy && (
-                        <span className="tag">
-                          {t.common.proxy}: <EmojiText text={proxy.name} />
-                        </span>
-                      )}
-                      {jumphost && (
-                        <span className="tag">
-                          {t.serverTab.jumphost}:{" "}
-                          <EmojiText text={jumphost.name} />
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="item-actions">
-                  {onConnectServer && (
-                    <button
-                      type="button"
-                      onClick={() => onConnectServer(server.id)}
-                      className="btn-icon icon-btn-connect"
-                      title={t.serverTab.connectTooltip}
-                    >
-                      <Power size={14} />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => handleEditServer(server)}
-                    className="btn-icon icon-btn-edit"
-                    title={t.serverTab.editTooltip}
-                  >
-                    <Edit2 size={14} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteServer(server.id)}
-                    className="btn-icon icon-btn-delete"
-                    title={t.serverTab.deleteTooltip}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+        <div className="space-y-5">
+          {groupedServers.map((group) => (
+            <div key={group.id} className="space-y-2">
+              <div className="px-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                {group.name}
               </div>
-            )
-          })}
+              <div className="item-list">
+                {group.servers.map((server) => {
+                  const auth = authentications.find(
+                    (a) => a.id === server.authId,
+                  )
+                  const proxy = proxies.find((p) => p.id === server.proxyId)
+                  const jumphost = servers.find(
+                    (s) => s.id === server.jumphostId,
+                  )
+
+                  return (
+                    <div key={server.id} className="item-card">
+                      <div className="item-info">
+                        <p className="item-name">
+                          <EmojiText text={server.name} />
+                        </p>
+                        <p className="item-detail">
+                          {server.username ? `${server.username}@` : ""}
+                          {server.host}:{server.port}
+                        </p>
+                        {(auth || proxy || jumphost) && (
+                          <div className="item-tags">
+                            {auth && (
+                              <span className="tag">
+                                {t.auth}: <EmojiText text={auth.name} />
+                              </span>
+                            )}
+                            {proxy && (
+                              <span className="tag">
+                                {t.common.proxy}:{" "}
+                                <EmojiText text={proxy.name} />
+                              </span>
+                            )}
+                            {jumphost && (
+                              <span className="tag">
+                                {t.serverTab.jumphost}:{" "}
+                                <EmojiText text={jumphost.name} />
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="item-actions">
+                        {onConnectServer && (
+                          <button
+                            type="button"
+                            onClick={() => onConnectServer(server.id)}
+                            className="btn-icon icon-btn-connect"
+                            title={t.serverTab.connectTooltip}
+                          >
+                            <Power size={14} />
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleEditServer(server)}
+                          className="btn-icon icon-btn-edit"
+                          title={t.serverTab.editTooltip}
+                        >
+                          <Edit2 size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteServer(server.id)}
+                          className="btn-icon icon-btn-delete"
+                          title={t.serverTab.deleteTooltip}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

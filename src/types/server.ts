@@ -1,6 +1,7 @@
 export interface Server {
   id: string
   name: string
+  group?: string | null
   host: string
   port: number
   username: string

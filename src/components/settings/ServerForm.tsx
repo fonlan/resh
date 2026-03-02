@@ -1,4 +1,4 @@
-import { Ref, useState, useImperativeHandle } from "react"
+import { Ref, useState, useImperativeHandle, useMemo } from "react"
 import {
   Settings,
   Network,
@@ -63,6 +63,7 @@ export const ServerForm = ({
       return {
         id: server.id || "",
         name: server.name || "",
+        group: server.group || "",
         host: server.host || "",
         port: server.port || 22,
         username: server.username || "",
@@ -82,6 +83,7 @@ export const ServerForm = ({
     return {
       id: "",
       name: "",
+      group: "",
       host: "",
       port: 22,
       username: "",
@@ -108,6 +110,25 @@ export const ServerForm = ({
     remote: "",
   })
   const [newFavoritePath, setNewFavoritePath] = useState("")
+  const [isGroupDropdownOpen, setIsGroupDropdownOpen] = useState(false)
+
+  const normalizeGroupName = (group?: string | null): string =>
+    (group || "").trim()
+
+  const existingGroupNames = useMemo(() => {
+    const groups = new Set<string>()
+
+    availableServers.forEach((availableServer) => {
+      const groupName = normalizeGroupName(availableServer.group)
+      if (groupName) {
+        groups.add(groupName)
+      }
+    })
+
+    return Array.from(groups).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    )
+  }, [availableServers])
 
   const normalizeFavoritePath = (path: string): string => {
     const normalized = path.trim().replace(/\\/g, "/").replace(/\/+/g, "/")
@@ -170,6 +191,7 @@ export const ServerForm = ({
     if (validateForm()) {
       const serverToSave = {
         ...formData,
+        group: normalizeGroupName(formData.group),
         sftpFavoritePaths: normalizeFavoritePaths(
           formData.sftpFavoritePaths || [],
         ),
@@ -467,6 +489,59 @@ export const ServerForm = ({
                 </div>
                 {errors.name && (
                   <p className="text-red-400 text-xs mt-1">{errors.name}</p>
+                )}
+              </div>
+
+              <div className="relative">
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="server-group"
+                    className="block text-sm font-medium text-zinc-400 mb-1.5"
+                  >
+                    {t.serverForm.groupLabel}
+                  </label>
+                  <span className="text-xs text-zinc-500 mb-1.5">
+                    ({t.common.optional})
+                  </span>
+                </div>
+                <input
+                  id="server-group"
+                  type="text"
+                  value={formData.group || ""}
+                  onChange={(e) => handleChange("group", e.target.value)}
+                  onFocus={() => {
+                    if (existingGroupNames.length > 0) {
+                      setIsGroupDropdownOpen(true)
+                    }
+                  }}
+                  onBlur={() => {
+                    window.setTimeout(() => setIsGroupDropdownOpen(false), 100)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setIsGroupDropdownOpen(false)
+                    }
+                  }}
+                  placeholder={t.serverForm.groupPlaceholder}
+                  className="w-full px-3 py-2 text-sm rounded-md border border-zinc-700/50 outline-none transition-all bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)]"
+                />
+                {isGroupDropdownOpen && existingGroupNames.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1 max-h-44 overflow-y-auto rounded-md border border-zinc-700/50 bg-[var(--bg-primary)] shadow-[0_8px_24px_rgba(0,0,0,0.35)] z-20">
+                    {existingGroupNames.map((groupName) => (
+                      <button
+                        type="button"
+                        key={groupName}
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          handleChange("group", groupName)
+                          setIsGroupDropdownOpen(false)
+                        }}
+                        className="w-full text-left px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                      >
+                        {groupName}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 

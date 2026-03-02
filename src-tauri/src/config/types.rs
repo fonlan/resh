@@ -16,6 +16,9 @@ fn default_updated_at() -> String {
 pub struct Server {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    #[serde(alias = "groupName", alias = "group_name")]
+    pub group: String,
     pub host: String,
     pub port: u16,
     pub username: String,
