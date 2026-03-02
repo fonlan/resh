@@ -1,9 +1,29 @@
 use crate::commands::AppState;
 use crate::sftp_manager::{
-    DirectoryListResult, FileEntry, SftpManager, SftpSortOrder, SftpSortType,
+    DirectoryListResult, DirectoryListingHandle, DirectoryListingPage, FileEntry, SftpManager,
+    SftpSortOrder, SftpSortType,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
+
+fn parse_sort_params(
+    sort_type: &str,
+    sort_order: &str,
+) -> Result<(SftpSortType, SftpSortOrder), String> {
+    let parsed_sort_type = match sort_type {
+        "name" => SftpSortType::Name,
+        "modified" => SftpSortType::Modified,
+        _ => return Err(format!("Invalid sort type: {}", sort_type)),
+    };
+
+    let parsed_sort_order = match sort_order {
+        "asc" => SftpSortOrder::Asc,
+        "desc" => SftpSortOrder::Desc,
+        _ => return Err(format!("Invalid sort order: {}", sort_order)),
+    };
+
+    Ok((parsed_sort_type, parsed_sort_order))
+}
 
 #[tauri::command]
 pub async fn sftp_list_dir(session_id: String, path: String) -> Result<Vec<FileEntry>, String> {
@@ -17,17 +37,7 @@ pub async fn sftp_list_dir_sorted(
     sort_type: String,
     sort_order: String,
 ) -> Result<Vec<FileEntry>, String> {
-    let parsed_sort_type = match sort_type.as_str() {
-        "name" => SftpSortType::Name,
-        "modified" => SftpSortType::Modified,
-        _ => return Err(format!("Invalid sort type: {}", sort_type)),
-    };
-
-    let parsed_sort_order = match sort_order.as_str() {
-        "asc" => SftpSortOrder::Asc,
-        "desc" => SftpSortOrder::Desc,
-        _ => return Err(format!("Invalid sort order: {}", sort_order)),
-    };
+    let (parsed_sort_type, parsed_sort_order) = parse_sort_params(&sort_type, &sort_order)?;
 
     SftpManager::list_dir_with_sort(&session_id, &path, parsed_sort_type, parsed_sort_order).await
 }
@@ -39,19 +49,41 @@ pub async fn sftp_list_dirs_sorted(
     sort_type: String,
     sort_order: String,
 ) -> Result<Vec<DirectoryListResult>, String> {
-    let parsed_sort_type = match sort_type.as_str() {
-        "name" => SftpSortType::Name,
-        "modified" => SftpSortType::Modified,
-        _ => return Err(format!("Invalid sort type: {}", sort_type)),
-    };
-
-    let parsed_sort_order = match sort_order.as_str() {
-        "asc" => SftpSortOrder::Asc,
-        "desc" => SftpSortOrder::Desc,
-        _ => return Err(format!("Invalid sort order: {}", sort_order)),
-    };
+    let (parsed_sort_type, parsed_sort_order) = parse_sort_params(&sort_type, &sort_order)?;
 
     SftpManager::list_dirs_with_sort(&session_id, &paths, parsed_sort_type, parsed_sort_order).await
+}
+
+#[tauri::command]
+pub async fn sftp_prepare_dir_listing_sorted(
+    session_id: String,
+    path: String,
+    sort_type: String,
+    sort_order: String,
+) -> Result<DirectoryListingHandle, String> {
+    let (parsed_sort_type, parsed_sort_order) = parse_sort_params(&sort_type, &sort_order)?;
+    SftpManager::prepare_dir_listing_with_sort(
+        &session_id,
+        &path,
+        parsed_sort_type,
+        parsed_sort_order,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn sftp_get_dir_listing_page(
+    token: String,
+    offset: usize,
+    limit: usize,
+) -> Result<DirectoryListingPage, String> {
+    SftpManager::get_dir_listing_page(&token, offset, limit).await
+}
+
+#[tauri::command]
+pub async fn sftp_release_dir_listing(token: String) -> Result<(), String> {
+    SftpManager::release_dir_listing(&token).await;
+    Ok(())
 }
 
 #[tauri::command]

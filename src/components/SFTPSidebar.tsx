@@ -81,9 +81,22 @@ interface DirectoryListResult {
   error: string | null
 }
 
+interface DirectoryListingHandle {
+  token: string
+  total: number
+}
+
+interface DirectoryListingPage {
+  files: FileEntry[]
+  total: number
+  next_offset: number | null
+}
+
 const SFTP_PATH_MIME_TYPE = "application/x-resh-sftp-path"
 const SFTP_ENTRY_MIME_TYPE = "application/x-resh-sftp-entry"
 const COPY_DATA_UNSUPPORTED_ERROR = "SFTP_COPY_DATA_UNSUPPORTED"
+const TREE_RENDER_BATCH_SIZE = 250
+const SFTP_LISTING_PAGE_SIZE = 400
 
 interface CopyFallbackModalState {
   isOpen: boolean
@@ -91,6 +104,96 @@ interface CopyFallbackModalState {
   sourcePath: string
   destPath: string
   targetPath: string
+}
+
+const normalizeSftpPath = (path: string): string => path.replace(/\\/g, "/")
+
+const updateTreeNodeByPath = (
+  nodes: FileEntry[],
+  targetPath: string,
+  updater: (node: FileEntry) => FileEntry,
+): { nodes: FileEntry[]; found: boolean } => {
+  const normalizedTargetPath = normalizeSftpPath(targetPath)
+
+  const walk = (list: FileEntry[]): { nodes: FileEntry[]; found: boolean } => {
+    for (let index = 0; index < list.length; index += 1) {
+      const node = list[index]
+      if (normalizeSftpPath(node.path) === normalizedTargetPath) {
+        const nextNode = updater(node)
+        if (nextNode === node) {
+          return { nodes: list, found: false }
+        }
+        const nextList = list.slice()
+        nextList[index] = nextNode
+        return { nodes: nextList, found: true }
+      }
+
+      if (node.children && node.children.length > 0) {
+        const childResult = walk(node.children)
+        if (childResult.found) {
+          const nextList = list.slice()
+          nextList[index] = { ...node, children: childResult.nodes }
+          return { nodes: nextList, found: true }
+        }
+      }
+    }
+
+    return { nodes: list, found: false }
+  }
+
+  return walk(nodes)
+}
+
+const useIncrementalRenderCount = (total: number, enabled: boolean): number => {
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    if (!enabled || total <= 0) {
+      setCount(0)
+      return
+    }
+
+    if (total <= TREE_RENDER_BATCH_SIZE) {
+      setCount(total)
+      return
+    }
+
+    let cancelled = false
+    let frameId: number | null = null
+
+    setCount(TREE_RENDER_BATCH_SIZE)
+
+    const pump = () => {
+      frameId = window.requestAnimationFrame(() => {
+        if (cancelled) {
+          return
+        }
+
+        setCount((prev) => {
+          if (prev >= total) {
+            return prev
+          }
+
+          const next = Math.min(prev + TREE_RENDER_BATCH_SIZE, total)
+          if (next < total) {
+            pump()
+          }
+          return next
+        })
+      })
+    }
+
+    pump()
+
+    return () => {
+      cancelled = true
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+  }, [enabled, total])
+
+  return Math.min(count, total)
 }
 
 const formatPermissions = (entry: FileEntry): string => {
@@ -135,6 +238,20 @@ const FileTreeItem: React.FC<{
   const rowRef = useRef<HTMLButtonElement>(null)
   const nameRef = useRef<HTMLSpanElement>(null)
   const [showFullNameTooltip, setShowFullNameTooltip] = useState(false)
+  const totalChildren = entry.children?.length || 0
+  const visibleChildrenCount = useIncrementalRenderCount(
+    totalChildren,
+    Boolean(entry.isExpanded) && totalChildren > 0,
+  )
+  const visibleChildren = useMemo(() => {
+    if (!entry.children) {
+      return []
+    }
+    if (visibleChildrenCount >= entry.children.length) {
+      return entry.children
+    }
+    return entry.children.slice(0, visibleChildrenCount)
+  }, [entry.children, visibleChildrenCount])
 
   const updateTooltipVisibility = useCallback(() => {
     const rowElement = rowRef.current
@@ -233,7 +350,7 @@ const FileTreeItem: React.FC<{
 
       {entry.isExpanded && entry.children && (
         <div className="sftp-tree-children">
-          {entry.children.map((child) => (
+          {visibleChildren.map((child) => (
             <FileTreeItem
               key={child.path}
               entry={child}
@@ -245,6 +362,14 @@ const FileTreeItem: React.FC<{
               clipboardIsCut={clipboardIsCut}
             />
           ))}
+          {visibleChildrenCount < totalChildren && (
+            <div
+              className="flex items-center py-0.5 text-[var(--text-muted)]"
+              style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
+            >
+              <RefreshCw size={10} className="animate-spin opacity-65" />
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -330,6 +455,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const currentPath = currentSession?.currentPath || "/"
   const isLoading = currentSession?.isLoading || false
   const sortState = currentSession?.sortState || DEFAULT_SORT_STATE
+  const visibleRootCount = useIncrementalRenderCount(
+    rootFiles.length,
+    isOpen && Boolean(sessionId),
+  )
+  const visibleRootFiles = useMemo(() => {
+    if (visibleRootCount >= rootFiles.length) {
+      return rootFiles
+    }
+    return rootFiles.slice(0, visibleRootCount)
+  }, [rootFiles, visibleRootCount])
 
   const [clipboard, setClipboard] = useState<ClipboardState | null>(null)
 
@@ -394,6 +529,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   > | null>(null)
   const [customCommandsSubmenuTimeout, setCustomCommandsSubmenuTimeout] =
     useState<ReturnType<typeof setTimeout> | null>(null)
+  const activeDirectoryLoadRequestsRef = useRef<Record<string, string>>({})
 
   // Trigger terminal resize when locked state changes
   useEffect(() => {
@@ -431,6 +567,41 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     },
     [],
   )
+
+  const getDirectoryLoadKey = (sid: string, path: string): string =>
+    `${sid}:${normalizeSftpPath(path)}`
+
+  const registerDirectoryLoadRequest = (
+    sid: string,
+    path: string,
+  ): { key: string; requestId: string } => {
+    const key = getDirectoryLoadKey(sid, path)
+    const requestId = uuidv4()
+    activeDirectoryLoadRequestsRef.current[key] = requestId
+    return { key, requestId }
+  }
+
+  const clearDirectoryLoadRequest = (key: string, requestId?: string) => {
+    const activeRequestId = activeDirectoryLoadRequestsRef.current[key]
+    if (!activeRequestId) {
+      return
+    }
+    if (requestId && activeRequestId !== requestId) {
+      return
+    }
+    delete activeDirectoryLoadRequestsRef.current[key]
+  }
+
+  const isDirectoryLoadRequestActive = (
+    key: string,
+    requestId: string,
+  ): boolean => activeDirectoryLoadRequestsRef.current[key] === requestId
+
+  useEffect(() => {
+    return () => {
+      activeDirectoryLoadRequestsRef.current = {}
+    }
+  }, [])
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -543,22 +714,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           if (path === "/" || path === ".") {
             newRootFiles = sortedFiles
           } else {
-            const targetPath = path.replace(/\\/g, "/")
-            let updatedTarget = false
-            const updateNode = (nodes: FileEntry[]): FileEntry[] => {
-              return nodes.map((node) => {
-                if (node.path.replace(/\\/g, "/") === targetPath) {
-                  updatedTarget = true
-                  return { ...node, children: sortedFiles, isLoading: false }
-                }
-                if (node.children) {
-                  return { ...node, children: updateNode(node.children) }
-                }
-                return node
-              })
-            }
-            const updatedTree = updateNode(session?.rootFiles || [])
-            newRootFiles = updatedTarget ? updatedTree : sortedFiles
+            const targetPath = normalizeSftpPath(path)
+            const updateResult = updateTreeNodeByPath(
+              session?.rootFiles || [],
+              targetPath,
+              (node) => ({ ...node, children: sortedFiles, isLoading: false }),
+            )
+            newRootFiles = updateResult.found ? updateResult.nodes : sortedFiles
           }
 
           return {
@@ -583,22 +745,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             const session = prev[sid]
             if (!session) return prev
 
-            const targetPath = path.replace(/\\/g, "/")
-            const resetLoading = (nodes: FileEntry[]): FileEntry[] => {
-              return nodes.map((node) => {
-                if (node.path.replace(/\\/g, "/") === targetPath) {
-                  return { ...node, isLoading: false }
-                }
-                if (node.children) {
-                  return { ...node, children: resetLoading(node.children) }
-                }
-                return node
-              })
-            }
+            const targetPath = normalizeSftpPath(path)
+            const updateResult = updateTreeNodeByPath(
+              session.rootFiles,
+              targetPath,
+              (node) => ({ ...node, isLoading: false }),
+            )
 
             return {
               ...prev,
-              [sid]: { ...session, rootFiles: resetLoading(session.rootFiles) },
+              [sid]: { ...session, rootFiles: updateResult.nodes },
             }
           })
         }
@@ -653,49 +809,20 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           const session = prev[sid]
           if (!session) return prev
 
-          const updateChildren = (
-            nodes: FileEntry[],
-            targetPath: string,
-            children?: FileEntry[],
-            resetLoadingOnly = false,
-          ): FileEntry[] => {
-            return nodes.map((node) => {
-              if (node.path.replace(/\\/g, "/") === targetPath) {
-                if (resetLoadingOnly) {
-                  return { ...node, isLoading: false }
-                }
-                return { ...node, isExpanded: true, isLoading: false, children }
-              }
-              if (node.children) {
-                return {
-                  ...node,
-                  children: updateChildren(
-                    node.children,
-                    targetPath,
-                    children,
-                    resetLoadingOnly,
-                  ),
-                }
-              }
-              return node
-            })
-          }
-
           let nextRootFiles = session.rootFiles
 
           for (const result of batchResults) {
-            const normalizedPath = result.path.replace(/\\/g, "/")
+            const normalizedPath = normalizeSftpPath(result.path)
             if (result.error) {
               console.error(
                 `Failed to refresh directory ${result.path}:`,
                 result.error,
               )
-              nextRootFiles = updateChildren(
+              nextRootFiles = updateTreeNodeByPath(
                 nextRootFiles,
                 normalizedPath,
-                undefined,
-                true,
-              )
+                (node) => ({ ...node, isLoading: false }),
+              ).nodes
               continue
             }
 
@@ -706,12 +833,16 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               return { ...file, isExpanded: true, isLoading: true }
             })
 
-            nextRootFiles = updateChildren(
+            nextRootFiles = updateTreeNodeByPath(
               nextRootFiles,
               normalizedPath,
-              children,
-              false,
-            )
+              (node) => ({
+                ...node,
+                isExpanded: true,
+                isLoading: false,
+                children,
+              }),
+            ).nodes
           }
 
           return {
@@ -779,95 +910,149 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     // Allow toggling if it's a directory OR a symlink to a directory
     if (!entry.is_dir && !(entry.is_symlink && entry.target_is_dir)) return
     if (!sessionId) return
+    const loadKey = getDirectoryLoadKey(sessionId, entry.path)
 
     if (entry.isExpanded) {
       // Collapse
+      clearDirectoryLoadRequest(loadKey)
       updateSession(sessionId, (prev) => {
-        const toggleNode = (nodes: FileEntry[]): FileEntry[] => {
-          return nodes.map((node) => {
-            if (node.path === entry.path) {
-              return { ...node, isExpanded: false }
-            }
-            if (node.children) {
-              return { ...node, children: toggleNode(node.children) }
-            }
-            return node
-          })
-        }
-        return { rootFiles: toggleNode(prev.rootFiles) }
+        const updateResult = updateTreeNodeByPath(
+          prev.rootFiles,
+          entry.path,
+          (node) => ({
+            ...node,
+            isExpanded: false,
+            isLoading: false,
+          }),
+        )
+        return { rootFiles: updateResult.nodes }
       })
     } else {
       // Expand
-      // Set loading state for this node
+      const { requestId } = registerDirectoryLoadRequest(sessionId, entry.path)
       updateSession(sessionId, (prev) => {
-        const setLoading = (
-          nodes: FileEntry[],
-          loading: boolean,
-        ): FileEntry[] => {
-          return nodes.map((node) => {
-            if (node.path === entry.path) {
-              return { ...node, isLoading: loading }
-            }
-            if (node.children) {
-              return { ...node, children: setLoading(node.children, loading) }
-            }
-            return node
-          })
-        }
-        return { rootFiles: setLoading(prev.rootFiles, true) }
+        const updateResult = updateTreeNodeByPath(
+          prev.rootFiles,
+          entry.path,
+          (node) => ({
+            ...node,
+            isExpanded: true,
+            isLoading: true,
+            children: [],
+          }),
+        )
+        return { rootFiles: updateResult.nodes }
       })
 
+      let listingToken: string | null = null
       try {
-        const children = await invoke<FileEntry[]>("sftp_list_dir_sorted", {
-          sessionId,
-          path: entry.path,
-          sortType: sortState.type,
-          sortOrder: sortState.order,
-        })
+        const listingHandle = await invoke<DirectoryListingHandle>(
+          "sftp_prepare_dir_listing_sorted",
+          {
+            sessionId,
+            path: entry.path,
+            sortType: sortState.type,
+            sortOrder: sortState.order,
+          },
+        )
+        listingToken = listingHandle.token
 
-        setSessions((prev) => {
-          const session = prev[sessionId]
-          if (!session) return prev
+        let offset = 0
+        let nextOffset: number | null = 0
 
-          const updateChildren = (nodes: FileEntry[]): FileEntry[] => {
-            return nodes.map((node) => {
-              if (node.path === entry.path) {
-                return { ...node, isExpanded: true, isLoading: false, children }
-              }
-              if (node.children) {
-                return { ...node, children: updateChildren(node.children) }
-              }
-              return node
-            })
+        while (nextOffset !== null) {
+          if (!isDirectoryLoadRequestActive(loadKey, requestId)) {
+            break
           }
 
-          return {
-            ...prev,
-            [sessionId]: {
-              ...session,
-              rootFiles: updateChildren(session.rootFiles),
+          const page = await invoke<DirectoryListingPage>(
+            "sftp_get_dir_listing_page",
+            {
+              token: listingHandle.token,
+              offset,
+              limit: SFTP_LISTING_PAGE_SIZE,
             },
+          )
+
+          if (!isDirectoryLoadRequestActive(loadKey, requestId)) {
+            break
           }
-        })
+
+          setSessions((prev) => {
+            const session = prev[sessionId]
+            if (!session) return prev
+
+            const updateResult = updateTreeNodeByPath(
+              session.rootFiles,
+              entry.path,
+              (node) => {
+                const existingChildren = node.children || []
+                const nextChildren =
+                  existingChildren.length === 0
+                    ? page.files
+                    : [...existingChildren, ...page.files]
+                return {
+                  ...node,
+                  isExpanded: true,
+                  isLoading: page.next_offset !== null,
+                  children: nextChildren,
+                }
+              },
+            )
+
+            return {
+              ...prev,
+              [sessionId]: {
+                ...session,
+                rootFiles: updateResult.nodes,
+              },
+            }
+          })
+
+          nextOffset = page.next_offset
+          if (nextOffset !== null) {
+            offset = nextOffset
+            await new Promise<void>((resolve) => window.setTimeout(resolve, 0))
+          }
+        }
+
+        if (isDirectoryLoadRequestActive(loadKey, requestId)) {
+          clearDirectoryLoadRequest(loadKey, requestId)
+          updateSession(sessionId, (prev) => {
+            const updateResult = updateTreeNodeByPath(
+              prev.rootFiles,
+              entry.path,
+              (node) => ({
+                ...node,
+                isExpanded: true,
+                isLoading: false,
+              }),
+            )
+            return { rootFiles: updateResult.nodes }
+          })
+        }
       } catch (error) {
         console.error("Failed to load children:", error)
+        if (isDirectoryLoadRequestActive(loadKey, requestId)) {
+          clearDirectoryLoadRequest(loadKey, requestId)
+        }
         updateSession(sessionId, (prev) => {
-          const setLoading = (
-            nodes: FileEntry[],
-            loading: boolean,
-          ): FileEntry[] => {
-            return nodes.map((node) => {
-              if (node.path === entry.path) {
-                return { ...node, isLoading: loading } // Should probably set false
-              }
-              if (node.children) {
-                return { ...node, children: setLoading(node.children, loading) }
-              }
-              return node
-            })
-          }
-          return { rootFiles: setLoading(prev.rootFiles, false) }
+          const updateResult = updateTreeNodeByPath(
+            prev.rootFiles,
+            entry.path,
+            (node) => ({
+              ...node,
+              isLoading: false,
+            }),
+          )
+          return { rootFiles: updateResult.nodes }
         })
+      } finally {
+        if (listingToken) {
+          invoke("sftp_release_dir_listing", { token: listingToken }).catch(
+            () => undefined,
+          )
+        }
       }
     }
   }
@@ -2014,7 +2199,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2"
           data-sftp-tree-scroll
         >
-          {rootFiles.map((entry) => (
+          {visibleRootFiles.map((entry) => (
             <FileTreeItem
               key={entry.path}
               entry={entry}
@@ -2026,6 +2211,11 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
               clipboardIsCut={clipboard?.isCut}
             />
           ))}
+          {visibleRootCount < rootFiles.length && (
+            <div className="flex items-center justify-center py-1 text-[var(--text-muted)]">
+              <RefreshCw size={12} className="animate-spin opacity-60" />
+            </div>
+          )}
           {rootFiles.length === 0 && !isLoading && (
             <div className="p-4 text-center text-gray-500 text-sm">
               {sessionId ? t.sftp.noFiles : t.sftp.notConnected}

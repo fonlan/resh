@@ -44,6 +44,19 @@ pub struct DirectoryListResult {
     pub error: Option<String>,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct DirectoryListingHandle {
+    pub token: String,
+    pub total: usize,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct DirectoryListingPage {
+    pub files: Vec<FileEntry>,
+    pub total: usize,
+    pub next_offset: Option<usize>,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum SftpSortType {
     Name,
@@ -142,6 +155,13 @@ struct CopyProgressContext<'a> {
     destination: &'a str,
 }
 
+#[derive(Clone)]
+struct CachedDirectoryListing {
+    session_id: String,
+    files: Arc<Vec<FileEntry>>,
+    created_at: Instant,
+}
+
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> =
         Mutex::new(HashMap::new());
@@ -154,7 +174,13 @@ lazy_static! {
     static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(2);
     static ref QUEUE_NOTIFY: Notify = Notify::new();
     static ref SCHEDULER_RUNNING: AtomicBool = AtomicBool::new(false);
+    static ref DIRECTORY_LISTING_CACHE: Mutex<HashMap<String, CachedDirectoryListing>> =
+        Mutex::new(HashMap::new());
 }
+
+const DIRECTORY_LISTING_CACHE_MAX_ENTRIES: usize = 32;
+const DIRECTORY_LISTING_PAGE_LIMIT_DEFAULT: usize = 400;
+const DIRECTORY_LISTING_PAGE_LIMIT_MAX: usize = 2_000;
 
 pub struct SftpManager;
 
@@ -540,6 +566,9 @@ impl SftpManager {
 
         let mut copy_data_support = SFTP_COPY_DATA_SUPPORT.lock().await;
         copy_data_support.remove(session_id);
+
+        let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
+        cache.retain(|_, listing| listing.session_id != session_id);
     }
 
     pub async fn list_dir(session_id: &str, path: &str) -> Result<Vec<FileEntry>, String> {
@@ -646,6 +675,81 @@ impl SftpManager {
             }
         }
         Ok(results)
+    }
+
+    pub async fn prepare_dir_listing_with_sort(
+        session_id: &str,
+        path: &str,
+        sort_type: SftpSortType,
+        sort_order: SftpSortOrder,
+    ) -> Result<DirectoryListingHandle, String> {
+        let files = Self::list_dir_with_sort(session_id, path, sort_type, sort_order).await?;
+        let token = Uuid::new_v4().to_string();
+        let total = files.len();
+
+        let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
+        if cache.len() >= DIRECTORY_LISTING_CACHE_MAX_ENTRIES {
+            if let Some(oldest_token) = cache
+                .iter()
+                .min_by_key(|(_, listing)| listing.created_at)
+                .map(|(token, _)| token.clone())
+            {
+                cache.remove(&oldest_token);
+            }
+        }
+
+        cache.insert(
+            token.clone(),
+            CachedDirectoryListing {
+                session_id: session_id.to_string(),
+                files: Arc::new(files),
+                created_at: Instant::now(),
+            },
+        );
+
+        Ok(DirectoryListingHandle { token, total })
+    }
+
+    pub async fn get_dir_listing_page(
+        token: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<DirectoryListingPage, String> {
+        let page_limit = if limit == 0 {
+            DIRECTORY_LISTING_PAGE_LIMIT_DEFAULT
+        } else {
+            std::cmp::min(limit, DIRECTORY_LISTING_PAGE_LIMIT_MAX)
+        };
+
+        let listing = {
+            let cache = DIRECTORY_LISTING_CACHE.lock().await;
+            cache
+                .get(token)
+                .cloned()
+                .ok_or_else(|| format!("Directory listing token not found: {}", token))?
+        };
+
+        let total = listing.files.len();
+        let start = std::cmp::min(offset, total);
+        let end = std::cmp::min(start.saturating_add(page_limit), total);
+        let files = listing.files[start..end].to_vec();
+        let next_offset = if end < total { Some(end) } else { None };
+
+        if next_offset.is_none() {
+            let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
+            cache.remove(token);
+        }
+
+        Ok(DirectoryListingPage {
+            files,
+            total,
+            next_offset,
+        })
+    }
+
+    pub async fn release_dir_listing(token: &str) {
+        let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
+        cache.remove(token);
     }
 
     pub async fn cancel_transfer(task_id: &str) -> Result<(), String> {
