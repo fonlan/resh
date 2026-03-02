@@ -1151,10 +1151,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     const parentPath = getParentPath(entry.path)
     command = command.replace(/{dpath}/g, parentPath)
 
-    const lastDotIndex = entry.name.lastIndexOf(".")
     let fname = entry.name
-    if (lastDotIndex > 0) {
-      fname = entry.name.substring(0, lastDotIndex)
+    if (!entry.is_dir) {
+      const lastDotIndex = entry.name.lastIndexOf(".")
+      if (lastDotIndex > 0) {
+        fname = entry.name.substring(0, lastDotIndex)
+      }
     }
     command = command.replace(/{fname}/g, fname)
 
