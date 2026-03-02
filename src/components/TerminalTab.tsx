@@ -9,6 +9,7 @@ import {
   Authentication,
   ProxyConfig,
   TerminalSettings,
+  TerminalRightClickMode,
   ManualAuthCredentials,
 } from "../types"
 import { v4 as uuidv4 } from "uuid"
@@ -203,11 +204,17 @@ export const TerminalTab = React.memo<TerminalTabProps>(
       }
     }, [])
 
+    const terminalRightClickMode: TerminalRightClickMode =
+      config?.general.terminalRightClickMode === "selectionCopyPaste"
+        ? "selectionCopyPaste"
+        : "contextMenu"
+
     const { terminal, isReady, write, focus, getBufferText } = useTerminal(
       containerId,
       sessionIdRef,
       memoizedSettings,
       theme,
+      terminalRightClickMode,
       handleData,
       handleResize,
     )
@@ -576,6 +583,12 @@ export const TerminalTab = React.memo<TerminalTabProps>(
     }, [isActive])
 
     useEffect(() => {
+      if (terminalRightClickMode !== "contextMenu") {
+        setTerminalContextMenu(null)
+      }
+    }, [terminalRightClickMode])
+
+    useEffect(() => {
       if (!terminalContextMenu) return
 
       const closeContextMenu = () => {
@@ -684,10 +697,30 @@ export const TerminalTab = React.memo<TerminalTabProps>(
       [isActive, focus],
     )
 
+    const pasteClipboardToTerminal = useCallback(async () => {
+      try {
+        const clipboardText = await readText()
+        if (clipboardText) {
+          window.dispatchEvent(
+            new CustomEvent("paste-snippet", { detail: clipboardText }),
+          )
+        }
+      } catch {
+        // Failed to read clipboard
+      } finally {
+        focus()
+      }
+    }, [focus])
+
     const handleTerminalContextMenu = useCallback(
       (e: React.MouseEvent<HTMLDivElement>) => {
         e.preventDefault()
         e.stopPropagation()
+
+        if (terminalRightClickMode === "selectionCopyPaste") {
+          void pasteClipboardToTerminal()
+          return
+        }
 
         const menuWidth = 128
         const menuHeight = 76
@@ -708,7 +741,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
           canCopy: selection.length > 0,
         })
       },
-      [terminal],
+      [terminal, terminalRightClickMode, pasteClipboardToTerminal],
     )
 
     const handleTerminalContextCopy = useCallback(() => {
@@ -730,19 +763,13 @@ export const TerminalTab = React.memo<TerminalTabProps>(
 
     const handleTerminalContextPaste = useCallback(async () => {
       try {
-        const clipboardText = await readText()
-        if (clipboardText) {
-          window.dispatchEvent(
-            new CustomEvent("paste-snippet", { detail: clipboardText }),
-          )
-        }
+        await pasteClipboardToTerminal()
       } catch {
-        // Failed to read clipboard
+        // Failed to paste clipboard text
       } finally {
         setTerminalContextMenu(null)
-        focus()
       }
-    }, [focus])
+    }, [pasteClipboardToTerminal])
 
     useEffect(() => {
       return () => {
@@ -915,33 +942,35 @@ export const TerminalTab = React.memo<TerminalTabProps>(
             }}
           />
 
-          {terminalContextMenu && isActive && (
-            <div
-              ref={terminalContextMenuRef}
-              className="fixed min-w-[120px] py-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-md shadow-lg z-[200]"
-              style={{
-                left: terminalContextMenu.x,
-                top: terminalContextMenu.y,
-              }}
-              onContextMenu={(e) => e.preventDefault()}
-            >
-              <button
-                type="button"
-                onClick={handleTerminalContextCopy}
-                disabled={!terminalContextMenu.canCopy}
-                className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] disabled:cursor-not-allowed"
+          {terminalRightClickMode === "contextMenu" &&
+            terminalContextMenu &&
+            isActive && (
+              <div
+                ref={terminalContextMenuRef}
+                className="fixed min-w-[120px] py-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-md shadow-lg z-[200]"
+                style={{
+                  left: terminalContextMenu.x,
+                  top: terminalContextMenu.y,
+                }}
+                onContextMenu={(e) => e.preventDefault()}
               >
-                {t.terminalTab.contextMenuCopy}
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleTerminalContextPaste()}
-                className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)]"
-              >
-                {t.terminalTab.contextMenuPaste}
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={handleTerminalContextCopy}
+                  disabled={!terminalContextMenu.canCopy}
+                  className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] disabled:cursor-not-allowed"
+                >
+                  {t.terminalTab.contextMenuCopy}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleTerminalContextPaste()}
+                  className="w-full px-3 py-1.5 text-left text-sm bg-transparent border-0 text-[var(--text-primary)] cursor-pointer hover:bg-[var(--bg-tertiary)]"
+                >
+                  {t.terminalTab.contextMenuPaste}
+                </button>
+              </div>
+            )}
 
           {showManualAuth && isActive && (
             <ManualAuthModal

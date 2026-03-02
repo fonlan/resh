@@ -3,15 +3,17 @@ import { Terminal } from "xterm"
 import { FitAddon } from "xterm-addon-fit"
 import { WebglAddon } from "xterm-addon-webgl"
 import "xterm/css/xterm.css"
-import { TerminalSettings } from "../types"
+import { TerminalSettings, TerminalRightClickMode } from "../types"
 import { debounce } from "../utils/common"
 import { invoke } from "@tauri-apps/api/core"
+import { writeText } from "@tauri-apps/plugin-clipboard-manager"
 
 export const useTerminal = (
   containerId: string,
   sessionIdRef: React.RefObject<string | null>,
   settings?: TerminalSettings,
   theme?: "light" | "dark" | "orange" | "green" | "system",
+  terminalRightClickMode: TerminalRightClickMode = "contextMenu",
   onData?: (data: string) => void,
   onResize?: (cols: number, rows: number) => void,
 ) => {
@@ -22,6 +24,7 @@ export const useTerminal = (
 
   const onDataRef = useRef(onData)
   const onResizeRef = useRef(onResize)
+  const terminalRightClickModeRef = useRef(terminalRightClickMode)
 
   useEffect(() => {
     onDataRef.current = onData
@@ -30,6 +33,10 @@ export const useTerminal = (
   useEffect(() => {
     onResizeRef.current = onResize
   }, [onResize])
+
+  useEffect(() => {
+    terminalRightClickModeRef.current = terminalRightClickMode
+  }, [terminalRightClickMode])
 
   useEffect(() => {
     const container = document.getElementById(containerId)
@@ -105,9 +112,11 @@ export const useTerminal = (
         if (term.hasSelection()) {
           const selection = term.getSelection()
           if (selection) {
-            navigator.clipboard.writeText(selection).catch(() => {
-              // Failed to copy
-            })
+            if (terminalRightClickModeRef.current === "selectionCopyPaste") {
+              writeText(selection).catch(() => {
+                // Failed to auto-copy selection
+              })
+            }
             // Sync selection to backend for AI tools
             const currentSessionId = sessionIdRef.current
             if (currentSessionId) {
@@ -136,7 +145,7 @@ export const useTerminal = (
           Uint8Array.from(atob(b64Data), (c) => c.charCodeAt(0)),
         )
 
-        navigator.clipboard.writeText(text).catch(() => {
+        writeText(text).catch(() => {
           // OSC 52 write failed
         })
 

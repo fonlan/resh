@@ -43,6 +43,12 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
     onGeneralUpdate({ ...general, tabFixedWidth: normalizedWidth })
   }
 
+  const handleTerminalRightClickModeChange = (
+    terminalRightClickMode: "contextMenu" | "selectionCopyPaste",
+  ) => {
+    onGeneralUpdate({ ...general, terminalRightClickMode })
+  }
+
   const handleTerminalUpdate = (
     field: keyof typeof general.terminal,
     value: string | number,
@@ -215,6 +221,34 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
               </span>
             </div>
           )}
+
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label
+              htmlFor="terminal-right-click-mode-select"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.terminalRightClickMode}
+            </label>
+            <CustomSelect
+              id="terminal-right-click-mode-select"
+              value={general.terminalRightClickMode || "contextMenu"}
+              onChange={(val) =>
+                handleTerminalRightClickModeChange(
+                  val as "contextMenu" | "selectionCopyPaste",
+                )
+              }
+              options={[
+                {
+                  value: "contextMenu",
+                  label: t.terminalRightClickModes.contextMenu,
+                },
+                {
+                  value: "selectionCopyPaste",
+                  label: t.terminalRightClickModes.selectionCopyPaste,
+                },
+              ]}
+            />
+          </div>
         </div>
       </div>
 

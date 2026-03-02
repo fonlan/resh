@@ -39,6 +39,7 @@ export type Language = "en" | "zh-CN"
 export type AIMode = "ask" | "agent"
 export type RecordingMode = "raw" | "text"
 export type TabWidthMode = "adaptive" | "fixed"
+export type TerminalRightClickMode = "contextMenu" | "selectionCopyPaste"
 
 export interface GeneralSettings {
   theme: Theme
@@ -60,5 +61,6 @@ export interface GeneralSettings {
   recordingMode: RecordingMode
   tabWidthMode: TabWidthMode
   tabFixedWidth: number
+  terminalRightClickMode: TerminalRightClickMode
   aiModelId?: string
 }

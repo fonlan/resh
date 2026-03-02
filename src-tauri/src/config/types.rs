@@ -258,6 +258,9 @@ pub struct GeneralSettings {
     #[serde(default = "default_tab_fixed_width")]
     #[serde(alias = "tabFixedWidth", alias = "tab_fixed_width")]
     pub tab_fixed_width: u32,
+    #[serde(default = "default_terminal_right_click_mode")]
+    #[serde(alias = "terminalRightClickMode", alias = "terminal_right_click_mode")]
+    pub terminal_right_click_mode: String,
     #[serde(default)]
     #[serde(alias = "aiModelId", alias = "ai_model_id")]
     pub ai_model_id: Option<String>,
@@ -273,6 +276,10 @@ fn default_tab_width_mode() -> String {
 
 fn default_tab_fixed_width() -> u32 {
     200
+}
+
+fn default_terminal_right_click_mode() -> String {
+    "contextMenu".to_string()
 }
 
 fn default_ai_mode() -> String {
@@ -420,6 +427,7 @@ impl Config {
                 recording_mode: default_recording_mode(),
                 tab_width_mode: default_tab_width_mode(),
                 tab_fixed_width: default_tab_fixed_width(),
+                terminal_right_click_mode: default_terminal_right_click_mode(),
                 ai_model_id: None,
             },
         }

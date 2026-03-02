@@ -54,6 +54,11 @@ export const locales = {
     },
     fixedTabWidth: "Fixed Tab Width (px)",
     fixedTabWidthHint: "Range: {min}-{max} px",
+    terminalRightClickMode: "Terminal Right-Click Mode",
+    terminalRightClickModes: {
+      contextMenu: "Context Menu (Copy/Paste)",
+      selectionCopyPaste: "Select to Copy + Right-Click to Paste",
+    },
     saveStatus: {
       saving: "Saving...",
       saved: "Saved",
@@ -507,6 +512,11 @@ export const locales = {
     },
     fixedTabWidth: "固定标签页宽度 (px)",
     fixedTabWidthHint: "可设置范围：{min}-{max} px",
+    terminalRightClickMode: "终端右键模式",
+    terminalRightClickModes: {
+      contextMenu: "右键菜单 (复制/粘贴)",
+      selectionCopyPaste: "选中复制 + 右键粘贴",
+    },
     saveStatus: {
       saving: "正在保存...",
       saved: "已保存",
