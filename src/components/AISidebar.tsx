@@ -77,15 +77,32 @@ interface RenderableMessage {
   modelName: string | null
 }
 
+type RenderableListItem =
+  | {
+      kind: "message"
+      key: string
+      message: RenderableMessage
+      messageIndex: number
+    }
+  | {
+      kind: "pending-tools"
+      key: string
+    }
+  | {
+      kind: "typing"
+      key: string
+    }
+
 interface CommandExecutionToolArgs {
   command?: unknown
   timeoutSeconds?: unknown
   wait_finish?: unknown
 }
 
+type VirtualScrollBehavior = "auto" | "smooth"
+
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
 const VIRTUAL_MESSAGE_GAP_PX = 16
-const MESSAGE_VIRTUALIZATION_THRESHOLD = 40
 const DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS = 30
 
 const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
@@ -1128,28 +1145,63 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     !isLoading &&
     !pendingToolCalls &&
     latestAssistantMessageSourceIndex !== null
-  const shouldUseVirtualizedMessages =
-    renderableMessages.length > MESSAGE_VIRTUALIZATION_THRESHOLD
+  const renderableListItems = useMemo<RenderableListItem[]>(() => {
+    const sessionKey = activeSessionId || "no-session"
+    const items: RenderableListItem[] = renderableMessages.map(
+      (message, messageIndex) => ({
+        kind: "message",
+        key: `${sessionKey}-message-${message.sourceIndex}-${message.msg.created_at || "no-date"}`,
+        message,
+        messageIndex,
+      }),
+    )
+
+    if (pendingToolCalls) {
+      items.push({
+        kind: "pending-tools",
+        key: `${sessionKey}-pending-tools`,
+      })
+    } else if (isLoading) {
+      items.push({
+        kind: "typing",
+        key: `${sessionKey}-typing`,
+      })
+    }
+
+    return items
+  }, [activeSessionId, renderableMessages, pendingToolCalls, isLoading])
   const messageVirtualizer = useVirtualizer({
-    enabled: shouldUseVirtualizedMessages,
-    count: renderableMessages.length,
+    count: renderableListItems.length,
     getScrollElement: () => messagesContainerRef.current,
+    getItemKey: (index) => renderableListItems[index]?.key || index,
     estimateSize: () => 188,
     overscan: 8,
   })
   const virtualMessageItems = messageVirtualizer.getVirtualItems()
   const virtualizedTotalHeight = messageVirtualizer.getTotalSize()
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
-    if (messagesContainerRef.current) {
+  const scrollToBottom = useCallback(
+    (behavior: VirtualScrollBehavior = "auto") => {
       const container = messagesContainerRef.current
+      if (!container) {
+        return
+      }
+
+      if (renderableListItems.length > 0) {
+        messageVirtualizer.scrollToIndex(renderableListItems.length - 1, {
+          align: "end",
+          behavior,
+        })
+      }
+
       if (behavior === "smooth") {
         container.scrollTo({ top: container.scrollHeight, behavior: "smooth" })
       } else {
         container.scrollTop = container.scrollHeight
       }
-    }
-  }, [])
+    },
+    [messageVirtualizer, renderableListItems.length],
+  )
 
   const handleScroll = useCallback(() => {
     if (messagesContainerRef.current) {
@@ -1160,28 +1212,34 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [])
 
-  const lastMessageContentLength = useMemo(() => {
+  const lastMessageRenderSignature = useMemo(() => {
     const lastMsg = currentMessages[currentMessages.length - 1]
     if (lastMsg?.role === "assistant") {
       const contentLength =
         (lastMsg.content?.length || 0) +
         (lastMsg.reasoning_content?.length || 0)
       const toolCallsCount = lastMsg.tool_calls?.length || 0
-      // Include tool calls count to trigger scroll when tool call cards appear
-      return contentLength + toolCallsCount
+      return `${currentMessages.length}:${contentLength + toolCallsCount}`
     }
-    return 0
+    return `${currentMessages.length}:0`
   }, [currentMessages])
 
   useEffect(() => {
-    const shouldScroll = isAtBottomRef.current || isLoading
-    if (shouldScroll && lastMessageContentLength >= 0) {
+    const shouldScroll =
+      isAtBottomRef.current || isLoading || !!pendingToolCalls
+    if (shouldScroll) {
       const rafId = requestAnimationFrame(() => {
         scrollToBottom(isLoading ? "auto" : "smooth")
       })
       return () => cancelAnimationFrame(rafId)
     }
-  }, [lastMessageContentLength, isLoading, scrollToBottom])
+  }, [
+    lastMessageRenderSignature,
+    renderableListItems.length,
+    isLoading,
+    pendingToolCalls,
+    scrollToBottom,
+  ])
 
   // Focus textarea when sidebar opens or when tools are resolved
   useEffect(() => {
@@ -1987,101 +2045,80 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               </div>
             )}
 
-            {shouldUseVirtualizedMessages ? (
-              <div
-                className="relative w-full"
-                style={{ height: `${virtualizedTotalHeight}px` }}
-              >
-                {virtualMessageItems.map((virtualItem) => {
-                  const message = renderableMessages[virtualItem.index]
-                  if (!message) {
-                    return null
-                  }
+            <div
+              className="relative w-full"
+              style={{ height: `${virtualizedTotalHeight}px` }}
+            >
+              {virtualMessageItems.map((virtualItem) => {
+                const item = renderableListItems[virtualItem.index]
+                if (!item) {
+                  return null
+                }
 
-                  const isLastMessage =
-                    virtualItem.index === renderableMessages.length - 1
-
-                  return (
-                    <div
-                      key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || "no-date"}`}
-                      data-index={virtualItem.index}
-                      ref={messageVirtualizer.measureElement}
-                      className="absolute left-0 top-0 w-full"
-                      style={{
-                        transform: `translateY(${virtualItem.start}px)`,
-                        paddingBottom: `${VIRTUAL_MESSAGE_GAP_PX}px`,
-                      }}
-                    >
+                return (
+                  <div
+                    key={item.key}
+                    data-index={virtualItem.index}
+                    ref={messageVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full"
+                    style={{
+                      transform: `translateY(${virtualItem.start}px)`,
+                      paddingBottom: `${VIRTUAL_MESSAGE_GAP_PX}px`,
+                    }}
+                  >
+                    {item.kind === "message" ? (
                       <MessageBubble
-                        msg={message.msg}
+                        msg={item.message.msg}
                         t={t}
-                        isPending={message.isPending}
-                        isLast={isLastMessage}
-                        isStreaming={isLoading && isLastMessage}
-                        modelName={message.modelName}
+                        isPending={item.message.isPending}
+                        isLast={
+                          item.messageIndex === renderableMessages.length - 1
+                        }
+                        isStreaming={
+                          isLoading &&
+                          item.messageIndex === renderableMessages.length - 1
+                        }
+                        modelName={item.message.modelName}
                         canRegenerate={
                           canRegenerateLatestAssistant &&
-                          message.sourceIndex ===
+                          item.message.sourceIndex ===
                             latestAssistantMessageSourceIndex
                         }
                         onRegenerate={handleRegenerateResponse}
                       />
-                    </div>
-                  )
-                })}
-              </div>
-            ) : (
-              renderableMessages.map((message, idx) => (
-                <MessageBubble
-                  key={`${activeSessionId}-${message.sourceIndex}-${message.msg.created_at || "no-date"}`}
-                  msg={message.msg}
-                  t={t}
-                  isPending={message.isPending}
-                  isLast={idx === renderableMessages.length - 1}
-                  isStreaming={
-                    isLoading && idx === renderableMessages.length - 1
-                  }
-                  modelName={message.modelName}
-                  canRegenerate={
-                    canRegenerateLatestAssistant &&
-                    message.sourceIndex === latestAssistantMessageSourceIndex
-                  }
-                  onRegenerate={handleRegenerateResponse}
-                />
-              ))
-            )}
-
-            {pendingToolCalls && (
-              <div className="ai-message assistant">
-                <div className="ai-message-content p-0 overflow-hidden">
-                  <ToolConfirmation
-                    toolCalls={pendingToolCalls}
-                    onConfirm={handleConfirmTools}
-                    onCancel={handleCancelTools}
-                  />
-                </div>
-              </div>
-            )}
-
-            {isLoading && !pendingToolCalls && (
-              <div className="flex flex-col gap-1 max-w-full items-start">
-                <div className="relative max-w-[90%] flex flex-col items-start">
-                  <div className="p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm">
-                    <div className="flex items-center gap-1 px-2 py-1 h-5">
-                      <div
-                        className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"
-                        style={{ animationDelay: "-0.32s" }}
-                      ></div>
-                      <div
-                        className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"
-                        style={{ animationDelay: "-0.16s" }}
-                      ></div>
-                      <div className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"></div>
-                    </div>
+                    ) : item.kind === "pending-tools" ? (
+                      <div className="ai-message assistant">
+                        <div className="ai-message-content p-0 overflow-hidden">
+                          <ToolConfirmation
+                            toolCalls={pendingToolCalls || []}
+                            onConfirm={handleConfirmTools}
+                            onCancel={handleCancelTools}
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1 max-w-full items-start">
+                        <div className="relative max-w-[90%] flex flex-col items-start">
+                          <div className="p-2 px-3 rounded-lg text-[13px] leading-[1.5] w-full break-words overflow-x-auto bg-[var(--bg-tertiary)] text-[var(--text-primary)] rounded-tl-sm">
+                            <div className="flex items-center gap-1 px-2 py-1 h-5">
+                              <div
+                                className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"
+                                style={{ animationDelay: "-0.32s" }}
+                              ></div>
+                              <div
+                                className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"
+                                style={{ animationDelay: "-0.16s" }}
+                              ></div>
+                              <div className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-typing-bounce"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </div>
-            )}
+                )
+              })}
+            </div>
           </div>
 
           <div className="p-3 border-t border-[var(--glass-border)] bg-[var(--bg-secondary)] flex flex-col gap-2">
