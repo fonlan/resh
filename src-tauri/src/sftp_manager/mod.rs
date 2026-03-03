@@ -125,6 +125,8 @@ const COPY_DATA_EXTENSION_NAME: &str = "copy-data";
 const COPY_DATA_EXTENSION_VERSION: &str = "1";
 const COPY_TRANSFER_TYPE: &str = "copy";
 const COPY_DATA_UNSUPPORTED_ERROR: &str = "SFTP_COPY_DATA_UNSUPPORTED";
+const SFTP_REQUEST_TIMEOUT_SECS: u64 = 60;
+const DOWNLOAD_CHUNK_SIZE: u64 = 256 * 1024;
 
 #[derive(Serialize)]
 struct CopyDataExtension {
@@ -522,7 +524,10 @@ impl SftpManager {
     pub async fn get_session(session_id: &str) -> Result<Arc<RawSftpSession>, String> {
         let mut sessions = SFTP_SESSIONS.lock().await;
         if let Some(s) = sessions.get(session_id) {
-            return Ok(s.clone());
+            let sftp = s.clone();
+            drop(sessions);
+            sftp.set_timeout(SFTP_REQUEST_TIMEOUT_SECS).await;
+            return Ok(sftp);
         }
 
         let ssh_session = SSHClient::get_session_handle(session_id)
@@ -540,6 +545,7 @@ impl SftpManager {
             .map_err(|e| format!("Failed to request SFTP subsystem: {}", e))?;
 
         let sftp = RawSftpSession::new(channel.into_stream());
+        sftp.set_timeout(SFTP_REQUEST_TIMEOUT_SECS).await;
         let version = sftp
             .init()
             .await
@@ -972,10 +978,12 @@ impl SftpManager {
                     .map_err(|e| e.to_string())?;
 
                 let mut transferred = 0u64;
-                let chunk_size = 256 * 1024;
-                let max_concurrent_requests = 64;
+                let chunk_size = DOWNLOAD_CHUNK_SIZE;
                 let start_time = Instant::now();
                 let mut last_emit = Instant::now();
+                let mut display_speed = 0.0f64;
+                let mut last_speed_sample_at = start_time;
+                let mut last_speed_sample_bytes = 0u64;
 
                 let _ = app.emit(
                     "transfer-progress",
@@ -995,97 +1003,62 @@ impl SftpManager {
                     },
                 );
 
-                let mut futures = FuturesUnordered::new();
-                let mut next_offset = 0u64;
-
                 let transfer_result: Result<(), String> = async {
-                    for _ in 0..max_concurrent_requests {
-                        if next_offset >= total_bytes {
-                            break;
-                        }
-                        let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
-                        let offset = next_offset;
-                        let sftp_clone = sftp.clone();
-                        let handle_clone = handle.clone();
-
-                        futures.push(
-                            async move {
-                                let mut buffered = Vec::with_capacity(current_chunk_size as usize);
-                                let mut read_offset = offset;
-                                let mut remaining = current_chunk_size;
-
-                                while remaining > 0 {
-                                    let request_size =
-                                        std::cmp::min(remaining, u32::MAX as u64) as u32;
-                                    match sftp_clone
-                                        .read(&handle_clone, read_offset, request_size)
-                                        .await
-                                    {
-                                        Ok(data) => {
-                                            if data.data.is_empty() {
-                                                return (
-                                                    offset,
-                                                    Err(format!(
-                                                        "Download incomplete: empty data before full chunk (offset={}, remaining={}, total={})",
-                                                        read_offset, remaining, total_bytes
-                                                    )),
-                                                );
-                                            }
-                                            let read_len = data.data.len() as u64;
-                                            buffered.extend_from_slice(&data.data);
-                                            read_offset = read_offset.saturating_add(read_len);
-                                            remaining = remaining.saturating_sub(read_len);
-                                        }
-                                        Err(russh_sftp::client::error::Error::Status(status))
-                                            if status.status_code == StatusCode::Eof =>
-                                        {
-                                            return (
-                                                offset,
-                                                Err(format!(
-                                                    "Download incomplete: EOF before full chunk (offset={}, remaining={}, total={})",
-                                                    read_offset, remaining, total_bytes
-                                                )),
-                                            );
-                                        }
-                                        Err(e) => return (offset, Err(e.to_string())),
-                                    }
-                                }
-
-                                (offset, Ok(buffered))
-                            }
-                            .boxed(),
-                        );
-                        next_offset += current_chunk_size;
-                    }
-
-                    while let Some((offset, result)) = futures.next().await {
+                    while transferred < total_bytes {
                         if cancel_token.load(Ordering::SeqCst) {
                             return Err("Cancelled".to_string());
                         }
 
-                        let data = result?;
+                        let request_size =
+                            std::cmp::min(chunk_size, total_bytes.saturating_sub(transferred));
+                        let read_size = std::cmp::min(request_size, u32::MAX as u64) as u32;
+                        let data = match sftp.read(&handle, transferred, read_size).await {
+                            Ok(data) => data,
+                            Err(russh_sftp::client::error::Error::Status(status))
+                                if status.status_code == StatusCode::Eof =>
+                            {
+                                return Err(format!(
+                                    "Download incomplete: EOF before full content ({} / {} bytes)",
+                                    transferred, total_bytes
+                                ));
+                            }
+                            Err(e) => return Err(e.to_string()),
+                        };
+
+                        if data.data.is_empty() {
+                            return Err(format!(
+                                "Download incomplete: empty data before full content ({} / {} bytes)",
+                                transferred, total_bytes
+                            ));
+                        }
 
                         local_file
-                            .seek(SeekFrom::Start(offset))
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        local_file
-                            .write_all(&data)
+                            .write_all(&data.data)
                             .await
                             .map_err(|e| e.to_string())?;
 
-                        transferred += data.len() as u64;
+                        transferred += data.data.len() as u64;
 
                         if last_emit.elapsed().as_millis() > 500 {
-                            let duration = start_time.elapsed().as_secs_f64();
-                            let speed = if duration > 0.0 {
-                                transferred as f64 / duration
-                            } else {
-                                0.0
-                            };
-                            let eta = if speed > 0.0 {
+                            let now = Instant::now();
+                            let sample_secs =
+                                now.duration_since(last_speed_sample_at).as_secs_f64();
+                            if sample_secs > 0.0 && transferred >= last_speed_sample_bytes {
+                                let instant_speed =
+                                    (transferred - last_speed_sample_bytes) as f64 / sample_secs;
+                                display_speed = if display_speed > 0.0 {
+                                    (display_speed * 0.6) + (instant_speed * 0.4)
+                                } else {
+                                    instant_speed
+                                };
+                            }
+                            last_speed_sample_at = now;
+                            last_speed_sample_bytes = transferred;
+
+                            let eta = if display_speed > 0.0 {
                                 Some(
-                                    ((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64,
+                                    ((total_bytes.saturating_sub(transferred)) as f64 / display_speed)
+                                        as u64,
                                 )
                             } else {
                                 None
@@ -1102,67 +1075,13 @@ impl SftpManager {
                                     destination: local_path_inner.clone(),
                                     total_bytes,
                                     transferred_bytes: transferred,
-                                    speed,
+                                    speed: display_speed,
                                     eta,
                                     status: "transferring".to_string(),
                                     error: None,
                                 },
                             );
                             last_emit = Instant::now();
-                        }
-
-                        if next_offset < total_bytes {
-                            let current_chunk_size =
-                                std::cmp::min(chunk_size, total_bytes - next_offset);
-                            let offset = next_offset;
-                            let sftp_clone = sftp.clone();
-                            let handle_clone = handle.clone();
-
-                            futures.push(Box::pin(async move {
-                                let mut buffered = Vec::with_capacity(current_chunk_size as usize);
-                                let mut read_offset = offset;
-                                let mut remaining = current_chunk_size;
-
-                                while remaining > 0 {
-                                    let request_size =
-                                        std::cmp::min(remaining, u32::MAX as u64) as u32;
-                                    match sftp_clone
-                                        .read(&handle_clone, read_offset, request_size)
-                                        .await
-                                    {
-                                        Ok(data) => {
-                                            if data.data.is_empty() {
-                                                return (
-                                                    offset,
-                                                    Err(format!(
-                                                        "Download incomplete: empty data before full chunk (offset={}, remaining={}, total={})",
-                                                        read_offset, remaining, total_bytes
-                                                    )),
-                                                );
-                                            }
-                                            let read_len = data.data.len() as u64;
-                                            buffered.extend_from_slice(&data.data);
-                                            read_offset = read_offset.saturating_add(read_len);
-                                            remaining = remaining.saturating_sub(read_len);
-                                        }
-                                        Err(russh_sftp::client::error::Error::Status(status))
-                                            if status.status_code == StatusCode::Eof =>
-                                        {
-                                            return (
-                                                offset,
-                                                Err(format!(
-                                                    "Download incomplete: EOF before full chunk (offset={}, remaining={}, total={})",
-                                                    read_offset, remaining, total_bytes
-                                                )),
-                                            );
-                                        }
-                                        Err(e) => return (offset, Err(e.to_string())),
-                                    }
-                                }
-
-                                (offset, Ok(buffered))
-                            }));
-                            next_offset += current_chunk_size;
                         }
                     }
 
