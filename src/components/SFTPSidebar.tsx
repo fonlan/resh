@@ -106,7 +106,16 @@ interface CopyFallbackModalState {
   targetPath: string
 }
 
+interface ContextSubmenuPosition {
+  top: number
+  left: number
+  maxHeight: number
+}
+
 const normalizeSftpPath = (path: string): string => path.replace(/\\/g, "/")
+const CONTEXT_SUBMENU_WIDTH = 220
+const CONTEXT_MENU_VIEWPORT_PADDING = 8
+const CONTEXT_SUBMENU_GAP = 4
 
 const updateTreeNodeByPath = (
   nodes: FileEntry[],
@@ -530,6 +539,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   > | null>(null)
   const [customCommandsSubmenuTimeout, setCustomCommandsSubmenuTimeout] =
     useState<ReturnType<typeof setTimeout> | null>(null)
+  const customCommandsTriggerRef = useRef<HTMLDivElement>(null)
+  const [customCommandsSubmenuPosition, setCustomCommandsSubmenuPosition] =
+    useState<ContextSubmenuPosition | null>(null)
   const activeDirectoryLoadRequestsRef = useRef<Record<string, string>>({})
 
   // Trigger terminal resize when locked state changes
@@ -1153,6 +1165,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     setShowPathSubmenu(false)
     setShowEditSubmenu(false)
     setShowCustomCommandsSubmenu(false)
+    setCustomCommandsSubmenuPosition(null)
   }, [])
 
   const handleEditVim = () => {
@@ -1177,6 +1190,96 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     }
     return matchPattern(entry.name, cmd.pattern)
   }
+
+  const matchedCustomCommands = useMemo(() => {
+    if (!contextMenu?.entry || !config?.sftpCustomCommands) {
+      return []
+    }
+
+    return config.sftpCustomCommands
+      .filter((cmd) => matchCustomCommand(contextMenu.entry!, cmd))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [config?.sftpCustomCommands, contextMenu?.entry])
+
+  const clearCustomCommandsSubmenuCloseTimeout = useCallback(() => {
+    if (customCommandsSubmenuTimeout) {
+      clearTimeout(customCommandsSubmenuTimeout)
+      setCustomCommandsSubmenuTimeout(null)
+    }
+  }, [customCommandsSubmenuTimeout])
+
+  const updateCustomCommandsSubmenuPosition = useCallback(() => {
+    const trigger = customCommandsTriggerRef.current
+    if (!trigger) {
+      return
+    }
+
+    const triggerRect = trigger.getBoundingClientRect()
+    const preferredHeight = Math.min(
+      320,
+      Math.max(120, matchedCustomCommands.length * 36 + 12),
+    )
+    const top = Math.min(
+      Math.max(triggerRect.top - 4, CONTEXT_MENU_VIEWPORT_PADDING),
+      Math.max(
+        CONTEXT_MENU_VIEWPORT_PADDING,
+        window.innerHeight - preferredHeight - CONTEXT_MENU_VIEWPORT_PADDING,
+      ),
+    )
+
+    const rightSideLeft = triggerRect.right + CONTEXT_SUBMENU_GAP
+    const left =
+      rightSideLeft + CONTEXT_SUBMENU_WIDTH <=
+      window.innerWidth - CONTEXT_MENU_VIEWPORT_PADDING
+        ? rightSideLeft
+        : Math.max(
+            CONTEXT_MENU_VIEWPORT_PADDING,
+            triggerRect.left - CONTEXT_SUBMENU_WIDTH - CONTEXT_SUBMENU_GAP,
+          )
+    const maxHeight = Math.max(
+      120,
+      window.innerHeight - top - CONTEXT_MENU_VIEWPORT_PADDING,
+    )
+
+    setCustomCommandsSubmenuPosition({ top, left, maxHeight })
+  }, [matchedCustomCommands.length])
+
+  const openCustomCommandsSubmenu = useCallback(() => {
+    clearCustomCommandsSubmenuCloseTimeout()
+    setShowCustomCommandsSubmenu(true)
+    updateCustomCommandsSubmenuPosition()
+  }, [
+    clearCustomCommandsSubmenuCloseTimeout,
+    updateCustomCommandsSubmenuPosition,
+  ])
+
+  const scheduleCloseCustomCommandsSubmenu = useCallback(() => {
+    clearCustomCommandsSubmenuCloseTimeout()
+    const timeout = setTimeout(() => {
+      setShowCustomCommandsSubmenu(false)
+    }, 200)
+    setCustomCommandsSubmenuTimeout(timeout)
+  }, [clearCustomCommandsSubmenuCloseTimeout])
+
+  useEffect(() => {
+    if (!showCustomCommandsSubmenu) {
+      setCustomCommandsSubmenuPosition(null)
+      return
+    }
+
+    updateCustomCommandsSubmenuPosition()
+    window.addEventListener("resize", updateCustomCommandsSubmenuPosition)
+    window.addEventListener("scroll", updateCustomCommandsSubmenuPosition, true)
+
+    return () => {
+      window.removeEventListener("resize", updateCustomCommandsSubmenuPosition)
+      window.removeEventListener(
+        "scroll",
+        updateCustomCommandsSubmenuPosition,
+        true,
+      )
+    }
+  }, [showCustomCommandsSubmenu, updateCustomCommandsSubmenuPosition])
 
   const handleExecuteCustomCommand = (cmd: SftpCustomCommand) => {
     if (!contextMenu || !contextMenu.entry) return
@@ -2349,7 +2452,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
       {contextMenu && (
         <div
-          className="fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
+          className="sftp-context-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
           style={{
             top:
               contextMenu.y > window.innerHeight - 350 ? "auto" : contextMenu.y,
@@ -2581,63 +2684,61 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             </>
           )}
 
-          {contextMenu.entry &&
-            config?.sftpCustomCommands &&
-            config.sftpCustomCommands.some((cmd) =>
-              matchCustomCommand(contextMenu.entry!, cmd),
-            ) && (
-              <div className="relative border-t border-[var(--glass-border)] mt-1 pt-1">
-                <div
-                  role="menuitem"
-                  onMouseEnter={() => {
-                    if (customCommandsSubmenuTimeout) {
-                      clearTimeout(customCommandsSubmenuTimeout)
-                      setCustomCommandsSubmenuTimeout(null)
-                    }
-                    setShowCustomCommandsSubmenu(true)
-                  }}
-                  onMouseLeave={() => {
-                    const timeout = setTimeout(() => {
+          {contextMenu.entry && matchedCustomCommands.length > 0 && (
+            <div className="relative border-t border-[var(--glass-border)] mt-1 pt-1">
+              <div
+                ref={customCommandsTriggerRef}
+                role="menuitem"
+                onMouseEnter={openCustomCommandsSubmenu}
+                onMouseLeave={scheduleCloseCustomCommandsSubmenu}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (showCustomCommandsSubmenu) {
                       setShowCustomCommandsSubmenu(false)
-                    }, 200)
-                    setCustomCommandsSubmenuTimeout(timeout)
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowCustomCommandsSubmenu(!showCustomCommandsSubmenu)
+                      return
                     }
-                    className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                  >
-                    <Terminal size={14} /> {t.sftp.contextMenu.commands}
-                    <ChevronRight
-                      size={14}
-                      style={{ marginLeft: "auto", opacity: 0.5 }}
-                    />
-                  </button>
-                  {showCustomCommandsSubmenu && (
-                    <div className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
-                      {config.sftpCustomCommands
-                        .filter((cmd) =>
-                          matchCustomCommand(contextMenu.entry!, cmd),
-                        )
-                        .sort((a, b) => a.name.localeCompare(b.name))
-                        .map((cmd) => (
-                          <button
-                            key={cmd.id}
-                            type="button"
-                            onClick={() => handleExecuteCustomCommand(cmd)}
-                            className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                          >
-                            <Terminal size={14} /> {cmd.name}
-                          </button>
-                        ))}
-                    </div>
+                    openCustomCommandsSubmenu()
+                  }}
+                  className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
+                >
+                  <Terminal size={14} /> {t.sftp.contextMenu.commands}
+                  <ChevronRight
+                    size={14}
+                    style={{ marginLeft: "auto", opacity: 0.5 }}
+                  />
+                </button>
+                {showCustomCommandsSubmenu &&
+                  customCommandsSubmenuPosition &&
+                  createPortal(
+                    <div
+                      className="sftp-context-submenu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] p-1 z-[1001] overflow-y-auto backdrop-blur-xl animate-sftp-fade-in"
+                      style={{
+                        top: customCommandsSubmenuPosition.top,
+                        left: customCommandsSubmenuPosition.left,
+                        width: CONTEXT_SUBMENU_WIDTH,
+                        maxHeight: customCommandsSubmenuPosition.maxHeight,
+                      }}
+                      onMouseEnter={openCustomCommandsSubmenu}
+                      onMouseLeave={scheduleCloseCustomCommandsSubmenu}
+                    >
+                      {matchedCustomCommands.map((cmd) => (
+                        <button
+                          key={cmd.id}
+                          type="button"
+                          onClick={() => handleExecuteCustomCommand(cmd)}
+                          className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
+                        >
+                          <Terminal size={14} /> {cmd.name}
+                        </button>
+                      ))}
+                    </div>,
+                    document.body,
                   )}
-                </div>
               </div>
-            )}
+            </div>
+          )}
         </div>
       )}
 
