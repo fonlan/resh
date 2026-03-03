@@ -771,6 +771,46 @@ impl SftpManager {
         task_id: Option<String>,
         _ai_session_id: Option<String>,
     ) -> Result<String, String> {
+        let sftp = Self::get_session(&session_id).await?;
+        let metadata = sftp
+            .stat(&remote_path)
+            .await
+            .map_err(|e| e.to_string())?
+            .attrs;
+
+        if metadata.is_dir() {
+            let download_files =
+                Self::collect_directory_download_files(&sftp, &remote_path, &local_path).await?;
+
+            if download_files.is_empty() {
+                tokio::fs::create_dir_all(&local_path)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                return Ok(task_id.unwrap_or_else(|| Uuid::new_v4().to_string()));
+            }
+
+            let mut preferred_task_id = task_id;
+            let mut first_task_id: Option<String> = None;
+
+            for (file_remote_path, file_local_path) in download_files {
+                let queued_task_id = Self::queue_download(
+                    app.clone(),
+                    db_manager.clone(),
+                    session_id.clone(),
+                    file_remote_path,
+                    file_local_path,
+                    preferred_task_id.take(),
+                )
+                .await?;
+
+                if first_task_id.is_none() {
+                    first_task_id = Some(queued_task_id);
+                }
+            }
+
+            return first_task_id.ok_or_else(|| "No download tasks were queued".to_string());
+        }
+
         Self::queue_download(
             app,
             db_manager,
@@ -780,6 +820,72 @@ impl SftpManager {
             task_id,
         )
         .await
+    }
+
+    async fn collect_directory_download_files(
+        sftp: &Arc<RawSftpSession>,
+        remote_root: &str,
+        local_root: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        tokio::fs::create_dir_all(local_root)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let mut pending_dirs = vec![(remote_root.to_string(), local_root.to_string())];
+        let mut files = Vec::new();
+
+        while let Some((remote_dir, local_dir)) = pending_dirs.pop() {
+            let dir_handle = sftp
+                .opendir(&remote_dir)
+                .await
+                .map_err(|e| e.to_string())?
+                .handle;
+
+            let mut dir_result: Result<(), String> = Ok(());
+
+            loop {
+                match sftp.readdir(&dir_handle).await {
+                    Ok(name) => {
+                        for entry in name.files {
+                            let file_name = entry.filename;
+                            if file_name == "." || file_name == ".." {
+                                continue;
+                            }
+
+                            let remote_path =
+                                format!("{}/{}", remote_dir.trim_end_matches('/'), file_name);
+                            let local_path = Path::new(&local_dir)
+                                .join(&file_name)
+                                .to_string_lossy()
+                                .to_string();
+
+                            if entry.attrs.is_dir() {
+                                tokio::fs::create_dir_all(&local_path)
+                                    .await
+                                    .map_err(|e| e.to_string())?;
+                                pending_dirs.push((remote_path, local_path));
+                            } else {
+                                files.push((remote_path, local_path));
+                            }
+                        }
+                    }
+                    Err(russh_sftp::client::error::Error::Status(status))
+                        if status.status_code == StatusCode::Eof =>
+                    {
+                        break
+                    }
+                    Err(e) => {
+                        dir_result = Err(e.to_string());
+                        break;
+                    }
+                }
+            }
+
+            let _ = sftp.close(dir_handle).await;
+            dir_result?;
+        }
+
+        Ok(files)
     }
 
     async fn _download_file(
