@@ -281,6 +281,7 @@ const FileTreeItem: React.FC<{
         ref={rowRef}
         type="button"
         draggable
+        data-sftp-path={entry.path}
         className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent min-w-full w-max text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? "opacity-50" : ""}`}
         onClick={() => onToggle(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
@@ -1396,6 +1397,65 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     return `${normalizedParentPath}/${normalizedItemName}`
   }
 
+  const getPathAncestors = (path: string): string[] => {
+    const normalizedPath = normalizeRemotePath(path)
+    if (normalizedPath === "/" || normalizedPath === ".") {
+      return []
+    }
+
+    const parts = normalizedPath.split("/").filter(Boolean)
+    const ancestors: string[] = []
+    let current = ""
+    parts.forEach((part) => {
+      current = `${current}/${part}`
+      ancestors.push(current)
+    })
+
+    return ancestors
+  }
+
+  const scrollTreePathIntoView = (targetPath: string) => {
+    const normalizedTargetPath = normalizeRemotePath(targetPath)
+    let attempts = 0
+    const maxAttempts = 20
+
+    const tryScroll = () => {
+      attempts += 1
+      const treeContainer = sidebarRef.current?.querySelector<HTMLElement>(
+        "[data-sftp-tree-scroll]",
+      )
+      if (!treeContainer) {
+        return
+      }
+
+      const targetRow = Array.from(
+        treeContainer.querySelectorAll<HTMLButtonElement>(
+          "button[data-sftp-path]",
+        ),
+      ).find((row) => {
+        const rowPath = row.dataset.sftpPath
+        return rowPath
+          ? normalizeRemotePath(rowPath) === normalizedTargetPath
+          : false
+      })
+
+      if (targetRow) {
+        targetRow.scrollIntoView({
+          block: "center",
+          inline: "nearest",
+          behavior: "smooth",
+        })
+        return
+      }
+
+      if (attempts < maxAttempts) {
+        window.setTimeout(tryScroll, 50)
+      }
+    }
+
+    window.setTimeout(tryScroll, 0)
+  }
+
   const normalizeFavoritePaths = useCallback((paths: string[]): string[] => {
     const deduped = new Set<string>()
     const result: string[] = []
@@ -1653,34 +1713,30 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
     updateSession(sessionId, { isLoading: true })
     try {
-      const files = await invoke<FileEntry[]>("sftp_list_dir_sorted", {
+      await invoke<FileEntry[]>("sftp_list_dir_sorted", {
         sessionId,
         path: normalizedPath,
         sortType: requestedSort.type,
         sortOrder: requestedSort.order,
       })
 
-      setSessions((prev) => {
-        const session = prev[sessionId] || {
-          rootFiles: [],
-          currentPath: "/",
-          sortState: requestedSort,
-          isLoading: false,
-        }
-        return {
-          ...prev,
-          [sessionId]: {
-            ...session,
-            rootFiles: files,
-            currentPath: normalizedPath,
-            sortState: requestedSort,
-            isLoading: false,
-          },
-        }
+      const expandedPaths = currentSessionState
+        ? getAllExpandedPaths(currentSessionState.rootFiles)
+        : new Set<string>()
+      getPathAncestors(normalizedPath).forEach((path) => {
+        expandedPaths.add(path)
+      })
+
+      await refreshDirectoryTree(sessionId, "/", expandedPaths, requestedSort)
+      updateSession(sessionId, {
+        currentPath: normalizedPath,
+        sortState: requestedSort,
+        isLoading: false,
       })
 
       setFavoriteError(null)
       setShowFavoritesMenu(false)
+      scrollTreePathIntoView(normalizedPath)
     } catch (error) {
       console.error("Failed to jump to favorite path:", error)
       updateSession(sessionId, { isLoading: false })
