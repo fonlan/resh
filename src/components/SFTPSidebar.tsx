@@ -569,6 +569,42 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     [],
   )
 
+  const setTreePathExpansionState = useCallback(
+    (
+      sid: string,
+      path: string,
+      options: {
+        isExpanded?: boolean
+        isLoading?: boolean
+      },
+    ) => {
+      updateSession(sid, (prev) => {
+        const updateResult = updateTreeNodeByPath(
+          prev.rootFiles,
+          path,
+          (node) => ({
+            ...node,
+            ...(options.isExpanded === undefined
+              ? {}
+              : { isExpanded: options.isExpanded }),
+            ...(options.isLoading === undefined
+              ? {}
+              : { isLoading: options.isLoading }),
+          }),
+        )
+
+        if (!updateResult.found) {
+          return {}
+        }
+
+        return {
+          rootFiles: updateResult.nodes,
+        }
+      })
+    },
+    [updateSession],
+  )
+
   const getDirectoryLoadKey = (sid: string, path: string): string =>
     `${sid}:${normalizeSftpPath(path)}`
 
@@ -1710,6 +1746,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     const normalizedPath = normalizeRemotePath(favorite.path)
     const currentSessionState = sessions[sessionId]
     const requestedSort = currentSessionState?.sortState || DEFAULT_SORT_STATE
+    const ancestorPaths = getPathAncestors(normalizedPath)
 
     updateSession(sessionId, { isLoading: true })
     try {
@@ -1723,11 +1760,33 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       const expandedPaths = currentSessionState
         ? getAllExpandedPaths(currentSessionState.rootFiles)
         : new Set<string>()
-      getPathAncestors(normalizedPath).forEach((path) => {
-        expandedPaths.add(path)
-      })
 
-      await refreshDirectoryTree(sessionId, "/", expandedPaths, requestedSort)
+      await loadDirectory("/", sessionId, expandedPaths, requestedSort)
+
+      for (let index = 0; index < ancestorPaths.length; index += 1) {
+        const ancestorPath = ancestorPaths[index]
+        const isLastLayer = index === ancestorPaths.length - 1
+
+        expandedPaths.add(ancestorPath)
+        setTreePathExpansionState(sessionId, ancestorPath, {
+          isExpanded: true,
+          isLoading: !isLastLayer,
+        })
+        scrollTreePathIntoView(ancestorPath)
+
+        if (isLastLayer) {
+          continue
+        }
+
+        await loadDirectory(
+          ancestorPath,
+          sessionId,
+          expandedPaths,
+          requestedSort,
+        )
+        scrollTreePathIntoView(ancestorPath)
+      }
+
       updateSession(sessionId, {
         currentPath: normalizedPath,
         sortState: requestedSort,
