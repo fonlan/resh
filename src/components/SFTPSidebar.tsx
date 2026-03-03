@@ -1729,6 +1729,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   }
 
   const handleJumpToFavorite = async (favorite: FavoriteTarget) => {
+    setShowFavoritesMenu(false)
+    setFavoriteError(null)
+
     if (!serverId || !sessionId) {
       return
     }
@@ -1765,18 +1768,13 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
       for (let index = 0; index < ancestorPaths.length; index += 1) {
         const ancestorPath = ancestorPaths[index]
-        const isLastLayer = index === ancestorPaths.length - 1
 
         expandedPaths.add(ancestorPath)
         setTreePathExpansionState(sessionId, ancestorPath, {
           isExpanded: true,
-          isLoading: !isLastLayer,
+          isLoading: true,
         })
         scrollTreePathIntoView(ancestorPath)
-
-        if (isLastLayer) {
-          continue
-        }
 
         await loadDirectory(
           ancestorPath,
@@ -1794,7 +1792,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       })
 
       setFavoriteError(null)
-      setShowFavoritesMenu(false)
       scrollTreePathIntoView(normalizedPath)
     } catch (error) {
       console.error("Failed to jump to favorite path:", error)
@@ -2250,7 +2247,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                           >
                             <button
                               type="button"
-                              onClick={() => handleJumpToFavorite(favorite)}
+                              onClick={() => {
+                                void handleJumpToFavorite(favorite)
+                              }}
                               className={`flex-1 min-w-0 px-3 py-2 border-0 bg-transparent cursor-pointer rounded text-left transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:translate-x-0.5 ${isActiveServerFavorite ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}
                               title={favorite.path}
                             >
