@@ -998,97 +998,200 @@ impl SftpManager {
                 let mut futures = FuturesUnordered::new();
                 let mut next_offset = 0u64;
 
-                for _ in 0..max_concurrent_requests {
-                    if next_offset >= total_bytes {
-                        break;
-                    }
-                    let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
-                    let offset = next_offset;
-                    let sftp_clone = sftp.clone();
-                    let handle_clone = handle.clone();
-
-                    futures.push(
-                        async move {
-                            let data = sftp_clone
-                                .read(handle_clone, offset, current_chunk_size as u32)
-                                .await;
-                            (offset, data)
+                let transfer_result: Result<(), String> = async {
+                    for _ in 0..max_concurrent_requests {
+                        if next_offset >= total_bytes {
+                            break;
                         }
-                        .boxed(),
-                    );
-                    next_offset += current_chunk_size;
-                }
-
-                while let Some((offset, result)) = futures.next().await {
-                    if cancel_token.load(Ordering::SeqCst) {
-                        return Err("Cancelled".to_string());
-                    }
-
-                    let data = result.map_err(|e| e.to_string())?.data;
-
-                    local_file
-                        .seek(SeekFrom::Start(offset))
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    local_file
-                        .write_all(&data)
-                        .await
-                        .map_err(|e| e.to_string())?;
-
-                    transferred += data.len() as u64;
-
-                    if last_emit.elapsed().as_millis() > 500 {
-                        let duration = start_time.elapsed().as_secs_f64();
-                        let speed = if duration > 0.0 {
-                            transferred as f64 / duration
-                        } else {
-                            0.0
-                        };
-                        let eta = if speed > 0.0 {
-                            Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
-                        } else {
-                            None
-                        };
-
-                        let _ = app.emit(
-                            "transfer-progress",
-                            TransferProgress {
-                                task_id: task_id_inner.clone(),
-                                type_: "download".to_string(),
-                                session_id: session_id_inner.clone(),
-                                file_name: file_name.clone(),
-                                source: remote_path_inner.clone(),
-                                destination: local_path_inner.clone(),
-                                total_bytes,
-                                transferred_bytes: transferred,
-                                speed,
-                                eta,
-                                status: "transferring".to_string(),
-                                error: None,
-                            },
-                        );
-                        last_emit = Instant::now();
-                    }
-
-                    if next_offset < total_bytes {
-                        let current_chunk_size =
-                            std::cmp::min(chunk_size, total_bytes - next_offset);
+                        let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
                         let offset = next_offset;
                         let sftp_clone = sftp.clone();
                         let handle_clone = handle.clone();
 
-                        futures.push(Box::pin(async move {
-                            let data = sftp_clone
-                                .read(handle_clone, offset, current_chunk_size as u32)
-                                .await;
-                            (offset, data)
-                        }));
+                        futures.push(
+                            async move {
+                                let mut buffered = Vec::with_capacity(current_chunk_size as usize);
+                                let mut read_offset = offset;
+                                let mut remaining = current_chunk_size;
+
+                                while remaining > 0 {
+                                    let request_size =
+                                        std::cmp::min(remaining, u32::MAX as u64) as u32;
+                                    match sftp_clone
+                                        .read(&handle_clone, read_offset, request_size)
+                                        .await
+                                    {
+                                        Ok(data) => {
+                                            if data.data.is_empty() {
+                                                return (
+                                                    offset,
+                                                    Err(format!(
+                                                        "Download incomplete: empty data before full chunk (offset={}, remaining={}, total={})",
+                                                        read_offset, remaining, total_bytes
+                                                    )),
+                                                );
+                                            }
+                                            let read_len = data.data.len() as u64;
+                                            buffered.extend_from_slice(&data.data);
+                                            read_offset = read_offset.saturating_add(read_len);
+                                            remaining = remaining.saturating_sub(read_len);
+                                        }
+                                        Err(russh_sftp::client::error::Error::Status(status))
+                                            if status.status_code == StatusCode::Eof =>
+                                        {
+                                            return (
+                                                offset,
+                                                Err(format!(
+                                                    "Download incomplete: EOF before full chunk (offset={}, remaining={}, total={})",
+                                                    read_offset, remaining, total_bytes
+                                                )),
+                                            );
+                                        }
+                                        Err(e) => return (offset, Err(e.to_string())),
+                                    }
+                                }
+
+                                (offset, Ok(buffered))
+                            }
+                            .boxed(),
+                        );
                         next_offset += current_chunk_size;
                     }
+
+                    while let Some((offset, result)) = futures.next().await {
+                        if cancel_token.load(Ordering::SeqCst) {
+                            return Err("Cancelled".to_string());
+                        }
+
+                        let data = result?;
+
+                        local_file
+                            .seek(SeekFrom::Start(offset))
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        local_file
+                            .write_all(&data)
+                            .await
+                            .map_err(|e| e.to_string())?;
+
+                        transferred += data.len() as u64;
+
+                        if last_emit.elapsed().as_millis() > 500 {
+                            let duration = start_time.elapsed().as_secs_f64();
+                            let speed = if duration > 0.0 {
+                                transferred as f64 / duration
+                            } else {
+                                0.0
+                            };
+                            let eta = if speed > 0.0 {
+                                Some(
+                                    ((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64,
+                                )
+                            } else {
+                                None
+                            };
+
+                            let _ = app.emit(
+                                "transfer-progress",
+                                TransferProgress {
+                                    task_id: task_id_inner.clone(),
+                                    type_: "download".to_string(),
+                                    session_id: session_id_inner.clone(),
+                                    file_name: file_name.clone(),
+                                    source: remote_path_inner.clone(),
+                                    destination: local_path_inner.clone(),
+                                    total_bytes,
+                                    transferred_bytes: transferred,
+                                    speed,
+                                    eta,
+                                    status: "transferring".to_string(),
+                                    error: None,
+                                },
+                            );
+                            last_emit = Instant::now();
+                        }
+
+                        if next_offset < total_bytes {
+                            let current_chunk_size =
+                                std::cmp::min(chunk_size, total_bytes - next_offset);
+                            let offset = next_offset;
+                            let sftp_clone = sftp.clone();
+                            let handle_clone = handle.clone();
+
+                            futures.push(Box::pin(async move {
+                                let mut buffered = Vec::with_capacity(current_chunk_size as usize);
+                                let mut read_offset = offset;
+                                let mut remaining = current_chunk_size;
+
+                                while remaining > 0 {
+                                    let request_size =
+                                        std::cmp::min(remaining, u32::MAX as u64) as u32;
+                                    match sftp_clone
+                                        .read(&handle_clone, read_offset, request_size)
+                                        .await
+                                    {
+                                        Ok(data) => {
+                                            if data.data.is_empty() {
+                                                return (
+                                                    offset,
+                                                    Err(format!(
+                                                        "Download incomplete: empty data before full chunk (offset={}, remaining={}, total={})",
+                                                        read_offset, remaining, total_bytes
+                                                    )),
+                                                );
+                                            }
+                                            let read_len = data.data.len() as u64;
+                                            buffered.extend_from_slice(&data.data);
+                                            read_offset = read_offset.saturating_add(read_len);
+                                            remaining = remaining.saturating_sub(read_len);
+                                        }
+                                        Err(russh_sftp::client::error::Error::Status(status))
+                                            if status.status_code == StatusCode::Eof =>
+                                        {
+                                            return (
+                                                offset,
+                                                Err(format!(
+                                                    "Download incomplete: EOF before full chunk (offset={}, remaining={}, total={})",
+                                                    read_offset, remaining, total_bytes
+                                                )),
+                                            );
+                                        }
+                                        Err(e) => return (offset, Err(e.to_string())),
+                                    }
+                                }
+
+                                (offset, Ok(buffered))
+                            }));
+                            next_offset += current_chunk_size;
+                        }
+                    }
+
+                    if transferred < total_bytes {
+                        return Err(format!(
+                            "Download incomplete: transferred {} / {} bytes",
+                            transferred, total_bytes
+                        ));
+                    }
+
+                    if let Ok(latest_metadata) = sftp.fstat(&handle).await {
+                        if let Some(latest_size) = latest_metadata.attrs.size {
+                            if latest_size != total_bytes {
+                                return Err(format!(
+                                    "Remote file size changed during download ({} -> {}), please retry after file generation completes",
+                                    total_bytes, latest_size
+                                ));
+                            }
+                        }
+                    }
+
+                    local_file.flush().await.map_err(|e| e.to_string())?;
+                    local_file.sync_all().await.map_err(|e| e.to_string())?;
+                    Ok(())
                 }
-                local_file.flush().await.map_err(|e| e.to_string())?;
+                .await;
+
                 let _ = sftp.close(handle).await;
-                Ok(())
+                transfer_result
             }
         }
         .await;
@@ -1284,7 +1387,41 @@ impl SftpManager {
                                 match sftp.read(&handle, transferred, (256 * 1024) as u32).await {
                                     Ok(data) => {
                                         if data.data.is_empty() {
-                                            break;
+                                            if total_bytes == 0 || transferred >= total_bytes {
+                                                break;
+                                            }
+
+                                            let duration = start_time.elapsed().as_secs_f64();
+                                            let speed = if duration > 0.0 {
+                                                transferred as f64 / duration
+                                            } else {
+                                                0.0
+                                            };
+                                            let error = format!(
+                                                "Download incomplete: empty data before EOF ({} / {} bytes)",
+                                                transferred, total_bytes
+                                            );
+
+                                            let _ = sftp.close(handle).await;
+                                            let _ = app.emit(
+                                                "transfer-progress",
+                                                TransferProgress {
+                                                    task_id: task_id.to_string(),
+                                                    type_: "download".to_string(),
+                                                    session_id: session_id.to_string(),
+                                                    file_name: file_name.clone(),
+                                                    source: remote_path.clone(),
+                                                    destination: local_path.clone(),
+                                                    total_bytes,
+                                                    transferred_bytes: transferred,
+                                                    speed,
+                                                    eta: None,
+                                                    status: "failed".to_string(),
+                                                    error: Some(error.clone()),
+                                                },
+                                            );
+
+                                            return Err(error);
                                         }
                                         local_file
                                             .write_all(&data.data)
@@ -1333,7 +1470,40 @@ impl SftpManager {
                                     Err(russh_sftp::client::error::Error::Status(status))
                                         if status.status_code == StatusCode::Eof =>
                                     {
-                                        break
+                                        if total_bytes > 0 && transferred < total_bytes {
+                                            let duration = start_time.elapsed().as_secs_f64();
+                                            let speed = if duration > 0.0 {
+                                                transferred as f64 / duration
+                                            } else {
+                                                0.0
+                                            };
+                                            let error = format!(
+                                                "Download incomplete: EOF before full content ({} / {} bytes)",
+                                                transferred, total_bytes
+                                            );
+
+                                            let _ = sftp.close(handle).await;
+                                            let _ = app.emit(
+                                                "transfer-progress",
+                                                TransferProgress {
+                                                    task_id: task_id.to_string(),
+                                                    type_: "download".to_string(),
+                                                    session_id: session_id.to_string(),
+                                                    file_name: file_name.clone(),
+                                                    source: remote_path.clone(),
+                                                    destination: local_path.clone(),
+                                                    total_bytes,
+                                                    transferred_bytes: transferred,
+                                                    speed,
+                                                    eta: None,
+                                                    status: "failed".to_string(),
+                                                    error: Some(error.clone()),
+                                                },
+                                            );
+
+                                            return Err(error);
+                                        }
+                                        break;
                                     }
                                     Err(e) => {
                                         let duration = start_time.elapsed().as_secs_f64();
@@ -1365,6 +1535,40 @@ impl SftpManager {
                                 }
                             }
 
+                            if total_bytes > 0 && transferred < total_bytes {
+                                let duration = start_time.elapsed().as_secs_f64();
+                                let speed = if duration > 0.0 {
+                                    transferred as f64 / duration
+                                } else {
+                                    0.0
+                                };
+                                let error = format!(
+                                    "Download incomplete: transferred {} / {} bytes",
+                                    transferred, total_bytes
+                                );
+
+                                let _ = sftp.close(handle).await;
+                                let _ = app.emit(
+                                    "transfer-progress",
+                                    TransferProgress {
+                                        task_id: task_id.to_string(),
+                                        type_: "download".to_string(),
+                                        session_id: session_id.to_string(),
+                                        file_name: file_name.clone(),
+                                        source: remote_path.clone(),
+                                        destination: local_path.clone(),
+                                        total_bytes,
+                                        transferred_bytes: transferred,
+                                        speed,
+                                        eta: None,
+                                        status: "failed".to_string(),
+                                        error: Some(error.clone()),
+                                    },
+                                );
+
+                                return Err(error);
+                            }
+
                             let duration = start_time.elapsed().as_secs_f64();
                             let speed = if duration > 0.0 {
                                 total_bytes as f64 / duration
@@ -1390,6 +1594,7 @@ impl SftpManager {
                                 },
                             );
                             local_file.flush().await.map_err(|e| e.to_string())?;
+                            local_file.sync_all().await.map_err(|e| e.to_string())?;
                             let _ = sftp.close(handle).await;
                         }
                     }
