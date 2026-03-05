@@ -68,6 +68,7 @@ const SPLIT_LAYOUT_REQUIRED_TABS: Record<SplitLayout, number> = {
 const MIN_FIXED_TAB_WIDTH = 120
 const MAX_FIXED_TAB_WIDTH = 400
 const DEFAULT_FIXED_TAB_WIDTH = 200
+const MIN_TITLEBAR_DRAG_SPACER_WIDTH = 40
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig } = useConfig()
@@ -171,9 +172,11 @@ export const MainWindow: React.FC = () => {
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [pendingSplitLayout, setPendingSplitLayout] =
     useState<SplitLayout | null>(null)
+  const titleBarRef = useRef<HTMLDivElement | null>(null)
   const tabListRef = useRef<HTMLDivElement | null>(null)
+  const rightControlsRef = useRef<HTMLDivElement | null>(null)
   const newTabButtonRef = useRef<HTMLDivElement | null>(null)
-  const [tabListClientWidth, setTabListClientWidth] = useState(0)
+  const [tabListMaxWidth, setTabListMaxWidth] = useState(0)
   const [newTabButtonWidth, setNewTabButtonWidth] = useState(0)
   const [isTabListOverflowing, setIsTabListOverflowing] = useState(false)
 
@@ -633,23 +636,30 @@ export const MainWindow: React.FC = () => {
   const fixedModeTotalWidth = tabs.length * tabFixedWidth + newTabButtonWidth
   const shouldFallbackToAdaptive =
     tabWidthMode === "fixed" &&
-    tabListClientWidth > 0 &&
-    fixedModeTotalWidth > tabListClientWidth
+    tabListMaxWidth > 0 &&
+    fixedModeTotalWidth > tabListMaxWidth
   const resolvedTabWidthMode = shouldFallbackToAdaptive
     ? "adaptive"
     : tabWidthMode
 
   useEffect(() => {
-    const tabListElement = tabListRef.current
-    if (!tabListElement) {
+    const titleBarElement = titleBarRef.current
+    if (!titleBarElement) {
       return
     }
 
     const updateLayoutSizes = () => {
-      const nextTabListWidth = tabListElement.clientWidth
+      const nextTitleBarWidth = titleBarElement.clientWidth
+      const nextRightControlsWidth = rightControlsRef.current?.offsetWidth ?? 0
+      const nextTabListMaxWidth = Math.max(
+        0,
+        nextTitleBarWidth -
+          nextRightControlsWidth -
+          MIN_TITLEBAR_DRAG_SPACER_WIDTH,
+      )
       const nextNewTabButtonWidth = newTabButtonRef.current?.offsetWidth ?? 0
-      setTabListClientWidth((prev) =>
-        prev === nextTabListWidth ? prev : nextTabListWidth,
+      setTabListMaxWidth((prev) =>
+        prev === nextTabListMaxWidth ? prev : nextTabListMaxWidth,
       )
       setNewTabButtonWidth((prev) =>
         prev === nextNewTabButtonWidth ? prev : nextNewTabButtonWidth,
@@ -662,16 +672,16 @@ export const MainWindow: React.FC = () => {
       return
     }
 
-    const resizeObserver = new ResizeObserver(() => {
-      updateLayoutSizes()
-    })
+    const resizeObserver = new ResizeObserver(updateLayoutSizes)
+    resizeObserver.observe(titleBarElement)
+    if (rightControlsRef.current)
+      resizeObserver.observe(rightControlsRef.current)
+    if (newTabButtonRef.current) resizeObserver.observe(newTabButtonRef.current)
 
-    resizeObserver.observe(tabListElement)
-    if (newTabButtonRef.current) {
-      resizeObserver.observe(newTabButtonRef.current)
-    }
+    window.addEventListener("resize", updateLayoutSizes)
 
     return () => {
+      window.removeEventListener("resize", updateLayoutSizes)
       resizeObserver.disconnect()
     }
   }, [tabs.length])
@@ -772,7 +782,10 @@ export const MainWindow: React.FC = () => {
         }
       `}</style>
       {/* Title Bar with drag region */}
-      <div className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
+      <div
+        ref={titleBarRef}
+        className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0"
+      >
         {/* Tab Bar */}
         <div
           ref={tabListRef}
@@ -849,7 +862,7 @@ export const MainWindow: React.FC = () => {
         ></div>
 
         {/* Right side: Settings button + Window controls */}
-        <div className="flex items-center shrink-0">
+        <div ref={rightControlsRef} className="flex items-center shrink-0">
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? "bg-[var(--bg-tertiary)] text-[var(--accent-primary)]" : "bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"}`}
