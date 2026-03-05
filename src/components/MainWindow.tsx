@@ -33,6 +33,7 @@ const TerminalTab = React.lazy(() =>
 import { WindowControls } from "./WindowControls"
 import { WelcomeScreen } from "./WelcomeScreen"
 import { NewTabButton } from "./NewTabButton"
+import type { QuickConnectTarget } from "./NewTabButton"
 import { SplitViewButton, SplitLayout } from "./SplitViewButton"
 import { SplitTabPickerModal } from "./SplitTabPickerModal"
 import { TabContextMenu } from "./TabContextMenu"
@@ -50,6 +51,7 @@ interface Tab {
   id: string
   label: string
   serverId: string
+  temporaryServer?: Config["servers"][number]
 }
 
 interface SplitViewState {
@@ -188,6 +190,25 @@ export const MainWindow: React.FC = () => {
   servers.forEach((server) => {
     serverById.set(server.id, server)
   })
+  const temporaryServerById = useMemo(() => {
+    const map = new Map<string, Config["servers"][number]>()
+    tabs.forEach((tab) => {
+      if (tab.temporaryServer) {
+        map.set(tab.serverId, tab.temporaryServer)
+      }
+    })
+    return map
+  }, [tabs])
+
+  const allServers = useMemo(
+    () => [
+      ...servers,
+      ...tabs
+        .map((tab) => tab.temporaryServer)
+        .filter((server): server is Config["servers"][number] => !!server),
+    ],
+    [servers, tabs],
+  )
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
 
@@ -423,6 +444,47 @@ export const MainWindow: React.FC = () => {
     [saveConfig],
   )
 
+  const handleAddQuickConnectTab = useCallback((target: QuickConnectTarget) => {
+    const normalizedHost = target.host.trim()
+    if (!normalizedHost) {
+      return
+    }
+
+    const normalizedUsername = target.username?.trim() || ""
+    const temporaryServerId = `temp-${generateId()}`
+    const temporaryServer: Config["servers"][number] = {
+      id: temporaryServerId,
+      name: normalizedUsername
+        ? `${normalizedUsername}@${normalizedHost}`
+        : normalizedHost,
+      group: null,
+      host: normalizedHost,
+      port: 22,
+      username: normalizedUsername,
+      authId: null,
+      proxyId: null,
+      jumphostId: null,
+      portForwards: [],
+      keepAlive: 0,
+      autoExecCommands: [],
+      snippets: [],
+      sftpFavoritePaths: [],
+      additionalPrompt: null,
+      synced: false,
+      updatedAt: new Date().toISOString(),
+    }
+
+    const newTab: Tab = {
+      id: generateId(),
+      label: temporaryServer.name,
+      serverId: temporaryServer.id,
+      temporaryServer,
+    }
+
+    setTabs((prev) => [...prev, newTab])
+    setActiveTabId(newTab.id)
+  }, [])
+
   const handleCloneTab = useCallback(
     (tabId: string) => {
       const sourceTab = tabs.find((t) => t.id === tabId)
@@ -433,6 +495,7 @@ export const MainWindow: React.FC = () => {
         id: generateId(),
         label: sourceTab.label,
         serverId: sourceTab.serverId,
+        temporaryServer: sourceTab.temporaryServer,
       }
 
       const newTabs = [...tabs]
@@ -722,7 +785,9 @@ export const MainWindow: React.FC = () => {
 
   const globalSnippets = config?.snippets || []
   const activeServer = activeServerId
-    ? serverById.get(activeServerId) || null
+    ? serverById.get(activeServerId) ||
+      temporaryServerById.get(activeServerId) ||
+      null
     : null
   const serverSnippets = activeServer?.snippets || []
   const displayedSnippets = [...globalSnippets, ...serverSnippets]
@@ -850,6 +915,7 @@ export const MainWindow: React.FC = () => {
             <NewTabButton
               servers={config?.servers || []}
               onServerSelect={handleAddTab}
+              onQuickConnect={handleAddQuickConnectTab}
               onOpenSettings={() => handleOpenSettings("servers")}
             />
           </div>
@@ -977,7 +1043,8 @@ export const MainWindow: React.FC = () => {
             />
           ) : (
             tabs.map((tab) => {
-              const server = serverById.get(tab.serverId)
+              const server =
+                serverById.get(tab.serverId) || tab.temporaryServer || null
               if (!server) return null
 
               const isVisibleInLayout = splitView
@@ -1013,7 +1080,7 @@ export const MainWindow: React.FC = () => {
                         onClose={handleCloseTab}
                         onActivate={() => handleTabSelect(tab.id)}
                         server={server}
-                        servers={servers}
+                        servers={allServers}
                         authentications={authentications}
                         proxies={proxies}
                         terminalSettings={config?.general.terminal}

@@ -266,6 +266,9 @@ export const locales = {
     },
     newTabButton: {
       connectTo: "Connect to Server",
+      quickConnectPlaceholder: "Quick connect: ip, host or user@host",
+      quickConnectAction: "Quick Connect",
+      quickConnectInvalid: "Use ip, host, or user@host",
       manageServers: "Manage Servers",
       collapseGroup: "Collapse group",
       expandGroup: "Expand group",
@@ -728,6 +731,9 @@ export const locales = {
     },
     newTabButton: {
       connectTo: "连接到服务器",
+      quickConnectPlaceholder: "快速连接：ip、host 或 user@host",
+      quickConnectAction: "快速连接",
+      quickConnectInvalid: "请输入 ip、host 或 user@host",
       manageServers: "服务器管理",
       collapseGroup: "收起分组",
       expandGroup: "展开分组",

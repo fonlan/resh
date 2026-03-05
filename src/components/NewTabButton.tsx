@@ -6,21 +6,29 @@ import {
   Server as ServerIcon,
   ChevronDown,
   ChevronRight,
+  ArrowRight,
 } from "lucide-react"
 import { Server } from "../types"
 import { useTranslation } from "../i18n"
 import { EmojiText } from "./EmojiText"
 import { groupServersByName } from "../utils/serverGroups"
 
+export interface QuickConnectTarget {
+  host: string
+  username?: string
+}
+
 interface NewTabButtonProps {
   servers: Server[]
   onServerSelect: (serverId: string) => void
+  onQuickConnect: (target: QuickConnectTarget) => void
   onOpenSettings: () => void
 }
 
 export const NewTabButton: React.FC<NewTabButtonProps> = ({
   servers,
   onServerSelect,
+  onQuickConnect,
   onOpenSettings,
 }) => {
   const { t } = useTranslation()
@@ -32,8 +40,59 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
   const [collapsedGroups, setCollapsedGroups] = useState<
     Record<string, boolean>
   >({})
+  const [quickConnectInput, setQuickConnectInput] = useState("")
+  const [quickConnectError, setQuickConnectError] = useState("")
   const menuRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+
+  const parseQuickConnectTarget = useCallback(
+    (rawValue: string): QuickConnectTarget | null => {
+      const trimmed = rawValue.trim()
+      if (!trimmed || /\s/.test(trimmed)) {
+        return null
+      }
+
+      const normalized = trimmed.replace(/^ssh:\/\//i, "")
+      if (!normalized) {
+        return null
+      }
+
+      const atIndex = normalized.indexOf("@")
+      if (atIndex < 0) {
+        return normalized.includes("/") ? null : { host: normalized }
+      }
+
+      const username = normalized.slice(0, atIndex).trim()
+      const host = normalized.slice(atIndex + 1).trim()
+      if (!username || !host || host.includes("@") || host.includes("/")) {
+        return null
+      }
+
+      return {
+        host,
+        username,
+      }
+    },
+    [],
+  )
+
+  const handleQuickConnectSubmit = useCallback(() => {
+    const target = parseQuickConnectTarget(quickConnectInput)
+    if (!target) {
+      setQuickConnectError(t.newTabButton.quickConnectInvalid)
+      return
+    }
+
+    setQuickConnectError("")
+    setQuickConnectInput("")
+    onQuickConnect(target)
+    setIsOpen(false)
+  }, [
+    onQuickConnect,
+    parseQuickConnectTarget,
+    quickConnectInput,
+    t.newTabButton.quickConnectInvalid,
+  ])
 
   const updateMenuPosition = useCallback(() => {
     if (!buttonRef.current) {
@@ -141,8 +200,44 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
                 to { opacity: 1; transform: translateY(0) scale(1); }
               }
             `}</style>
-            <div className="p-[14px_20px] border-b border-[var(--glass-border)] text-[11px] font-bold text-[var(--text-muted)] uppercase  bg-[rgba(255,255,255,0.02)]">
-              <span>{t.newTabButton.connectTo}</span>
+            <div className="p-[14px_20px] border-b border-[var(--glass-border)] bg-[rgba(255,255,255,0.02)]">
+              <span className="text-[11px] font-bold text-[var(--text-muted)] uppercase">
+                {t.newTabButton.connectTo}
+              </span>
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={quickConnectInput}
+                  onChange={(event) => {
+                    setQuickConnectInput(event.target.value)
+                    if (quickConnectError) {
+                      setQuickConnectError("")
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault()
+                      handleQuickConnectSubmit()
+                    }
+                  }}
+                  placeholder={t.newTabButton.quickConnectPlaceholder}
+                  className="flex-1 h-8 px-2.5 text-[12px] bg-[var(--bg-primary)] border border-[var(--glass-border)] rounded-[var(--radius-sm)] text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)]"
+                />
+                <button
+                  type="button"
+                  className="h-8 w-8 shrink-0 flex items-center justify-center border-none rounded-[var(--radius-sm)] bg-[var(--accent-primary)] text-white cursor-pointer transition-all hover:brightness-110"
+                  onClick={handleQuickConnectSubmit}
+                  title={t.newTabButton.quickConnectAction}
+                  aria-label={t.newTabButton.quickConnectAction}
+                >
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+              {quickConnectError && (
+                <p className="mt-1 text-[11px] text-red-400">
+                  {quickConnectError}
+                </p>
+              )}
             </div>
 
             {groupedServers.length === 0 ? (
@@ -241,6 +336,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               const next = !prev
               if (next) {
                 updateMenuPosition()
+                setQuickConnectError("")
               }
               return next
             })

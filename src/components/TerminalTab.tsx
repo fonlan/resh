@@ -251,6 +251,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
     const saveConfigRef = useRef(saveConfig)
     const onSessionChangeRef = useRef(onSessionChange)
     const tRef = useRef(t)
+    const showManualAuthRef = useRef(showManualAuth)
 
     // Use refs for stable access inside the connect effect without triggering it
     const writeRef = useRef(write)
@@ -288,6 +289,10 @@ export const TerminalTab = React.memo<TerminalTabProps>(
     useEffect(() => {
       tRef.current = t
     }, [t])
+
+    useEffect(() => {
+      showManualAuthRef.current = showManualAuth
+    }, [showManualAuth])
 
     const serverConnectionKey = useMemo(
       () =>
@@ -540,7 +545,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
             ? currentManualCredentials
             : undefined,
         )
-      } else if (!showManualAuth && !isCancelled) {
+      } else if (!showManualAuthRef.current && !isCancelled) {
         connect()
       }
 
@@ -557,13 +562,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
           onSessionChangeRef.current?.(null)
         }
       }
-    }, [
-      serverId,
-      serverConnectionKey,
-      showManualAuth,
-      isCancelled,
-      connectTrigger,
-    ])
+    }, [serverId, serverConnectionKey, isCancelled, connectTrigger])
 
     // Terminal focus effect
     useEffect(() => {
