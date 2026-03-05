@@ -2,6 +2,7 @@ import React, {
   useState,
   useCallback,
   useEffect,
+  useRef,
   useMemo,
   Suspense,
 } from "react"
@@ -170,6 +171,11 @@ export const MainWindow: React.FC = () => {
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [pendingSplitLayout, setPendingSplitLayout] =
     useState<SplitLayout | null>(null)
+  const tabListRef = useRef<HTMLDivElement | null>(null)
+  const newTabButtonRef = useRef<HTMLDivElement | null>(null)
+  const [tabListClientWidth, setTabListClientWidth] = useState(0)
+  const [newTabButtonWidth, setNewTabButtonWidth] = useState(0)
+  const [isTabListOverflowing, setIsTabListOverflowing] = useState(false)
 
   const servers = config?.servers || EMPTY_SERVERS
   const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
@@ -624,6 +630,85 @@ export const MainWindow: React.FC = () => {
           Math.min(MAX_FIXED_TAB_WIDTH, tabFixedWidthRaw),
         )
       : DEFAULT_FIXED_TAB_WIDTH
+  const fixedModeTotalWidth = tabs.length * tabFixedWidth + newTabButtonWidth
+  const shouldFallbackToAdaptive =
+    tabWidthMode === "fixed" &&
+    tabListClientWidth > 0 &&
+    fixedModeTotalWidth > tabListClientWidth
+  const resolvedTabWidthMode = shouldFallbackToAdaptive
+    ? "adaptive"
+    : tabWidthMode
+
+  useEffect(() => {
+    const tabListElement = tabListRef.current
+    if (!tabListElement) {
+      return
+    }
+
+    const updateLayoutSizes = () => {
+      const nextTabListWidth = tabListElement.clientWidth
+      const nextNewTabButtonWidth = newTabButtonRef.current?.offsetWidth ?? 0
+      setTabListClientWidth((prev) =>
+        prev === nextTabListWidth ? prev : nextTabListWidth,
+      )
+      setNewTabButtonWidth((prev) =>
+        prev === nextNewTabButtonWidth ? prev : nextNewTabButtonWidth,
+      )
+    }
+
+    updateLayoutSizes()
+
+    if (typeof ResizeObserver === "undefined") {
+      return
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateLayoutSizes()
+    })
+
+    resizeObserver.observe(tabListElement)
+    if (newTabButtonRef.current) {
+      resizeObserver.observe(newTabButtonRef.current)
+    }
+
+    return () => {
+      resizeObserver.disconnect()
+    }
+  }, [tabs.length])
+
+  useEffect(() => {
+    const tabListElement = tabListRef.current
+    if (!tabListElement) {
+      return
+    }
+
+    const updateOverflowState = () => {
+      const nextOverflowing =
+        tabListElement.scrollWidth > tabListElement.clientWidth + 1
+      setIsTabListOverflowing((prev) =>
+        prev === nextOverflowing ? prev : nextOverflowing,
+      )
+    }
+
+    updateOverflowState()
+    const frameId = window.requestAnimationFrame(updateOverflowState)
+
+    if (typeof ResizeObserver === "undefined") {
+      return () => {
+        window.cancelAnimationFrame(frameId)
+      }
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateOverflowState()
+    })
+    resizeObserver.observe(tabListElement)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      resizeObserver.disconnect()
+    }
+  }, [tabs, resolvedTabWidthMode, tabFixedWidth])
 
   const globalSnippets = config?.snippets || []
   const activeServer = activeServerId
@@ -690,7 +775,12 @@ export const MainWindow: React.FC = () => {
       <div className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0">
         {/* Tab Bar */}
         <div
-          className="flex flex-[0_1_auto] min-w-0 overflow-x-auto overflow-y-hidden p-0 gap-0 no-scrollbar"
+          ref={tabListRef}
+          className={`flex flex-[0_1_auto] min-w-0 overflow-y-hidden p-0 gap-0 ${
+            isTabListOverflowing
+              ? "overflow-x-auto"
+              : "overflow-x-hidden no-scrollbar"
+          }`}
           role="tablist"
         >
           {tabs.map((tab, index) => (
@@ -708,11 +798,11 @@ export const MainWindow: React.FC = () => {
               aria-label={t.mainWindow.tabAriaLabel
                 .replace("{index}", (index + 1).toString())
                 .replace("{total}", tabs.length.toString())}
-              className={`flex items-center gap-2 px-4 h-10 ${tabWidthMode === "adaptive" ? "w-auto min-w-[120px] max-w-[320px]" : "w-auto"} bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ""} ${
+              className={`flex items-center gap-2 px-4 h-10 ${resolvedTabWidthMode === "adaptive" ? "w-auto min-w-[120px] max-w-[320px]" : "w-auto"} bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ""} ${
                 draggedTabIndex === index ? "opacity-40 cursor-grabbing" : ""
               } ${dropTargetIndex === index ? "border-l-2 border-l-[var(--accent-primary)]" : ""}`}
               style={
-                tabWidthMode === "fixed"
+                resolvedTabWidthMode === "fixed"
                   ? { width: `${tabFixedWidth}px` }
                   : undefined
               }
@@ -743,7 +833,7 @@ export const MainWindow: React.FC = () => {
               </button>
             </div>
           ))}
-          <div className="shrink-0" role="presentation">
+          <div ref={newTabButtonRef} className="shrink-0" role="presentation">
             <NewTabButton
               servers={config?.servers || []}
               onServerSelect={handleAddTab}
