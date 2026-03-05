@@ -1,4 +1,4 @@
-import React, { useRef } from "react"
+import React, { useEffect, useRef } from "react"
 import type { ManualAuthCredentials } from "../types"
 import { useTranslation } from "../i18n"
 import { Upload } from "lucide-react"
@@ -22,8 +22,18 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
 }) => {
   const { t } = useTranslation()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const usernameInputRef = useRef<HTMLInputElement>(null)
+  const passwordInputRef = useRef<HTMLInputElement>(null)
   const modalRef = useRef<HTMLDivElement>(null)
   const mouseDownInsideRef = useRef(false)
+
+  useEffect(() => {
+    const hasUsername = credentials.username.trim().length > 0
+    const targetInput = hasUsername
+      ? passwordInputRef.current
+      : usernameInputRef.current
+    targetInput?.focus()
+  }, [])
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -59,6 +69,28 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
     mouseDownInsideRef.current = false
   }
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.nativeEvent.isComposing) {
+      return
+    }
+
+    const target = e.target as HTMLElement | null
+    const isTextField =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement
+
+    if (e.key === "Enter" && isTextField) {
+      e.preventDefault()
+      onConnect()
+      return
+    }
+
+    if (e.key === "Escape") {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
   return (
     <div
       className="fixed inset-0 flex items-center justify-center z-[1000] animate-in fade-in duration-300"
@@ -71,6 +103,7 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
     >
       <div
         ref={modalRef}
+        onKeyDown={handleKeyDown}
         className="relative bg-[var(--bg-secondary)] rounded-lg w-full max-w-[480px] flex flex-col overflow-hidden animate-in slide-in-from-bottom-2 duration-400"
         style={{
           boxShadow:
@@ -100,6 +133,8 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
             <input
               id="manual-username"
               type="text"
+              ref={usernameInputRef}
+              autoFocus={credentials.username.trim().length === 0}
               value={credentials.username}
               onChange={(e) =>
                 onCredentialsChange({
@@ -121,6 +156,8 @@ export const ManualAuthModal: React.FC<ManualAuthModalProps> = ({
             <input
               id="manual-password"
               type="password"
+              ref={passwordInputRef}
+              autoFocus={credentials.username.trim().length > 0}
               value={credentials.password}
               onChange={(e) =>
                 onCredentialsChange({

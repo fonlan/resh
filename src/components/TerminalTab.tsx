@@ -567,14 +567,23 @@ export const TerminalTab = React.memo<TerminalTabProps>(
 
     // Terminal focus effect
     useEffect(() => {
-      if (!terminal || !isReady || !sessionId) return
+      if (!terminal || !isReady || !sessionId || showManualAuth) return
       if (isActive && terminalVisible) focus()
-    }, [terminal, isReady, sessionId, isActive, terminalVisible, focus])
+    }, [
+      terminal,
+      isReady,
+      sessionId,
+      showManualAuth,
+      isActive,
+      terminalVisible,
+      focus,
+    ])
 
     // Focus on active change
     useEffect(() => {
+      if (showManualAuth) return
       if (isActive && terminalVisible && isReady) focus()
-    }, [isActive, terminalVisible, isReady, focus])
+    }, [showManualAuth, isActive, terminalVisible, isReady, focus])
 
     useEffect(() => {
       if (!isActive) {
