@@ -2247,207 +2247,208 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     <>
       <div
         ref={sidebarRef}
-        className={`absolute top-0 bottom-0 overflow-hidden bg-[var(--bg-secondary)] border-r flex flex-col transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? "opacity-100 visible border-r-[var(--glass-border)]" : "opacity-0 invisible border-transparent"} ${isResizing ? "transition-none" : ""} ${isLocked ? "!relative shadow-none !left-auto !top-auto !bottom-auto h-full" : ""}`}
+        className={`absolute top-0 bottom-0 overflow-visible bg-[var(--bg-secondary)] border-r flex flex-col transition-all duration-200 shadow-[2px_0_8px_rgba(0,0,0,0.2)] ${isOpen ? "opacity-100 visible border-r-[var(--glass-border)]" : "opacity-0 invisible border-transparent"} ${isResizing ? "transition-none" : ""} ${isLocked ? "!relative shadow-none !left-auto !top-auto !bottom-auto h-full" : ""}`}
         style={{ width: isOpen ? `${width}px` : "0px", zIndex }}
         aria-hidden={!isOpen}
       >
+        <div className="flex h-full min-w-0 flex-col overflow-hidden">
+          <div className="flex items-center justify-between p-3 pr-4 border-b border-[var(--glass-border)] flex-shrink-0">
+            <h3 className="text-[14px] font-semibold text-[var(--text-primary)] flex items-center gap-2 m-0 whitespace-nowrap">
+              <Folder size={16} /> SFTP
+            </h3>
+            <div className="flex items-center gap-1">
+              <div className="relative">
+                <button
+                  type="button"
+                  className="sftp-sort-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                  onClick={() => setShowSortMenu(!showSortMenu)}
+                  title={t.sftp.tooltips.sort}
+                >
+                  <ArrowDownUp size={16} />
+                </button>
+                {showSortMenu && (
+                  <div
+                    className="sftp-sort-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
+                    style={{
+                      position: "absolute",
+                      top: "100%",
+                      right: 0,
+                      marginTop: "4px",
+                      minWidth: "150px",
+                    }}
+                  >
+                    <button type="button" onClick={() => handleSort("name")}>
+                      <span>{t.sftp.sort.name}</span>
+                      {sortState.type === "name" &&
+                        (sortState.order === "asc" ? (
+                          <ArrowDown size={14} />
+                        ) : (
+                          <ArrowUp size={14} />
+                        ))}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSort("modified")}
+                      className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
+                    >
+                      <span>{t.sftp.sort.dateModified}</span>
+                      {sortState.type === "modified" &&
+                        (sortState.order === "asc" ? (
+                          <ArrowDown size={14} />
+                        ) : (
+                          <ArrowUp size={14} />
+                        ))}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="relative">
+                <button
+                  ref={favoritesButtonRef}
+                  type="button"
+                  className="sftp-favorites-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                  onClick={() => {
+                    setShowFavoritesMenu((prev) => {
+                      if (!prev) {
+                        updateFavoritesMenuPosition()
+                      }
+                      return !prev
+                    })
+                  }}
+                  title={t.sftp.tooltips.favorites}
+                >
+                  <Heart size={16} />
+                </button>
+                {showFavoritesMenu &&
+                  createPortal(
+                    <div
+                      className="sftp-favorites-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] max-h-[300px] p-1 z-[1001] overflow-y-auto backdrop-blur-xl animate-sftp-fade-in"
+                      style={{
+                        top: favoritesMenuPosition.top,
+                        left: favoritesMenuPosition.left,
+                        width: favoritesMenuPosition.width,
+                      }}
+                    >
+                      {favoriteTargets.length === 0 ? (
+                        <div className="px-3 py-2 text-[13px] text-[var(--text-muted)]">
+                          {t.sftp.favorites.empty}
+                        </div>
+                      ) : (
+                        favoriteTargets.map((favorite) => {
+                          const isActiveServerFavorite =
+                            favorite.serverId === serverId
+                          return (
+                            <div
+                              key={`${favorite.serverId}:${favorite.path}`}
+                              className="flex items-center gap-1"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void handleJumpToFavorite(favorite)
+                                }}
+                                className={`flex-1 min-w-0 px-3 py-2 border-0 bg-transparent cursor-pointer rounded text-left transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:translate-x-0.5 ${isActiveServerFavorite ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}
+                                title={favorite.path}
+                              >
+                                <div className="truncate text-[13px] font-medium">
+                                  {favorite.path}
+                                </div>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  void handleRemoveFavoritePath(
+                                    favorite.serverId,
+                                    favorite.path,
+                                  )
+                                }}
+                                className="shrink-0 p-1.5 border-0 bg-transparent text-[var(--text-muted)] cursor-pointer rounded transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]"
+                                title={t.sftp.favorites.remove}
+                              >
+                                <Trash size={13} />
+                              </button>
+                            </div>
+                          )
+                        })
+                      )}
+                      {favoriteError && (
+                        <div className="px-3 py-2 text-[12px] text-red-400">
+                          {favoriteError}
+                        </div>
+                      )}
+                    </div>,
+                    document.body,
+                  )}
+              </div>
+              <button
+                type="button"
+                className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                onClick={handleRefresh}
+                title={t.sftp.tooltips.refresh}
+              >
+                <RefreshCw size={16} />
+              </button>
+              <button
+                type="button"
+                className={`bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100 ${isLocked ? "text-[var(--accent-primary)]" : ""}`}
+                onClick={onToggleLock}
+                title={isLocked ? t.sftp.tooltips.unlock : t.sftp.tooltips.lock}
+              >
+                {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
+              </button>
+              <button
+                type="button"
+                className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
+                onClick={onClose}
+                title={t.sftp.tooltips.close}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+
+          <div
+            className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2"
+            data-sftp-tree-scroll
+          >
+            {visibleRootFiles.map((entry) => (
+              <FileTreeItem
+                key={entry.path}
+                entry={entry}
+                depth={0}
+                onToggle={handleToggle}
+                onContextMenu={handleContextMenu}
+                onDragStart={handleTreeItemDragStart}
+                clipboardSourcePath={clipboard?.sourcePath}
+                clipboardIsCut={clipboard?.isCut}
+              />
+            ))}
+            {visibleRootCount < rootFiles.length && (
+              <div className="flex items-center justify-center py-1 text-[var(--text-muted)]">
+                <RefreshCw size={12} className="animate-spin opacity-60" />
+              </div>
+            )}
+            {rootFiles.length === 0 && !isLoading && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                {sessionId ? t.sftp.noFiles : t.sftp.notConnected}
+              </div>
+            )}
+            {isLoading && rootFiles.length === 0 && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                {t.sftp.loading}
+              </div>
+            )}
+          </div>
+
+          <TransferStatusPanel />
+        </div>
         <div
-          className="absolute top-0 bottom-0 right-0 w-[5px] cursor-col-resize bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
+          className="absolute top-0 bottom-0 -right-2 w-2 cursor-col-resize bg-transparent transition-colors duration-200 hover:bg-[var(--accent-primary)] hover:opacity-50"
           onMouseDown={startResizing}
           role="none"
           style={{ zIndex: zIndex ? zIndex + 1 : undefined }}
         />
-
-        <div className="flex items-center justify-between p-3 pr-4 border-b border-[var(--glass-border)] flex-shrink-0">
-          <h3 className="text-[14px] font-semibold text-[var(--text-primary)] flex items-center gap-2 m-0 whitespace-nowrap">
-            <Folder size={16} /> SFTP
-          </h3>
-          <div className="flex items-center gap-1">
-            <div className="relative">
-              <button
-                type="button"
-                className="sftp-sort-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
-                onClick={() => setShowSortMenu(!showSortMenu)}
-                title={t.sftp.tooltips.sort}
-              >
-                <ArrowDownUp size={16} />
-              </button>
-              {showSortMenu && (
-                <div
-                  className="sftp-sort-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    right: 0,
-                    marginTop: "4px",
-                    minWidth: "150px",
-                  }}
-                >
-                  <button type="button" onClick={() => handleSort("name")}>
-                    <span>{t.sftp.sort.name}</span>
-                    {sortState.type === "name" &&
-                      (sortState.order === "asc" ? (
-                        <ArrowDown size={14} />
-                      ) : (
-                        <ArrowUp size={14} />
-                      ))}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSort("modified")}
-                    className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                  >
-                    <span>{t.sftp.sort.dateModified}</span>
-                    {sortState.type === "modified" &&
-                      (sortState.order === "asc" ? (
-                        <ArrowDown size={14} />
-                      ) : (
-                        <ArrowUp size={14} />
-                      ))}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="relative">
-              <button
-                ref={favoritesButtonRef}
-                type="button"
-                className="sftp-favorites-btn bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
-                onClick={() => {
-                  setShowFavoritesMenu((prev) => {
-                    if (!prev) {
-                      updateFavoritesMenuPosition()
-                    }
-                    return !prev
-                  })
-                }}
-                title={t.sftp.tooltips.favorites}
-              >
-                <Heart size={16} />
-              </button>
-              {showFavoritesMenu &&
-                createPortal(
-                  <div
-                    className="sftp-favorites-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] max-h-[300px] p-1 z-[1001] overflow-y-auto backdrop-blur-xl animate-sftp-fade-in"
-                    style={{
-                      top: favoritesMenuPosition.top,
-                      left: favoritesMenuPosition.left,
-                      width: favoritesMenuPosition.width,
-                    }}
-                  >
-                    {favoriteTargets.length === 0 ? (
-                      <div className="px-3 py-2 text-[13px] text-[var(--text-muted)]">
-                        {t.sftp.favorites.empty}
-                      </div>
-                    ) : (
-                      favoriteTargets.map((favorite) => {
-                        const isActiveServerFavorite =
-                          favorite.serverId === serverId
-                        return (
-                          <div
-                            key={`${favorite.serverId}:${favorite.path}`}
-                            className="flex items-center gap-1"
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                void handleJumpToFavorite(favorite)
-                              }}
-                              className={`flex-1 min-w-0 px-3 py-2 border-0 bg-transparent cursor-pointer rounded text-left transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:translate-x-0.5 ${isActiveServerFavorite ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"}`}
-                              title={favorite.path}
-                            >
-                              <div className="truncate text-[13px] font-medium">
-                                {favorite.path}
-                              </div>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void handleRemoveFavoritePath(
-                                  favorite.serverId,
-                                  favorite.path,
-                                )
-                              }}
-                              className="shrink-0 p-1.5 border-0 bg-transparent text-[var(--text-muted)] cursor-pointer rounded transition-all duration-150 hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)]"
-                              title={t.sftp.favorites.remove}
-                            >
-                              <Trash size={13} />
-                            </button>
-                          </div>
-                        )
-                      })
-                    )}
-                    {favoriteError && (
-                      <div className="px-3 py-2 text-[12px] text-red-400">
-                        {favoriteError}
-                      </div>
-                    )}
-                  </div>,
-                  document.body,
-                )}
-            </div>
-            <button
-              type="button"
-              className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
-              onClick={handleRefresh}
-              title={t.sftp.tooltips.refresh}
-            >
-              <RefreshCw size={16} />
-            </button>
-            <button
-              type="button"
-              className={`bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100 ${isLocked ? "text-[var(--accent-primary)]" : ""}`}
-              onClick={onToggleLock}
-              title={isLocked ? t.sftp.tooltips.unlock : t.sftp.tooltips.lock}
-            >
-              {isLocked ? <Lock size={16} /> : <LockOpen size={16} />}
-            </button>
-            <button
-              type="button"
-              className="bg-transparent border-0 text-[var(--text-muted)] cursor-pointer p-1 rounded transition-all duration-200 flex items-center justify-center hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] opacity-100"
-              onClick={onClose}
-              title={t.sftp.tooltips.close}
-            >
-              <X size={16} />
-            </button>
-          </div>
-        </div>
-
-        <div
-          className="flex-1 overflow-y-auto overflow-x-auto py-0 px-2"
-          data-sftp-tree-scroll
-        >
-          {visibleRootFiles.map((entry) => (
-            <FileTreeItem
-              key={entry.path}
-              entry={entry}
-              depth={0}
-              onToggle={handleToggle}
-              onContextMenu={handleContextMenu}
-              onDragStart={handleTreeItemDragStart}
-              clipboardSourcePath={clipboard?.sourcePath}
-              clipboardIsCut={clipboard?.isCut}
-            />
-          ))}
-          {visibleRootCount < rootFiles.length && (
-            <div className="flex items-center justify-center py-1 text-[var(--text-muted)]">
-              <RefreshCw size={12} className="animate-spin opacity-60" />
-            </div>
-          )}
-          {rootFiles.length === 0 && !isLoading && (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              {sessionId ? t.sftp.noFiles : t.sftp.notConnected}
-            </div>
-          )}
-          {isLoading && rootFiles.length === 0 && (
-            <div className="p-4 text-center text-gray-500 text-sm">
-              {t.sftp.loading}
-            </div>
-          )}
-        </div>
-
-        <TransferStatusPanel />
       </div>
 
       {contextMenu && (
