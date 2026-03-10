@@ -396,8 +396,6 @@ export const locales = {
       favorites: {
         empty: "No favorite directories yet",
         remove: "Remove favorite path",
-        serverMismatch:
-          "This favorite belongs to {server}. Switch to that server to jump.",
         pathNotFound: "Favorite path no longer exists: {path}",
       },
       modals: {
@@ -858,7 +856,6 @@ export const locales = {
       favorites: {
         empty: "暂无收藏目录",
         remove: "删除收藏路径",
-        serverMismatch: "该收藏属于 {server}，请切换到对应服务器后再跳转。",
         pathNotFound: "收藏路径不存在：{path}",
       },
       modals: {

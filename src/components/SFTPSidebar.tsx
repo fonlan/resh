@@ -413,7 +413,6 @@ interface SessionState {
 
 interface FavoriteTarget {
   serverId: string
-  serverName: string
   path: string
 }
 
@@ -1663,29 +1662,22 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   )
 
   const favoriteTargets = useMemo<FavoriteTarget[]>(() => {
-    if (!config?.servers) {
+    if (!config?.servers || !serverId) {
       return []
     }
 
-    const targets = config.servers.flatMap((server) => {
-      const favoritePaths = normalizeFavoritePaths(
-        server.sftpFavoritePaths || [],
-      )
-      return favoritePaths.map((path) => ({
-        serverId: server.id,
-        serverName: server.name,
+    const activeServer = config.servers.find((server) => server.id === serverId)
+    if (!activeServer) {
+      return []
+    }
+
+    return normalizeFavoritePaths(activeServer.sftpFavoritePaths || [])
+      .map((path) => ({
+        serverId: activeServer.id,
         path,
       }))
-    })
-
-    return targets.sort((a, b) => {
-      const serverCompare = a.serverName.localeCompare(b.serverName)
-      if (serverCompare !== 0) {
-        return serverCompare
-      }
-      return a.path.localeCompare(b.path)
-    })
-  }, [config?.servers, normalizeFavoritePaths])
+      .sort((a, b) => a.path.localeCompare(b.path))
+  }, [config?.servers, normalizeFavoritePaths, serverId])
 
   const quoteForShell = (input: string): string => {
     return `'${input.replace(/'/g, `'\"'\"'`)}'`
@@ -1836,16 +1828,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     setFavoriteError(null)
 
     if (!serverId || !sessionId) {
-      return
-    }
-
-    if (favorite.serverId !== serverId) {
-      setFavoriteError(
-        t.sftp.favorites.serverMismatch.replace(
-          "{server}",
-          favorite.serverName,
-        ),
-      )
       return
     }
 
