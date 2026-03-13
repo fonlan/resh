@@ -84,6 +84,25 @@ fn extract_wait_finish(arguments: &str) -> Option<bool> {
         .and_then(|v| v.as_bool())
 }
 
+fn extract_required_timeout_seconds(
+    arguments: &serde_json::Value,
+    tool_name: &str,
+) -> Result<u64, String> {
+    match arguments.get("timeoutSeconds") {
+        Some(value) => match value.as_u64() {
+            Some(timeout) if timeout > 0 => Ok(timeout),
+            _ => Err(format!(
+                "Error: Invalid 'timeoutSeconds' argument for {}. Provide a positive integer timeout in seconds with enough safety margin for the command.",
+                tool_name
+            )),
+        },
+        None => Err(format!(
+            "Error: Missing required 'timeoutSeconds' argument for {}. Estimate the command runtime and provide a timeout with enough safety margin.",
+            tool_name
+        )),
+    }
+}
+
 fn accumulate_streamed_tool_call_chunk(
     accumulated_tool_calls: &mut Vec<ToolCall>,
     tool_call_id_aliases: &mut HashMap<String, String>,
@@ -845,7 +864,7 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "run_in_terminal".to_string(),
-                description: "Execute a command in the terminal. By default it waits for command completion or timeout and then returns output. Set wait_finish=false for interactive TUI programs (for example vim/top/htop) when you only need to launch without waiting.".to_string(),
+                description: "Execute a command in the terminal. Always provide timeoutSeconds and estimate it with enough safety margin for the command. By default it waits for command completion or timeout and then returns output. Set wait_finish=false for interactive TUI programs (for example vim/top/htop) when you only need to launch without waiting.".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -855,14 +874,14 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                         },
                         "timeoutSeconds": {
                             "type": "integer",
-                            "description": "Timeout in seconds (default: 30). Maximum time to wait for command completion."
+                            "description": "Required positive timeout in seconds. Estimate expected runtime in the current environment and add enough safety margin."
                         },
                         "wait_finish": {
                             "type": "boolean",
                             "description": "Whether to wait for command completion before returning (default: true). Set false for TUI/interactive programs that keep running."
                         }
                     },
-                    "required": ["command"]
+                    "required": ["command", "timeoutSeconds"]
                 }),
             },
         });
@@ -871,7 +890,7 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: FunctionDefinition {
                 name: "run_in_background".to_string(),
-                description: "Execute a command through a separate SSH exec channel without using the foreground terminal. Prefer run_in_terminal first. Use this only when the foreground terminal is blocked/busy or when an immediate parallel diagnostic/recovery command is required (for example process check/kill).".to_string(),
+                description: "Execute a command through a separate SSH exec channel without using the foreground terminal. Always provide timeoutSeconds and estimate it with enough safety margin for the command. Prefer run_in_terminal first. Use this only when the foreground terminal is blocked/busy or when an immediate parallel diagnostic/recovery command is required (for example process check/kill).".to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -881,10 +900,10 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
                         },
                         "timeoutSeconds": {
                             "type": "integer",
-                            "description": "Timeout in seconds (default: 30). Maximum time to wait for command completion."
+                            "description": "Required positive timeout in seconds. Estimate expected runtime in the current environment and add enough safety margin."
                         }
                     },
-                    "required": ["command"]
+                    "required": ["command", "timeoutSeconds"]
                 }),
             },
         });
@@ -1349,6 +1368,66 @@ mod streamed_tool_call_tests {
     }
 }
 
+#[cfg(test)]
+mod tool_timeout_requirement_tests {
+    use super::*;
+
+    fn required_fields(tool_name: &str) -> Vec<String> {
+        create_tools(true)
+            .into_iter()
+            .find(|tool| tool.function.name == tool_name)
+            .and_then(|tool| {
+                tool.function
+                    .parameters
+                    .get("required")
+                    .and_then(|value| value.as_array().cloned())
+            })
+            .map(|values| {
+                values
+                    .into_iter()
+                    .filter_map(|value| value.as_str().map(|text| text.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn execution_tools_require_timeout_seconds_in_schema() {
+        let terminal_required = required_fields("run_in_terminal");
+        assert!(terminal_required.iter().any(|field| field == "command"));
+        assert!(terminal_required
+            .iter()
+            .any(|field| field == "timeoutSeconds"));
+
+        let background_required = required_fields("run_in_background");
+        assert!(background_required.iter().any(|field| field == "command"));
+        assert!(background_required
+            .iter()
+            .any(|field| field == "timeoutSeconds"));
+    }
+
+    #[test]
+    fn required_timeout_parser_rejects_missing_or_invalid_values() {
+        let missing_args = serde_json::json!({ "command": "ls" });
+        let zero_args = serde_json::json!({ "command": "ls", "timeoutSeconds": 0 });
+        let valid_args = serde_json::json!({ "command": "ls", "timeoutSeconds": 45 });
+
+        let missing_error = extract_required_timeout_seconds(&missing_args, "run_in_terminal")
+            .err()
+            .unwrap_or_default();
+        let invalid_error = extract_required_timeout_seconds(&zero_args, "run_in_terminal")
+            .err()
+            .unwrap_or_default();
+
+        assert!(missing_error.contains("Missing required 'timeoutSeconds'"));
+        assert!(invalid_error.contains("Invalid 'timeoutSeconds'"));
+        assert_eq!(
+            extract_required_timeout_seconds(&valid_args, "run_in_terminal"),
+            Ok(45)
+        );
+    }
+}
+
 async fn load_history(
     state: &Arc<AppState>,
     session_id: &str,
@@ -1636,143 +1715,155 @@ async fn execute_tools_and_save(
                         serde_json::from_str::<serde_json::Value>(&call.function.arguments)
                     {
                         if let Some(cmd) = args["command"].as_str() {
-                            let timeout = args
-                                .get("timeoutSeconds")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(30);
-                            let wait_finish = args
-                                .get("wait_finish")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(true);
+                            match extract_required_timeout_seconds(&args, "run_in_terminal") {
+                                Ok(timeout) => {
+                                    let wait_finish = args
+                                        .get("wait_finish")
+                                        .and_then(|v| v.as_bool())
+                                        .unwrap_or(true);
 
-                            if !wait_finish {
-                                tracing::debug!(
-                                    "[execute_tools] Command '{}' sent with wait_finish=false",
-                                    cmd
-                                );
-                                let cmd_nl = format!("{}\n", cmd);
-                                match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
-                                    Ok(_) => {
-                                        "Command sent to terminal without waiting for completion (wait_finish=false).".to_string()
-                                    }
-                                    Err(e) => format!("Failed to send command: {}", e),
-                                }
-                            } else {
-                                SSHClient::start_command_recording(ssh_id).await?;
-                                tracing::debug!(
-                                    "[execute_tools] Command '{}' sent, timeout={}s",
-                                    cmd,
-                                    timeout
-                                );
-
-                                let input_payload =
-                                    build_recording_input_payload(ssh_id, cmd, "execute_tools")
-                                        .await;
-
-                                if let Err(e) =
-                                    SSHClient::send_input(ssh_id, input_payload.as_bytes()).await
-                                {
-                                    let _ = SSHClient::stop_command_recording(ssh_id).await;
-                                    return Err(format!("Failed to send command: {}", e));
-                                }
-
-                                let mut interval =
-                                    tokio::time::interval(tokio::time::Duration::from_millis(100));
-                                let mut elapsed = 0u64;
-                                let timeout_ms = timeout * 1000;
-                                let mut completion_detected = false;
-                                let mut timed_out = false;
-                                let mut start_marker_seen = false;
-
-                                loop {
-                                    if cancellation_token.is_cancelled() {
-                                        SSHClient::stop_command_recording(ssh_id).await.ok();
-                                        return Err("CANCELLED".to_string());
-                                    }
-                                    interval.tick().await;
-                                    elapsed += 100;
-
-                                    if !start_marker_seen {
-                                        start_marker_seen =
-                                            SSHClient::is_recording_start_marker_seen(ssh_id)
-                                                .await
-                                                .unwrap_or(false);
-                                    }
-
-                                    let is_completed =
-                                        SSHClient::check_command_completed(ssh_id).await?;
-                                    if is_completed {
-                                        completion_detected = true;
+                                    if !wait_finish {
                                         tracing::debug!(
-                                            "[execute_tools] Command '{}' completed at {}ms",
+                                            "[execute_tools] Command '{}' sent with wait_finish=false",
+                                            cmd
+                                        );
+                                        let cmd_nl = format!("{}\n", cmd);
+                                        match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
+                                            Ok(_) => {
+                                                "Command sent to terminal without waiting for completion (wait_finish=false).".to_string()
+                                            }
+                                            Err(e) => format!("Failed to send command: {}", e),
+                                        }
+                                    } else {
+                                        SSHClient::start_command_recording(ssh_id).await?;
+                                        tracing::debug!(
+                                            "[execute_tools] Command '{}' sent, timeout={}s",
                                             cmd,
-                                            elapsed
+                                            timeout
                                         );
-                                        break;
-                                    }
 
-                                    if elapsed >= START_MARKER_EXPECT_MS && !start_marker_seen {
-                                        tracing::warn!(
-                                            "[execute_tools] Start marker not observed within {}ms for command '{}'; treating foreground channel as stalled",
-                                            START_MARKER_EXPECT_MS,
-                                            cmd
-                                        );
-                                        timed_out = true;
-                                        break;
-                                    }
-
-                                    if elapsed >= timeout_ms {
-                                        tracing::warn!(
-                                            "[execute_tools] Timeout reached at {}ms for command '{}'",
-                                            elapsed,
-                                            cmd
-                                        );
-                                        timed_out = true;
-                                        break;
-                                    }
-                                }
-
-                                if timed_out && !completion_detected {
-                                    let recovered = try_recover_terminal_after_timeout(
-                                        ssh_id,
-                                        cmd,
-                                        "execute_tools",
-                                    )
-                                    .await;
-                                    if !recovered {
-                                        tracing::warn!(
-                                            "[execute_tools] Terminal not recovered within {}ms grace after timeout for command '{}'",
-                                            TIMEOUT_RECOVERY_GRACE_MS,
-                                            cmd
-                                        );
-                                        let _ = try_reconnect_terminal_after_timeout(
+                                        let input_payload = build_recording_input_payload(
                                             ssh_id,
                                             cmd,
                                             "execute_tools",
                                         )
                                         .await;
-                                    }
-                                }
 
-                                match SSHClient::stop_command_recording(ssh_id).await {
-                                    Ok(output) => {
-                                        let clean_output = String::from_utf8_lossy(
-                                            &strip_ansi_escapes::strip(output.as_bytes()),
-                                        )
-                                        .to_string();
+                                        if let Err(e) =
+                                            SSHClient::send_input(ssh_id, input_payload.as_bytes())
+                                                .await
+                                        {
+                                            let _ = SSHClient::stop_command_recording(ssh_id).await;
+                                            return Err(format!("Failed to send command: {}", e));
+                                        }
+
+                                        let mut interval = tokio::time::interval(
+                                            tokio::time::Duration::from_millis(100),
+                                        );
+                                        let mut elapsed = 0u64;
+                                        let timeout_ms = timeout * 1000;
+                                        let mut completion_detected = false;
+                                        let mut timed_out = false;
+                                        let mut start_marker_seen = false;
+
+                                        loop {
+                                            if cancellation_token.is_cancelled() {
+                                                SSHClient::stop_command_recording(ssh_id)
+                                                    .await
+                                                    .ok();
+                                                return Err("CANCELLED".to_string());
+                                            }
+                                            interval.tick().await;
+                                            elapsed += 100;
+
+                                            if !start_marker_seen {
+                                                start_marker_seen =
+                                                    SSHClient::is_recording_start_marker_seen(
+                                                        ssh_id,
+                                                    )
+                                                    .await
+                                                    .unwrap_or(false);
+                                            }
+
+                                            let is_completed =
+                                                SSHClient::check_command_completed(ssh_id).await?;
+                                            if is_completed {
+                                                completion_detected = true;
+                                                tracing::debug!(
+                                                    "[execute_tools] Command '{}' completed at {}ms",
+                                                    cmd,
+                                                    elapsed
+                                                );
+                                                break;
+                                            }
+
+                                            if elapsed >= START_MARKER_EXPECT_MS
+                                                && !start_marker_seen
+                                            {
+                                                tracing::warn!(
+                                                    "[execute_tools] Start marker not observed within {}ms for command '{}'; treating foreground channel as stalled",
+                                                    START_MARKER_EXPECT_MS,
+                                                    cmd
+                                                );
+                                                timed_out = true;
+                                                break;
+                                            }
+
+                                            if elapsed >= timeout_ms {
+                                                tracing::warn!(
+                                                    "[execute_tools] Timeout reached at {}ms for command '{}'",
+                                                    elapsed,
+                                                    cmd
+                                                );
+                                                timed_out = true;
+                                                break;
+                                            }
+                                        }
+
                                         if timed_out && !completion_detected {
-                                            build_run_in_terminal_timeout_failure_message(
-                                                timeout,
-                                                &clean_output,
+                                            let recovered = try_recover_terminal_after_timeout(
+                                                ssh_id,
+                                                cmd,
+                                                "execute_tools",
                                             )
-                                        } else if clean_output.trim().is_empty() {
-                                            "Command produced no output".to_string()
-                                        } else {
-                                            clean_output
+                                            .await;
+                                            if !recovered {
+                                                tracing::warn!(
+                                                    "[execute_tools] Terminal not recovered within {}ms grace after timeout for command '{}'",
+                                                    TIMEOUT_RECOVERY_GRACE_MS,
+                                                    cmd
+                                                );
+                                                let _ = try_reconnect_terminal_after_timeout(
+                                                    ssh_id,
+                                                    cmd,
+                                                    "execute_tools",
+                                                )
+                                                .await;
+                                            }
+                                        }
+
+                                        match SSHClient::stop_command_recording(ssh_id).await {
+                                            Ok(output) => {
+                                                let clean_output = String::from_utf8_lossy(
+                                                    &strip_ansi_escapes::strip(output.as_bytes()),
+                                                )
+                                                .to_string();
+                                                if timed_out && !completion_detected {
+                                                    build_run_in_terminal_timeout_failure_message(
+                                                        timeout,
+                                                        &clean_output,
+                                                    )
+                                                } else if clean_output.trim().is_empty() {
+                                                    "Command produced no output".to_string()
+                                                } else {
+                                                    clean_output
+                                                }
+                                            }
+                                            Err(e) => format!("Error getting output: {}", e),
                                         }
                                     }
-                                    Err(e) => format!("Error getting output: {}", e),
                                 }
+                                Err(err) => err,
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -1790,63 +1881,65 @@ async fn execute_tools_and_save(
                         serde_json::from_str::<serde_json::Value>(&call.function.arguments)
                     {
                         if let Some(cmd) = args["command"].as_str() {
-                            let timeout = args
-                                .get("timeoutSeconds")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(30);
-
-                            match execute_command_in_exec_channel(
-                                ssh_id,
-                                cmd,
-                                timeout,
-                                Some(&cancellation_token),
-                            )
-                            .await
-                            {
-                                Ok(exec_result) => {
-                                    let clean_output = String::from_utf8_lossy(
-                                        &strip_ansi_escapes::strip(exec_result.output.as_bytes()),
+                            match extract_required_timeout_seconds(&args, "run_in_background") {
+                                Ok(timeout) => {
+                                    match execute_command_in_exec_channel(
+                                        ssh_id,
+                                        cmd,
+                                        timeout,
+                                        Some(&cancellation_token),
                                     )
-                                    .to_string();
+                                    .await
+                                    {
+                                        Ok(exec_result) => {
+                                            let clean_output = String::from_utf8_lossy(
+                                                &strip_ansi_escapes::strip(
+                                                    exec_result.output.as_bytes(),
+                                                ),
+                                            )
+                                            .to_string();
 
-                                    if exec_result.timed_out {
-                                        if clean_output.trim().is_empty() {
-                                            format!(
-                                                "Error: run_in_background timed out after {}s.",
-                                                timeout
-                                            )
-                                        } else {
-                                            format!(
-                                                "Error: run_in_background timed out after {}s.\n\n[Partial output]\n{}",
-                                                timeout,
-                                                clean_output.trim()
-                                            )
-                                        }
-                                    } else if let Some(status) = exec_result.exit_status {
-                                        if status != 0 {
-                                            if clean_output.trim().is_empty() {
-                                                format!("Error: run_in_background command exited with status {}.", status)
+                                            if exec_result.timed_out {
+                                                if clean_output.trim().is_empty() {
+                                                    format!(
+                                                        "Error: run_in_background timed out after {}s.",
+                                                        timeout
+                                                    )
+                                                } else {
+                                                    format!(
+                                                        "Error: run_in_background timed out after {}s.\n\n[Partial output]\n{}",
+                                                        timeout,
+                                                        clean_output.trim()
+                                                    )
+                                                }
+                                            } else if let Some(status) = exec_result.exit_status {
+                                                if status != 0 {
+                                                    if clean_output.trim().is_empty() {
+                                                        format!("Error: run_in_background command exited with status {}.", status)
+                                                    } else {
+                                                        format!("Error: run_in_background command exited with status {}.\n\n{}", status, clean_output)
+                                                    }
+                                                } else if clean_output.trim().is_empty() {
+                                                    "Command completed successfully with no output"
+                                                        .to_string()
+                                                } else {
+                                                    clean_output
+                                                }
+                                            } else if clean_output.trim().is_empty() {
+                                                "Command completed with no output".to_string()
                                             } else {
-                                                format!("Error: run_in_background command exited with status {}.\n\n{}", status, clean_output)
+                                                clean_output
                                             }
-                                        } else if clean_output.trim().is_empty() {
-                                            "Command completed successfully with no output"
-                                                .to_string()
-                                        } else {
-                                            clean_output
                                         }
-                                    } else if clean_output.trim().is_empty() {
-                                        "Command completed with no output".to_string()
-                                    } else {
-                                        clean_output
+                                        Err(e) => {
+                                            if e == "CANCELLED" {
+                                                return Err(e);
+                                            }
+                                            format!("Error: {}", e)
+                                        }
                                     }
                                 }
-                                Err(e) => {
-                                    if e == "CANCELLED" {
-                                        return Err(e);
-                                    }
-                                    format!("Error: {}", e)
-                                }
+                                Err(err) => err,
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -2428,12 +2521,15 @@ pub fn run_ai_turn(
                             let timeout = extract_timeout(&call.function.arguments);
                             let command = extract_command(&call.function.arguments);
                             let wait_finish = extract_wait_finish(&call.function.arguments);
+                            let timeout_display = timeout
+                                .map(|value| format!("{}s", value))
+                                .unwrap_or_else(|| "missing".to_string());
                             tracing::info!(
-                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}s, wait_finish={}, raw_args=\"{}\"",
+                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}, wait_finish={}, raw_args=\"{}\"",
                                     call.id,
                                     call.function.name,
                                     command.as_deref().unwrap_or("N/A"),
-                                    timeout.unwrap_or(30),
+                                    timeout_display,
                                     wait_finish.unwrap_or(true),
                                     call.function.arguments
                                 );

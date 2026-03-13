@@ -690,7 +690,7 @@ mod tests {
                     id: "tc1".to_string(),
                     function: ToolCallFunction {
                         name: "run_in_terminal".to_string(),
-                        arguments: r#"{"command": "ls"}"#.to_string(),
+                        arguments: r#"{"command": "ls", "timeoutSeconds": 30}"#.to_string(),
                     },
                 }]),
                 tool_call_id: None,
