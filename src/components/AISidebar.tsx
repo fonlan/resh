@@ -421,13 +421,18 @@ const COMMAND_EXECUTION_TOOL_NAMES = new Set([
 ])
 
 const getToolDisplayName = (toolName: string, t: any) => {
-  if (toolName === "run_in_terminal") {
-    return t.ai.tool.executeCommand
+  const displayNameMap: Record<string, string> = {
+    get_terminal_output: t.ai.tool.getTerminalOutput,
+    get_selected_terminal_output: t.ai.tool.getSelectedTerminalOutput,
+    read_file: t.ai.tool.readFile,
+    run_in_terminal: t.ai.tool.executeCommand,
+    run_in_background: t.ai.tool.executeBackgroundCommand,
+    send_interrupt: t.ai.tool.sendInterrupt,
+    send_terminal_input: t.ai.tool.sendTerminalInput,
+    sftp_download: t.ai.tool.sftpDownload,
+    sftp_upload: t.ai.tool.sftpUpload,
   }
-  if (toolName === "run_in_background") {
-    return t.ai.tool.executeBackgroundCommand
-  }
-  return toolName
+  return displayNameMap[toolName] || toolName
 }
 
 const normalizeAiErrorMessage = (error: unknown): string => {
