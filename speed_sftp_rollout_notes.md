@@ -24,6 +24,9 @@ Last updated: 2026-03-23
   - in-flight window downgrade on timeout streak
   - gradual window ramp-up on stable chunk completions
   - session-level fallback lock to single-flight mode after repeated timeouts
+- Added queue fairness safeguard for batch transfers:
+  - per-session active transfer cap in scheduler (default `2`)
+  - still bounded by global active transfer cap
 - Added SFTP tuning config fields in backend/frontend types.
 - Added settings UI controls and i18n strings for tuning options.
 - Added baseline matrix scaffold script:
@@ -40,8 +43,9 @@ Last updated: 2026-03-23
 - Keep download behavior conservative until same-handle read pipeline is fully guarded by fallback logic.
 
 ## Next Phases
-1. Run baseline matrix and unstable-link regression to quantify M2 gains and failure characteristics.
-2. M4/M5: Optional multi-connection modes (small-file parallel and large-file striping) behind guarded switches.
+1. Expose queue quota tuning (global/per-session) through config/UI and validate default values.
+2. Run baseline matrix and unstable-link regression to quantify M2/M4 gains and failure characteristics.
+3. M5: Optional multi-connection striping path behind guarded switches.
 
 ## Operator Notes
 - Use matrix scaffold for before/after comparisons to prevent regressions.

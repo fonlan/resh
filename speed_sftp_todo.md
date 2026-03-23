@@ -1,6 +1,6 @@
 # SFTP Speed TODO (Execution Tracker)
 
-Last updated: 2026-03-23 22:54
+Last updated: 2026-03-23 22:59
 Source plan: `speed_sftp.md`
 
 ## Rules For This File
@@ -41,6 +41,11 @@ Source plan: `speed_sftp.md`
 - [x] M3.1 Add adaptive in-flight downgrade on consecutive timeout.
 - [x] M3.2 Add upload stability report fields.
 
+### M4 - Queue & Connection Parallelism
+- [x] M4.1 Add per-session queue scheduling cap under global transfer cap.
+- [ ] M4.2 Expose per-session/global queue quota tuning in config/UI.
+- [ ] M4.3 Validate small-file batch throughput and fairness regression.
+
 ### Config/UI/Data
 - [x] C1 Add SFTP tuning config schema fields.
   - `transferProfile`
@@ -67,6 +72,7 @@ Source plan: `speed_sftp.md`
 - [x] Scope-F: Complete M2.1 (same-handle pipelined download)
 - [x] Scope-G: Complete M2.2 (adaptive ramp and session fallback lock)
 - [x] Scope-H: Complete M2.3 (integrity/cancel invariants on new download path)
+- [x] Scope-I: Complete M4.1 (per-session scheduler fairness cap)
 
 ## Progress Log
 
@@ -81,3 +87,4 @@ Source plan: `speed_sftp.md`
 - 2026-03-23 22:47 (M2.1): Reworked single-file download to same-handle multi in-flight `READ` pipelining with ordered local writeback (`pending_chunks` by offset), preserving cancellation and short-read/error guards; updated `AGENTS.md` policy wording and verified by `cargo fmt` + `cargo check`.
 - 2026-03-23 22:53 (M2.2): Added download adaptive window control on timeout/stability (`downshift` on consecutive timeouts, gradual `ramp-up` on stable chunks), bounded timeout retries per chunk, and session-level fallback lock to single-flight mode after repeated timeouts; verified by `cargo fmt` + `cargo check`.
 - 2026-03-23 22:54 (M2.3): Kept and revalidated integrity/cancel semantics in pipelined download path with explicit guards: cancel token abort, EOF/empty-read-before-complete failure, duplicate-offset and leftover-buffer failure, transferred-bytes completeness check, and remote-size-drift check.
+- 2026-03-23 22:59 (M4.1): Updated transfer scheduler to enforce per-session active-task cap (default `2`) under existing global concurrent cap, preventing single-session starvation of queued tasks from other sessions; verified by `cargo fmt` + `cargo check`.

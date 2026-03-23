@@ -148,6 +148,7 @@ const DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS: u32 = 8;
 const DOWNLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
 const MAX_INFLIGHT_LIMIT: usize = 64;
 const TRANSFER_DIAG_INTERVAL_SECS: u64 = 2;
+const MAX_CONCURRENT_TRANSFERS_PER_SESSION: usize = 2;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct SftpServerLimits {
@@ -358,6 +359,7 @@ lazy_static! {
         Mutex::new(HashMap::new());
     static ref TASK_QUEUE: Mutex<VecDeque<PendingTask>> = Mutex::new(VecDeque::new());
     static ref ACTIVE_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
+    static ref ACTIVE_TASK_SESSIONS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
     static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(2);
     static ref QUEUE_NOTIFY: Notify = Notify::new();
     static ref SCHEDULER_RUNNING: AtomicBool = AtomicBool::new(false);
@@ -625,12 +627,24 @@ impl SftpManager {
                 let max_concurrent = *MAX_CONCURRENT_TRANSFERS.lock().await;
                 let mut queue = TASK_QUEUE.lock().await;
                 let mut active = ACTIVE_TASKS.lock().await;
+                let mut active_task_sessions = ACTIVE_TASK_SESSIONS.lock().await;
 
                 if active.len() < max_concurrent as usize {
-                    if let Some(task) = queue.pop_front() {
+                    let next_index = queue.iter().position(|task| {
+                        let active_for_session = active_task_sessions
+                            .values()
+                            .filter(|sid| sid.as_str() == task.session_id.as_str())
+                            .count();
+                        active_for_session < MAX_CONCURRENT_TRANSFERS_PER_SESSION
+                    });
+
+                    if let Some(index) = next_index {
+                        let task = queue.remove(index).expect("queue index must exist");
                         let task_id = task.task_id.clone();
+                        let session_id = task.session_id.clone();
                         let cancel_token = task.cancel_token.clone();
                         active.insert(task_id, cancel_token);
+                        active_task_sessions.insert(task.task_id.clone(), session_id);
                         Some(task)
                     } else {
                         None
@@ -682,6 +696,9 @@ impl SftpManager {
 
                     let mut active = ACTIVE_TASKS.lock().await;
                     active.remove(&task_id);
+                    drop(active);
+                    let mut active_task_sessions = ACTIVE_TASK_SESSIONS.lock().await;
+                    active_task_sessions.remove(&task_id);
                     QUEUE_NOTIFY.notify_one();
                 });
 
