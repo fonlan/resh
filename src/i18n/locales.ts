@@ -348,6 +348,8 @@ export const locales = {
         waitFinish: "Wait for completion: {value}",
         waitFinishOn: "Yes",
         waitFinishOff: "No",
+        commandOutput: "Command Output",
+        noCommandOutput: "No captured output",
       },
     },
     sftp: {
@@ -808,6 +810,8 @@ export const locales = {
         waitFinish: "等待命令结束: {value}",
         waitFinishOn: "是",
         waitFinishOff: "否",
+        commandOutput: "命令输出",
+        noCommandOutput: "未捕获到输出",
       },
     },
     sftp: {

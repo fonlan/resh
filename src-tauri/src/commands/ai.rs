@@ -2149,14 +2149,29 @@ async fn execute_tools_and_save(
         };
 
         let tool_msg_id = Uuid::new_v4().to_string();
+        let tool_call_id = call.id.clone();
+        let tool_content = result.clone();
         {
             let conn = state.db_manager.get_connection();
             let conn = conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![tool_msg_id, session_id, "tool", result, call.id],
+                params![tool_msg_id, session_id, "tool", result, tool_call_id],
             ).map_err(|e| e.to_string())?;
         }
+
+        let _ = app_handle.emit(
+            &format!("ai-message-batch-{}", session_id),
+            vec![ChatMessage {
+                role: "tool".to_string(),
+                content: Some(tool_content),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some(call.id.clone()),
+                created_at: None,
+                model_id: None,
+            }],
+        );
     }
     Ok(())
 }
@@ -2909,13 +2924,60 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    load_history(&state, &session_id, false, None)
-        .await
-        .map(|msgs: Vec<ChatMessage>| {
-            msgs.into_iter()
-                .filter(|m| m.role != "system" && m.role != "tool")
-                .collect()
+    let conn = state.db_manager.get_connection();
+    let conn = conn.lock().unwrap();
+    let mut stmt = conn
+        .prepare(
+            "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
+             FROM ai_messages
+             WHERE session_id = ?1
+             ORDER BY created_at ASC, rowid ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            let role: String = row.get(0)?;
+            let content_raw: String = row.get(1)?;
+            let reasoning_raw: Option<String> = row.get(2)?;
+            let tool_calls_json: Option<String> = row.get(3).ok();
+            let tool_call_id: Option<String> = row.get(4).ok();
+            let created_at: String = row.get(5)?;
+            let model_id: Option<String> = row.get(6).ok();
+
+            let content = if content_raw.is_empty() {
+                None
+            } else {
+                Some(content_raw)
+            };
+
+            let tool_calls = if let Some(json) = tool_calls_json {
+                serde_json::from_str(&json).unwrap_or(None)
+            } else {
+                None
+            };
+
+            Ok(ChatMessage {
+                role,
+                content,
+                reasoning_content: reasoning_raw,
+                tool_calls,
+                tool_call_id,
+                created_at: Some(created_at),
+                model_id,
+            })
         })
+        .map_err(|e| e.to_string())?;
+
+    let mut messages: Vec<ChatMessage> = Vec::new();
+    for row in rows {
+        let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+        if msg.role != "system" {
+            messages.push(msg);
+        }
+    }
+
+    Ok(messages)
 }
 
 #[tauri::command]

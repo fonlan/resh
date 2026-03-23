@@ -75,6 +75,7 @@ interface RenderableMessage {
   sourceIndex: number
   isPending: boolean
   modelName: string | null
+  toolOutputsByCallId?: Record<string, string>
 }
 
 type RenderableListItem =
@@ -104,6 +105,7 @@ type VirtualScrollBehavior = "auto" | "smooth"
 const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
 const VIRTUAL_MESSAGE_GAP_PX = 16
 const DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS = 30
+const COMMAND_OUTPUT_PREVIEW_MAX_LINES = 5
 
 const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   contentVisibility: "auto",
@@ -153,6 +155,62 @@ const parseCommandExecutionToolArgs = (
     displayCommand,
     timeoutSeconds,
     waitFinish,
+  }
+}
+
+const collectAssistantToolOutputs = (
+  messages: ChatMessage[],
+  assistantIndex: number,
+) => {
+  const assistantMessage = messages[assistantIndex]
+  const toolCalls = assistantMessage.tool_calls || []
+  if (assistantMessage.role !== "assistant" || toolCalls.length === 0) {
+    return {
+      toolOutputsByCallId: {} as Record<string, string>,
+      consumedToolMessageIndexes: [] as number[],
+    }
+  }
+  const toolCallIdSet = new Set(toolCalls.map((call) => call.id))
+  const commandToolCallIdSet = new Set(
+    toolCalls
+      .filter((call) => COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name))
+      .map((call) => call.id),
+  )
+  if (commandToolCallIdSet.size === 0) {
+    return {
+      toolOutputsByCallId: {} as Record<string, string>,
+      consumedToolMessageIndexes: [] as number[],
+    }
+  }
+  const outputChunksByToolCallId = new Map<string, string[]>()
+  const consumedToolMessageIndexes: number[] = []
+  for (let i = assistantIndex + 1; i < messages.length; i += 1) {
+    const candidate = messages[i]
+    if (candidate.role !== "tool") {
+      continue
+    }
+    const toolCallId = candidate.tool_call_id?.trim()
+    if (!toolCallId || !toolCallIdSet.has(toolCallId)) {
+      continue
+    }
+    if (!commandToolCallIdSet.has(toolCallId)) {
+      continue
+    }
+    consumedToolMessageIndexes.push(i)
+    const outputText = candidate.content || ""
+    if (outputText.length > 0) {
+      const chunks = outputChunksByToolCallId.get(toolCallId) || []
+      chunks.push(outputText)
+      outputChunksByToolCallId.set(toolCallId, chunks)
+    }
+  }
+  const toolOutputsByCallId: Record<string, string> = {}
+  outputChunksByToolCallId.forEach((chunks, toolCallId) => {
+    toolOutputsByCallId[toolCallId] = chunks.join("\n\n").trimEnd()
+  })
+  return {
+    toolOutputsByCallId,
+    consumedToolMessageIndexes,
   }
 }
 
@@ -641,6 +699,7 @@ const MessageBubble = React.memo(
     isLast,
     isStreaming,
     modelName,
+    toolOutputsByCallId,
     canRegenerate,
     onRegenerate,
   }: {
@@ -650,6 +709,7 @@ const MessageBubble = React.memo(
     isLast?: boolean
     isStreaming?: boolean
     modelName: string | null
+    toolOutputsByCallId?: Record<string, string>
     canRegenerate?: boolean
     onRegenerate?: () => void
   }) => {
@@ -771,7 +831,12 @@ const MessageBubble = React.memo(
                     let displayArgs = call.function.arguments
                     let timeoutSeconds: number | null = null
                     let waitFinish: boolean | null = null
-                    if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
+                    const isCommandExecutionTool =
+                      COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)
+                    const commandOutput = isCommandExecutionTool
+                      ? toolOutputsByCallId?.[call.id] || ""
+                      : ""
+                    if (isCommandExecutionTool) {
                       const parsedArgs = parseCommandExecutionToolArgs(
                         call.function.arguments,
                         call.function.name,
@@ -808,6 +873,21 @@ const MessageBubble = React.memo(
                                 : t.ai.tool.waitFinishOff,
                             )}
                           </span>
+                        )}
+                        {isCommandExecutionTool && (
+                          <div className="mt-2">
+                            <span className="font-mono text-xs opacity-70 block">
+                              {t.ai.tool.commandOutput}
+                            </span>
+                            <pre
+                              className="block mt-1 w-full max-w-full bg-black/30 p-2 rounded font-mono whitespace-pre overflow-x-auto overflow-y-auto leading-5"
+                              style={{
+                                maxHeight: `${COMMAND_OUTPUT_PREVIEW_MAX_LINES * 20}px`,
+                              }}
+                            >
+                              {commandOutput || t.ai.tool.noCommandOutput}
+                            </pre>
+                          </div>
                         )}
                       </div>
                     )
@@ -1094,8 +1174,33 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
 
     const nextMessages: RenderableMessage[] = []
+    const consumedToolMessageIndexes = new Set<number>()
 
-    currentMessages.forEach((msg, sourceIndex) => {
+    for (
+      let sourceIndex = 0;
+      sourceIndex < currentMessages.length;
+      sourceIndex += 1
+    ) {
+      if (consumedToolMessageIndexes.has(sourceIndex)) {
+        continue
+      }
+      const msg = currentMessages[sourceIndex]
+      let toolOutputsByCallId: Record<string, string> | undefined
+      if (msg.role === "assistant" && msg.tool_calls?.length) {
+        const outputCollection = collectAssistantToolOutputs(
+          currentMessages,
+          sourceIndex,
+        )
+        outputCollection.consumedToolMessageIndexes.forEach((index) => {
+          consumedToolMessageIndexes.add(index)
+        })
+        if (outputCollection.consumedToolMessageIndexes.length > 0) {
+          toolOutputsByCallId = outputCollection.toolOutputsByCallId
+        }
+      }
+      if (msg.role === "tool") {
+        continue
+      }
       if (msg.role === "assistant") {
         const hasContent = !!(msg.content && msg.content.trim().length > 0)
         const hasReasoning = !!(
@@ -1106,7 +1211,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         )
 
         if (!hasContent && !hasVisibleTools && !hasReasoning) {
-          return
+          continue
         }
       }
 
@@ -1125,8 +1230,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         sourceIndex,
         isPending,
         modelName,
+        toolOutputsByCallId,
       })
-    })
+    }
 
     return nextMessages
   }, [currentMessages, modelNameById, pendingToolCallIdSet])
@@ -1743,6 +1849,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         boundSshSessionId,
         callsToExecute,
       )
+      await selectSession(activeSessionId)
     } catch (err) {
       setGenerating(activeSessionId, false)
       showAiError(err)
@@ -1757,6 +1864,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     setGenerating,
     storeSetPendingToolCalls,
     clearSessionStopped,
+    selectSession,
     showAiError,
   ])
 
@@ -2079,6 +2187,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                           item.messageIndex === renderableMessages.length - 1
                         }
                         modelName={item.message.modelName}
+                        toolOutputsByCallId={item.message.toolOutputsByCallId}
                         canRegenerate={
                           canRegenerateLatestAssistant &&
                           item.message.sourceIndex ===
