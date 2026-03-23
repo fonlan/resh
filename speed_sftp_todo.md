@@ -1,6 +1,6 @@
 # SFTP Speed TODO (Execution Tracker)
 
-Last updated: 2026-03-23 22:36
+Last updated: 2026-03-23 22:54
 Source plan: `speed_sftp.md`
 
 ## Rules For This File
@@ -33,9 +33,9 @@ Source plan: `speed_sftp.md`
   - Acceptance: upload uses computed chunk/in-flight instead of fixed `32KB` + `16`.
 
 ### M2 - Download Pipeline (next phase, not in first patch)
-- [ ] M2.1 Implement same-handle multi in-flight READ scheduler (ordered writeback).
-- [ ] M2.2 Add adaptive ramp up/down and per-session fallback lock.
-- [ ] M2.3 Keep integrity checks/cancel semantics unchanged.
+- [x] M2.1 Implement same-handle multi in-flight READ scheduler (ordered writeback).
+- [x] M2.2 Add adaptive ramp up/down and per-session fallback lock.
+- [x] M2.3 Keep integrity checks/cancel semantics unchanged.
 
 ### M3 - Upload Adaptive Stabilization
 - [x] M3.1 Add adaptive in-flight downgrade on consecutive timeout.
@@ -64,6 +64,9 @@ Source plan: `speed_sftp.md`
 - [x] Scope-C: Complete C1 + C2 + C3
 - [x] Scope-D: Run formatting/checks and sync this file status
 - [x] Scope-E: Complete M0.3 + D3 + M3.1 + M3.2
+- [x] Scope-F: Complete M2.1 (same-handle pipelined download)
+- [x] Scope-G: Complete M2.2 (adaptive ramp and session fallback lock)
+- [x] Scope-H: Complete M2.3 (integrity/cancel invariants on new download path)
 
 ## Progress Log
 
@@ -75,3 +78,6 @@ Source plan: `speed_sftp.md`
 - 2026-03-23 23:22 (M0.3): Added `scripts/sftp_baseline_matrix.ps1` matrix scaffold (low/high RTT x small/large x upload/download) with `results.csv` and `results.md` outputs plus per-case logs; added `scripts/sftp_baseline_report_template.md`.
 - 2026-03-23 23:27 (D3): Added rollout notes document `speed_sftp_rollout_notes.md` to clarify current delivered scope vs next phases (M2/M3/M4/M5).
 - 2026-03-23 22:34 (M3): Added upload adaptive timeout handling in `_upload_file`: timed-out chunks now support bounded retry, consecutive timeout streak triggers in-flight window downgrade, and transfer diagnostics logs now include `consecutive_timeout_count` + `downgrade_count`; verified by `cargo fmt` and `cargo check`.
+- 2026-03-23 22:47 (M2.1): Reworked single-file download to same-handle multi in-flight `READ` pipelining with ordered local writeback (`pending_chunks` by offset), preserving cancellation and short-read/error guards; updated `AGENTS.md` policy wording and verified by `cargo fmt` + `cargo check`.
+- 2026-03-23 22:53 (M2.2): Added download adaptive window control on timeout/stability (`downshift` on consecutive timeouts, gradual `ramp-up` on stable chunks), bounded timeout retries per chunk, and session-level fallback lock to single-flight mode after repeated timeouts; verified by `cargo fmt` + `cargo check`.
+- 2026-03-23 22:54 (M2.3): Kept and revalidated integrity/cancel semantics in pipelined download path with explicit guards: cancel token abort, EOF/empty-read-before-complete failure, duplicate-offset and leftover-buffer failure, transferred-bytes completeness check, and remote-size-drift check.

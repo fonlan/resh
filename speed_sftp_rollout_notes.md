@@ -16,6 +16,14 @@ Last updated: 2026-03-23
   - bounded retry on chunk write timeout
   - consecutive timeout streak triggers in-flight downgrade
   - diagnostics now include consecutive timeout and downgrade counters
+- Added same-handle pipelined download for single-file transfer:
+  - multiple in-flight `READ` requests on one SFTP handle
+  - ordered local writeback by offset to preserve file correctness
+  - short-read guard with missing-range requeue and duplicate-offset protection
+- Added adaptive download stabilization:
+  - in-flight window downgrade on timeout streak
+  - gradual window ramp-up on stable chunk completions
+  - session-level fallback lock to single-flight mode after repeated timeouts
 - Added SFTP tuning config fields in backend/frontend types.
 - Added settings UI controls and i18n strings for tuning options.
 - Added baseline matrix scaffold script:
@@ -23,7 +31,6 @@ Last updated: 2026-03-23
   - output: `results.csv`, `results.md`, per-case logs
 
 ## Behavior Intentionally Unchanged
-- Single-file download remains single-thread sequential (one in-flight read loop).
 - Existing download integrity checks and cancel semantics are preserved.
 - Multi-connection striping remains disabled by default.
 
@@ -33,9 +40,8 @@ Last updated: 2026-03-23
 - Keep download behavior conservative until same-handle read pipeline is fully guarded by fallback logic.
 
 ## Next Phases
-1. M2: Same-handle multi in-flight read scheduler for download with ordered writeback.
-2. M2: Adaptive ramp up/down and session fallback lock on timeout/error.
-3. M4/M5: Optional multi-connection modes (small-file parallel and large-file striping) behind guarded switches.
+1. Run baseline matrix and unstable-link regression to quantify M2 gains and failure characteristics.
+2. M4/M5: Optional multi-connection modes (small-file parallel and large-file striping) behind guarded switches.
 
 ## Operator Notes
 - Use matrix scaffold for before/after comparisons to prevent regressions.

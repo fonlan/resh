@@ -141,6 +141,11 @@ const UPLOAD_MAX_INFLIGHT_FAST: usize = 16;
 const UPLOAD_CHUNK_WRITE_TIMEOUT_SECS: u64 = 30;
 const UPLOAD_TIMEOUT_DOWNGRADE_THRESHOLD: u32 = 2;
 const UPLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
+const DOWNLOAD_INITIAL_INFLIGHT: usize = 2;
+const DOWNLOAD_TIMEOUT_DOWNGRADE_THRESHOLD: u32 = 2;
+const DOWNLOAD_FALLBACK_LOCK_TIMEOUT_THRESHOLD: u32 = 4;
+const DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS: u32 = 8;
+const DOWNLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
 const MAX_INFLIGHT_LIMIT: usize = 64;
 const TRANSFER_DIAG_INTERVAL_SECS: u64 = 2;
 
@@ -346,6 +351,8 @@ lazy_static! {
     static ref SFTP_COPY_DATA_SUPPORT: Mutex<HashMap<String, bool>> = Mutex::new(HashMap::new());
     static ref SFTP_SERVER_LIMITS: Mutex<HashMap<String, SftpServerLimits>> =
         Mutex::new(HashMap::new());
+    static ref SFTP_DOWNLOAD_FALLBACK_LOCK: Mutex<HashMap<String, bool>> =
+        Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref CONFLICT_RESPONSES: Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>> =
         Mutex::new(HashMap::new());
@@ -505,6 +512,16 @@ impl SftpManager {
         let runtime = Self::resolve_transfer_runtime_config(app).await;
         let limits = Self::get_server_limits(session_id).await;
         Self::calculate_transfer_tuning(runtime, limits)
+    }
+
+    async fn is_download_fallback_locked(session_id: &str) -> bool {
+        let locks = SFTP_DOWNLOAD_FALLBACK_LOCK.lock().await;
+        locks.get(session_id).copied().unwrap_or(false)
+    }
+
+    async fn set_download_fallback_lock(session_id: &str, locked: bool) {
+        let mut locks = SFTP_DOWNLOAD_FALLBACK_LOCK.lock().await;
+        locks.insert(session_id.to_string(), locked);
     }
 
     async fn log_transfer_start(
@@ -996,6 +1013,8 @@ impl SftpManager {
         drop(copy_data_support);
         let mut limits_cache = SFTP_SERVER_LIMITS.lock().await;
         limits_cache.remove(session_id);
+        let mut fallback_lock = SFTP_DOWNLOAD_FALLBACK_LOCK.lock().await;
+        fallback_lock.remove(session_id);
 
         let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
         cache.retain(|_, listing| listing.session_id != session_id);
@@ -1439,49 +1458,249 @@ impl SftpManager {
                 );
 
                 let transfer_result: Result<(), String> = async {
-                    while transferred < total_bytes {
+                    let fallback_locked = Self::is_download_fallback_locked(&session_id_inner).await;
+                    let max_inflight_reads = if fallback_locked {
+                        1
+                    } else {
+                        tuning.download_max_inflight.max(1)
+                    };
+                    if fallback_locked {
+                        tracing::info!(
+                            target: "sftp::transfer",
+                            task_id = &task_id_inner,
+                            session_id = &session_id_inner,
+                            "download fallback lock active, forcing single-flight mode"
+                        );
+                    }
+                    let mut adaptive_inflight_limit = if max_inflight_reads > 1 {
+                        DOWNLOAD_INITIAL_INFLIGHT.min(max_inflight_reads).max(1)
+                    } else {
+                        1
+                    };
+                    let mut consecutive_success_chunks = 0u32;
+                    let mut next_request_offset = 0u64;
+                    let mut next_write_offset = 0u64;
+                    let mut inflight_reads = FuturesUnordered::new();
+                    let mut pending_chunks: HashMap<u64, Vec<u8>> = HashMap::new();
+                    let mut retry_counts: HashMap<u64, u8> = HashMap::new();
+
+                    while inflight_reads.len() < adaptive_inflight_limit
+                        && next_request_offset < total_bytes
+                    {
+                        let request_size = std::cmp::min(
+                            chunk_size,
+                            total_bytes.saturating_sub(next_request_offset),
+                        );
+                        let read_size = std::cmp::min(request_size, u32::MAX as u64) as u32;
+                        let offset = next_request_offset;
+                        let sftp_clone = sftp.clone();
+                        let handle_clone = handle.clone();
+                        inflight_reads.push(
+                            async move {
+                                let read_started_at = Instant::now();
+                                let result = sftp_clone.read(&handle_clone, offset, read_size).await;
+                                (offset, read_size as u64, read_started_at, result)
+                            }
+                            .boxed(),
+                        );
+                        next_request_offset = next_request_offset.saturating_add(read_size as u64);
+                    }
+
+                    while next_write_offset < total_bytes {
                         if cancel_token.load(Ordering::SeqCst) {
                             return Err("Cancelled".to_string());
                         }
 
-                        let request_size =
-                            std::cmp::min(chunk_size, total_bytes.saturating_sub(transferred));
-                        let read_size = std::cmp::min(request_size, u32::MAX as u64) as u32;
-                        let read_started_at = Instant::now();
-                        let data = match sftp.read(&handle, transferred, read_size).await {
+                        let (offset, requested_size, read_started_at, read_result) =
+                            match inflight_reads.next().await {
+                                Some(v) => v,
+                                None => {
+                                    return Err(format!(
+                                        "Download incomplete: no in-flight reads while waiting for offset {}",
+                                        next_write_offset
+                                    ));
+                                }
+                            };
+
+                        let data = match read_result {
                             Ok(data) => data,
                             Err(russh_sftp::client::error::Error::Status(status))
                                 if status.status_code == StatusCode::Eof =>
                             {
                                 return Err(format!(
                                     "Download incomplete: EOF before full content ({} / {} bytes)",
-                                    transferred, total_bytes
+                                    next_write_offset, total_bytes
                                 ));
                             }
                             Err(e) => {
                                 let error = e.to_string();
                                 if error.to_ascii_lowercase().contains("timeout") {
                                     diagnostics.mark_timeout();
+
+                                    let retry_count = retry_counts.entry(offset).or_insert(0);
+                                    if *retry_count < DOWNLOAD_MAX_RETRIES_PER_CHUNK {
+                                        *retry_count += 1;
+                                        diagnostics.mark_retry();
+                                        consecutive_success_chunks = 0;
+
+                                        if diagnostics.consecutive_timeout_count
+                                            >= DOWNLOAD_TIMEOUT_DOWNGRADE_THRESHOLD
+                                            && adaptive_inflight_limit > 1
+                                        {
+                                            let previous = adaptive_inflight_limit;
+                                            adaptive_inflight_limit =
+                                                (adaptive_inflight_limit / 2).max(1);
+                                            diagnostics.mark_downgrade();
+                                            tracing::warn!(
+                                                target: "sftp::transfer",
+                                                task_id = &task_id_inner,
+                                                session_id = &session_id_inner,
+                                                previous_inflight = previous,
+                                                downgraded_inflight = adaptive_inflight_limit,
+                                                timeout_count = diagnostics.timeout_count,
+                                                "download inflight downgraded due to timeout streak"
+                                            );
+                                        }
+
+                                        if diagnostics.timeout_count
+                                            >= DOWNLOAD_FALLBACK_LOCK_TIMEOUT_THRESHOLD
+                                        {
+                                            Self::set_download_fallback_lock(
+                                                &session_id_inner,
+                                                true,
+                                            )
+                                            .await;
+                                            adaptive_inflight_limit = 1;
+                                            tracing::warn!(
+                                                target: "sftp::transfer",
+                                                task_id = &task_id_inner,
+                                                session_id = &session_id_inner,
+                                                timeout_count = diagnostics.timeout_count,
+                                                "download session fallback lock enabled"
+                                            );
+                                        }
+
+                                        let retry_size =
+                                            std::cmp::min(requested_size, u32::MAX as u64) as u32;
+                                        let sftp_clone = sftp.clone();
+                                        let handle_clone = handle.clone();
+                                        inflight_reads.push(Box::pin(async move {
+                                            let read_started_at = Instant::now();
+                                            let result = sftp_clone
+                                                .read(&handle_clone, offset, retry_size)
+                                                .await;
+                                            (offset, retry_size as u64, read_started_at, result)
+                                        }));
+                                        continue;
+                                    }
+
+                                    if diagnostics.timeout_count
+                                        >= DOWNLOAD_FALLBACK_LOCK_TIMEOUT_THRESHOLD
+                                    {
+                                        Self::set_download_fallback_lock(&session_id_inner, true)
+                                            .await;
+                                        tracing::warn!(
+                                            target: "sftp::transfer",
+                                            task_id = &task_id_inner,
+                                            session_id = &session_id_inner,
+                                            timeout_count = diagnostics.timeout_count,
+                                            "download session fallback lock enabled after timeout"
+                                        );
+                                    }
                                 }
                                 return Err(error);
                             }
                         };
                         diagnostics.record_rtt(read_started_at.elapsed());
                         diagnostics.mark_success();
+                        retry_counts.remove(&offset);
+                        if adaptive_inflight_limit < max_inflight_reads {
+                            consecutive_success_chunks =
+                                consecutive_success_chunks.saturating_add(1);
+                            if consecutive_success_chunks >= DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS {
+                                let previous = adaptive_inflight_limit;
+                                adaptive_inflight_limit =
+                                    (adaptive_inflight_limit + 1).min(max_inflight_reads);
+                                consecutive_success_chunks = 0;
+                                tracing::debug!(
+                                    target: "sftp::transfer",
+                                    task_id = &task_id_inner,
+                                    session_id = &session_id_inner,
+                                    previous_inflight = previous,
+                                    upgraded_inflight = adaptive_inflight_limit,
+                                    "download inflight ramped up after stable chunks"
+                                );
+                            }
+                        }
 
                         if data.data.is_empty() {
                             return Err(format!(
                                 "Download incomplete: empty data before full content ({} / {} bytes)",
-                                transferred, total_bytes
+                                next_write_offset, total_bytes
                             ));
                         }
 
-                        local_file
-                            .write_all(&data.data)
-                            .await
-                            .map_err(|e| e.to_string())?;
+                        let actual_size = data.data.len() as u64;
+                        if actual_size > requested_size {
+                            return Err(format!(
+                                "Download integrity error: received chunk larger than requested (offset {}, got {}, requested {})",
+                                offset, actual_size, requested_size
+                            ));
+                        }
 
-                        transferred += data.data.len() as u64;
+                        if actual_size < requested_size {
+                            diagnostics.mark_retry();
+                            let missing_offset = offset.saturating_add(actual_size);
+                            let missing_size = requested_size.saturating_sub(actual_size);
+                            let missing_read_size = std::cmp::min(missing_size, u32::MAX as u64) as u32;
+                            let sftp_clone = sftp.clone();
+                            let handle_clone = handle.clone();
+                            inflight_reads.push(Box::pin(async move {
+                                let read_started_at = Instant::now();
+                                let result = sftp_clone
+                                    .read(&handle_clone, missing_offset, missing_read_size)
+                                    .await;
+                                (missing_offset, missing_read_size as u64, read_started_at, result)
+                            }));
+                        }
+
+                        if pending_chunks.insert(offset, data.data).is_some() {
+                            return Err(format!(
+                                "Download integrity error: duplicate chunk offset {}",
+                                offset
+                            ));
+                        }
+
+                        while let Some(chunk) = pending_chunks.remove(&next_write_offset) {
+                            local_file
+                                .write_all(&chunk)
+                                .await
+                                .map_err(|e| e.to_string())?;
+                            next_write_offset = next_write_offset.saturating_add(chunk.len() as u64);
+                            transferred = next_write_offset;
+                        }
+
+                        while inflight_reads.len() < adaptive_inflight_limit
+                            && next_request_offset < total_bytes
+                        {
+                            let request_size = std::cmp::min(
+                                chunk_size,
+                                total_bytes.saturating_sub(next_request_offset),
+                            );
+                            let read_size = std::cmp::min(request_size, u32::MAX as u64) as u32;
+                            let offset = next_request_offset;
+                            let sftp_clone = sftp.clone();
+                            let handle_clone = handle.clone();
+                            inflight_reads.push(
+                                async move {
+                                    let read_started_at = Instant::now();
+                                    let result = sftp_clone.read(&handle_clone, offset, read_size).await;
+                                    (offset, read_size as u64, read_started_at, result)
+                                }
+                                .boxed(),
+                            );
+                            next_request_offset = next_request_offset.saturating_add(read_size as u64);
+                        }
 
                         if last_emit.elapsed().as_millis() > 500 {
                             let now = Instant::now();
@@ -1521,13 +1740,23 @@ impl SftpManager {
                                     total_bytes,
                                     transferred,
                                     display_speed,
-                                    1,
+                                    inflight_reads
+                                        .len()
+                                        .saturating_add(pending_chunks.len())
+                                        .max(1),
                                     &diagnostics,
                                 );
                                 diagnostics.touch_log_time(now);
                             }
                             last_emit = Instant::now();
                         }
+                    }
+
+                    if !pending_chunks.is_empty() {
+                        return Err(
+                            "Download integrity error: unexpected buffered chunks remain"
+                                .to_string(),
+                        );
                     }
 
                     if transferred < total_bytes {
