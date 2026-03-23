@@ -148,7 +148,8 @@ const DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS: u32 = 8;
 const DOWNLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
 const MAX_INFLIGHT_LIMIT: usize = 64;
 const TRANSFER_DIAG_INTERVAL_SECS: u64 = 2;
-const MAX_CONCURRENT_TRANSFERS_PER_SESSION: usize = 2;
+const DEFAULT_MAX_CONCURRENT_TRANSFERS: u32 = 2;
+const DEFAULT_MAX_CONCURRENT_TRANSFERS_PER_SESSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct SftpServerLimits {
@@ -360,7 +361,9 @@ lazy_static! {
     static ref TASK_QUEUE: Mutex<VecDeque<PendingTask>> = Mutex::new(VecDeque::new());
     static ref ACTIVE_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref ACTIVE_TASK_SESSIONS: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
-    static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(2);
+    static ref MAX_CONCURRENT_TRANSFERS: Mutex<u32> = Mutex::new(DEFAULT_MAX_CONCURRENT_TRANSFERS);
+    static ref MAX_CONCURRENT_TRANSFERS_PER_SESSION: Mutex<u32> =
+        Mutex::new(DEFAULT_MAX_CONCURRENT_TRANSFERS_PER_SESSION);
     static ref QUEUE_NOTIFY: Notify = Notify::new();
     static ref SCHEDULER_RUNNING: AtomicBool = AtomicBool::new(false);
     static ref DIRECTORY_LISTING_CACHE: Mutex<HashMap<String, CachedDirectoryListing>> =
@@ -615,8 +618,34 @@ impl SftpManager {
         );
     }
 
+    fn clamp_transfer_limit(max: u32) -> u32 {
+        max.clamp(1, 10)
+    }
+
+    async fn sync_queue_concurrency_from_app(app: &AppHandle) {
+        if let Some(state) = app.try_state::<Arc<AppState>>() {
+            let config = state.config.lock().await;
+            let global_max =
+                Self::clamp_transfer_limit(config.general.sftp.max_concurrent_transfers);
+            let per_session_max = Self::clamp_transfer_limit(
+                config.general.sftp.max_concurrent_transfers_per_session,
+            );
+            drop(config);
+            Self::set_max_concurrent_transfers(global_max).await;
+            Self::set_max_concurrent_transfers_per_session(per_session_max).await;
+        }
+    }
+
     pub async fn set_max_concurrent_transfers(max: u32) {
+        let max = Self::clamp_transfer_limit(max);
         let mut current = MAX_CONCURRENT_TRANSFERS.lock().await;
+        *current = max;
+        QUEUE_NOTIFY.notify_one();
+    }
+
+    pub async fn set_max_concurrent_transfers_per_session(max: u32) {
+        let max = Self::clamp_transfer_limit(max);
+        let mut current = MAX_CONCURRENT_TRANSFERS_PER_SESSION.lock().await;
         *current = max;
         QUEUE_NOTIFY.notify_one();
     }
@@ -625,6 +654,8 @@ impl SftpManager {
         loop {
             let next_task = {
                 let max_concurrent = *MAX_CONCURRENT_TRANSFERS.lock().await;
+                let max_concurrent_per_session =
+                    *MAX_CONCURRENT_TRANSFERS_PER_SESSION.lock().await as usize;
                 let mut queue = TASK_QUEUE.lock().await;
                 let mut active = ACTIVE_TASKS.lock().await;
                 let mut active_task_sessions = ACTIVE_TASK_SESSIONS.lock().await;
@@ -635,7 +666,7 @@ impl SftpManager {
                             .values()
                             .filter(|sid| sid.as_str() == task.session_id.as_str())
                             .count();
-                        active_for_session < MAX_CONCURRENT_TRANSFERS_PER_SESSION
+                        active_for_session < max_concurrent_per_session
                     });
 
                     if let Some(index) = next_index {
@@ -746,6 +777,7 @@ impl SftpManager {
         local_path: String,
         task_id: Option<String>,
     ) -> Result<String, String> {
+        Self::sync_queue_concurrency_from_app(&app).await;
         let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let cancel_token = Arc::new(AtomicBool::new(false));
 
@@ -807,6 +839,7 @@ impl SftpManager {
         remote_path: String,
         task_id: Option<String>,
     ) -> Result<String, String> {
+        Self::sync_queue_concurrency_from_app(&app).await;
         let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
         let cancel_token = Arc::new(AtomicBool::new(false));
 

@@ -269,6 +269,7 @@ async fn main() {
             commands::sftp::sftp_download,
             commands::sftp::sftp_upload,
             commands::sftp::sftp_set_max_concurrent,
+            commands::sftp::sftp_set_max_concurrent_per_session,
             commands::sftp::sftp_cancel_transfer,
             commands::sftp::sftp_resolve_conflict,
             commands::sftp::pick_files,

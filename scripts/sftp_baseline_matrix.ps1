@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$Host,
+  [string]$ServerHost,
 
   [Parameter(Mandatory = $true)]
   [string]$User,
@@ -98,7 +98,7 @@ function Invoke-SftpBatch {
   if (-not [string]::IsNullOrWhiteSpace($PrivateKeyPath)) {
     $args += @('-i', $PrivateKeyPath)
   }
-  $args += "$User@$Host"
+  $args += "$User@$ServerHost"
 
   $startedAt = Get-Date
   $rawOutput = & sftp @args 2>&1

@@ -32,6 +32,7 @@ export interface SftpSettings {
   defaultDownloadPath: string
   editors: EditorRule[]
   maxConcurrentTransfers: number
+  maxConcurrentTransfersPerSession: number
   transferProfile: "safe" | "balanced" | "fast"
   downloadMaxInflight: number
   uploadMaxInflight: number

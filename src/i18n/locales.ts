@@ -431,6 +431,9 @@ export const locales = {
         maxConcurrentTransfers: "Max Concurrent Transfers",
         maxConcurrentTransfersDesc:
           "Number of simultaneous download/upload tasks. Recommended: 2-4.",
+        maxConcurrentTransfersPerSession: "Max Concurrent Per Session",
+        maxConcurrentTransfersPerSessionDesc:
+          "Upper bound for active transfer tasks per SSH session, used for queue fairness.",
         transferProfile: "Transfer Profile",
         transferProfileDesc:
           "Balanced is recommended. Safe reduces risk on unstable links, Fast favors throughput.",
@@ -921,6 +924,9 @@ export const locales = {
         maxConcurrentTransfers: "最大并行传输任务数",
         maxConcurrentTransfersDesc:
           "同时进行的下载/上传任务数量。推荐值：2-4。",
+        maxConcurrentTransfersPerSession: "单会话最大并行任务数",
+        maxConcurrentTransfersPerSessionDesc:
+          "单个 SSH 会话允许的并行传输任务上限，用于保证队列公平性。",
         transferProfile: "传输策略",
         transferProfileDesc:
           "推荐使用 balanced。safe 在不稳定链路下更稳，fast 优先追求吞吐。",

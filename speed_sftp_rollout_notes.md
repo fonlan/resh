@@ -1,6 +1,6 @@
 # SFTP Speed Rollout Notes
 
-Last updated: 2026-03-23
+Last updated: 2026-03-24
 
 ## What Changed In This Patch
 - Added transfer diagnostics primitives in backend SFTP path:
@@ -27,11 +27,20 @@ Last updated: 2026-03-23
 - Added queue fairness safeguard for batch transfers:
   - per-session active transfer cap in scheduler (default `2`)
   - still bounded by global active transfer cap
+- Exposed queue quota tuning controls:
+  - new setting field `maxConcurrentTransfersPerSession`
+  - runtime command `sftp_set_max_concurrent_per_session`
+  - enqueue flow syncs queue caps from current config before scheduling
 - Added SFTP tuning config fields in backend/frontend types.
 - Added settings UI controls and i18n strings for tuning options.
 - Added baseline matrix scaffold script:
   - `scripts/sftp_baseline_matrix.ps1`
   - output: `results.csv`, `results.md`, per-case logs
+- Added fairness regression scaffold script:
+  - `scripts/sftp_fairness_regression.ps1`
+  - dual-session concurrent upload run + `fairness_ratio` report
+- Fixed baseline script runtime param conflict:
+  - renamed `Host` parameter to `ServerHost` in `sftp_baseline_matrix.ps1`
 
 ## Behavior Intentionally Unchanged
 - Existing download integrity checks and cancel semantics are preserved.
@@ -43,8 +52,8 @@ Last updated: 2026-03-23
 - Keep download behavior conservative until same-handle read pipeline is fully guarded by fallback logic.
 
 ## Next Phases
-1. Expose queue quota tuning (global/per-session) through config/UI and validate default values.
-2. Run baseline matrix and unstable-link regression to quantify M2/M4 gains and failure characteristics.
+1. Run fairness and baseline scripts on target environments to produce empirical throughput/fairness reports.
+2. Tune recommended defaults for global/per-session queue caps from measured fairness and throughput.
 3. M5: Optional multi-connection striping path behind guarded switches.
 
 ## Operator Notes

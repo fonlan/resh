@@ -199,6 +199,12 @@ pub struct SftpSettings {
     pub editors: Vec<EditorRule>,
     #[serde(default = "default_max_concurrent_transfers")]
     pub max_concurrent_transfers: u32,
+    #[serde(default = "default_max_concurrent_transfers_per_session")]
+    #[serde(
+        alias = "maxConcurrentTransfersPerSession",
+        alias = "max_concurrent_transfers_per_session"
+    )]
+    pub max_concurrent_transfers_per_session: u32,
     #[serde(default = "default_transfer_profile")]
     #[serde(alias = "transferProfile", alias = "transfer_profile")]
     pub transfer_profile: String,
@@ -229,6 +235,10 @@ pub struct SftpSettings {
 }
 
 fn default_max_concurrent_transfers() -> u32 {
+    2
+}
+
+fn default_max_concurrent_transfers_per_session() -> u32 {
     2
 }
 
@@ -467,6 +477,8 @@ impl Config {
                     default_download_path: String::new(),
                     editors: vec![],
                     max_concurrent_transfers: 2,
+                    max_concurrent_transfers_per_session:
+                        default_max_concurrent_transfers_per_session(),
                     transfer_profile: default_transfer_profile(),
                     download_max_inflight: default_download_max_inflight(),
                     upload_max_inflight: default_upload_max_inflight(),

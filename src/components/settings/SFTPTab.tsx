@@ -278,6 +278,9 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   }
 
   const transferProfile = config.general.sftp.transferProfile || "balanced"
+  const maxConcurrentTransfers = config.general.sftp.maxConcurrentTransfers || 2
+  const maxConcurrentTransfersPerSession =
+    config.general.sftp.maxConcurrentTransfersPerSession || 2
   const downloadMaxInflight = config.general.sftp.downloadMaxInflight || 8
   const uploadMaxInflight = config.general.sftp.uploadMaxInflight || 12
   const chunkSizeMinKB = Math.max(
@@ -318,40 +321,64 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
         </p>
       </div>
 
-      <div className="form-group">
-        <label htmlFor="sftp-max-concurrent" className="form-label">
-          {t.sftp.settings.maxConcurrentTransfers}
-        </label>
-        <input
-          id="sftp-max-concurrent"
-          type="number"
-          min="1"
-          max="10"
-          value={config.general.sftp.maxConcurrentTransfers}
-          onChange={(e) => {
-            const value = Math.max(
-              1,
-              Math.min(10, parseInt(e.target.value) || 1),
-            )
-            onChange({
-              ...config,
-              general: {
-                ...config.general,
-                sftp: {
-                  ...config.general.sftp,
-                  maxConcurrentTransfers: value,
-                },
-              },
-            })
-            invoke("sftp_set_max_concurrent", { max: value }).catch(
-              console.error,
-            )
-          }}
-          className="form-input w-32"
-        />
-        <p className="mt-1.5 text-xs text-zinc-500 leading-6">
-          {t.sftp.settings.maxConcurrentTransfersDesc}
-        </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="form-group">
+          <label htmlFor="sftp-max-concurrent" className="form-label">
+            {t.sftp.settings.maxConcurrentTransfers}
+          </label>
+          <input
+            id="sftp-max-concurrent"
+            type="number"
+            min="1"
+            max="10"
+            value={maxConcurrentTransfers}
+            onChange={(e) => {
+              const value = Math.max(
+                1,
+                Math.min(10, parseInt(e.target.value) || 1),
+              )
+              updateSftpSettings({ maxConcurrentTransfers: value })
+              invoke("sftp_set_max_concurrent", { max: value }).catch(
+                console.error,
+              )
+            }}
+            className="form-input w-32"
+          />
+          <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.maxConcurrentTransfersDesc}
+          </p>
+        </div>
+        <div className="form-group">
+          <label
+            htmlFor="sftp-max-concurrent-per-session"
+            className="form-label"
+          >
+            {t.sftp.settings.maxConcurrentTransfersPerSession}
+          </label>
+          <input
+            id="sftp-max-concurrent-per-session"
+            type="number"
+            min="1"
+            max="10"
+            value={maxConcurrentTransfersPerSession}
+            onChange={(e) => {
+              const value = Math.max(
+                1,
+                Math.min(10, parseInt(e.target.value) || 1),
+              )
+              updateSftpSettings({
+                maxConcurrentTransfersPerSession: value,
+              })
+              invoke("sftp_set_max_concurrent_per_session", {
+                max: value,
+              }).catch(console.error)
+            }}
+            className="form-input w-32"
+          />
+          <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.maxConcurrentTransfersPerSessionDesc}
+          </p>
+        </div>
       </div>
 
       <div className="form-group">

@@ -118,6 +118,13 @@ pub async fn sftp_set_max_concurrent(max: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn sftp_set_max_concurrent_per_session(max: u32) -> Result<(), String> {
+    let max = std::cmp::max(1, std::cmp::min(10, max));
+    SftpManager::set_max_concurrent_transfers_per_session(max).await;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn sftp_cancel_transfer(task_id: String) -> Result<(), String> {
     SftpManager::cancel_transfer(&task_id).await
 }

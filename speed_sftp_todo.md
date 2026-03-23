@@ -1,6 +1,6 @@
 # SFTP Speed TODO (Execution Tracker)
 
-Last updated: 2026-03-23 22:59
+Last updated: 2026-03-24 00:07
 Source plan: `speed_sftp.md`
 
 ## Rules For This File
@@ -43,8 +43,8 @@ Source plan: `speed_sftp.md`
 
 ### M4 - Queue & Connection Parallelism
 - [x] M4.1 Add per-session queue scheduling cap under global transfer cap.
-- [ ] M4.2 Expose per-session/global queue quota tuning in config/UI.
-- [ ] M4.3 Validate small-file batch throughput and fairness regression.
+- [x] M4.2 Expose per-session/global queue quota tuning in config/UI.
+- [ ] M4.3 Validate small-file batch throughput and fairness regression. (Harness scaffold added, awaiting environment run)
 
 ### Config/UI/Data
 - [x] C1 Add SFTP tuning config schema fields.
@@ -73,6 +73,8 @@ Source plan: `speed_sftp.md`
 - [x] Scope-G: Complete M2.2 (adaptive ramp and session fallback lock)
 - [x] Scope-H: Complete M2.3 (integrity/cancel invariants on new download path)
 - [x] Scope-I: Complete M4.1 (per-session scheduler fairness cap)
+- [x] Scope-J: Complete M4.2 (queue quota config + runtime command + settings UI)
+- [x] Scope-K: Add fairness regression script scaffold + baseline script runtime fix
 
 ## Progress Log
 
@@ -88,3 +90,5 @@ Source plan: `speed_sftp.md`
 - 2026-03-23 22:53 (M2.2): Added download adaptive window control on timeout/stability (`downshift` on consecutive timeouts, gradual `ramp-up` on stable chunks), bounded timeout retries per chunk, and session-level fallback lock to single-flight mode after repeated timeouts; verified by `cargo fmt` + `cargo check`.
 - 2026-03-23 22:54 (M2.3): Kept and revalidated integrity/cancel semantics in pipelined download path with explicit guards: cancel token abort, EOF/empty-read-before-complete failure, duplicate-offset and leftover-buffer failure, transferred-bytes completeness check, and remote-size-drift check.
 - 2026-03-23 22:59 (M4.1): Updated transfer scheduler to enforce per-session active-task cap (default `2`) under existing global concurrent cap, preventing single-session starvation of queued tasks from other sessions; verified by `cargo fmt` + `cargo check`.
+- 2026-03-24 00:02 (M4.2): Added queue quota tuning field `maxConcurrentTransfersPerSession` in backend/frontend settings schema, wired runtime command `sftp_set_max_concurrent_per_session`, and updated SFTP settings UI/i18n to edit global/per-session caps; enqueue path now syncs queue caps from current config before scheduling; verified by `cargo fmt`, `cargo check`, `prettier`, and `tsc`.
+- 2026-03-24 00:07 (M4.3 scaffold): Added `scripts/sftp_fairness_regression.ps1` to run concurrent dual-session small-file upload fairness checks with `fairness_ratio` report output; fixed `scripts/sftp_baseline_matrix.ps1` runtime parameter conflict by renaming `Host` -> `ServerHost`; validated both scripts with PowerShell parser.
