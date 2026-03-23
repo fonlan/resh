@@ -1,4 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+  useLayoutEffect,
+} from "react"
 import { createPortal } from "react-dom"
 import {
   X,
@@ -110,6 +117,11 @@ interface ContextSubmenuPosition {
   top: number
   left: number
   maxHeight: number
+}
+
+interface ContextMenuPosition {
+  top: number
+  left: number
 }
 
 const normalizeSftpPath = (path: string): string => path.replace(/\\/g, "/")
@@ -492,6 +504,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     y: number
     entry: FileEntry | null
   } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+  const [contextMenuPosition, setContextMenuPosition] =
+    useState<ContextMenuPosition | null>(null)
 
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean
@@ -1161,11 +1176,67 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null)
+    setContextMenuPosition(null)
     setShowPathSubmenu(false)
     setShowEditSubmenu(false)
     setShowCustomCommandsSubmenu(false)
     setCustomCommandsSubmenuPosition(null)
   }, [])
+
+  const updateContextMenuPosition = useCallback(() => {
+    if (!contextMenu || !contextMenuRef.current) {
+      return
+    }
+
+    const menuRect = contextMenuRef.current.getBoundingClientRect()
+    const viewportTop = CONTEXT_MENU_VIEWPORT_PADDING
+    const viewportLeft = CONTEXT_MENU_VIEWPORT_PADDING
+    const viewportBottom = window.innerHeight - CONTEXT_MENU_VIEWPORT_PADDING
+    const viewportRight = window.innerWidth - CONTEXT_MENU_VIEWPORT_PADDING
+    const menuHeight = menuRect.height
+    const menuWidth = menuRect.width
+    const canOpenDown = contextMenu.y + menuHeight <= viewportBottom
+    const canOpenUp = contextMenu.y - menuHeight >= viewportTop
+
+    let top = contextMenu.y
+    if (!canOpenDown && canOpenUp) {
+      top = contextMenu.y - menuHeight
+    } else if (!canOpenDown) {
+      top = viewportBottom - menuHeight
+    }
+    top = Math.min(
+      Math.max(top, viewportTop),
+      Math.max(viewportTop, viewportBottom - menuHeight),
+    )
+
+    const left = Math.min(
+      Math.max(contextMenu.x, viewportLeft),
+      Math.max(viewportLeft, viewportRight - menuWidth),
+    )
+
+    setContextMenuPosition({ top, left })
+  }, [contextMenu])
+
+  useLayoutEffect(() => {
+    if (!contextMenu) {
+      setContextMenuPosition(null)
+      return
+    }
+
+    updateContextMenuPosition()
+  }, [contextMenu, updateContextMenuPosition])
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return
+    }
+
+    window.addEventListener("resize", updateContextMenuPosition)
+
+    return () => {
+      window.removeEventListener("resize", updateContextMenuPosition)
+    }
+  }, [contextMenu, updateContextMenuPosition])
 
   const handleEditVim = () => {
     if (!contextMenu || !sessionId || !contextMenu.entry) return
@@ -2435,15 +2506,12 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
       {contextMenu && (
         <div
+          ref={contextMenuRef}
           className="sftp-context-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
           style={{
-            top:
-              contextMenu.y > window.innerHeight - 350 ? "auto" : contextMenu.y,
-            bottom:
-              contextMenu.y > window.innerHeight - 350
-                ? window.innerHeight - contextMenu.y
-                : "auto",
-            left: contextMenu.x,
+            top: contextMenuPosition?.top ?? contextMenu.y,
+            left: contextMenuPosition?.left ?? contextMenu.x,
+            visibility: contextMenuPosition ? "visible" : "hidden",
           }}
         >
           <button
