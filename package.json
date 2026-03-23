@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri-dev": "tauri dev",
-    "tauri-build": "tauri build"
+    "tauri-build": "tauri build",
+    "sftp:baseline": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_baseline_matrix.ps1",
+    "sftp:fairness": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_fairness_regression.ps1",
+    "sftp:perf-suite": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_perf_suite.ps1"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.18",

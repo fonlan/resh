@@ -1,6 +1,6 @@
 # SFTP Speed TODO (Execution Tracker)
 
-Last updated: 2026-03-24 00:07
+Last updated: 2026-03-24 00:16
 Source plan: `speed_sftp.md`
 
 ## Rules For This File
@@ -44,7 +44,7 @@ Source plan: `speed_sftp.md`
 ### M4 - Queue & Connection Parallelism
 - [x] M4.1 Add per-session queue scheduling cap under global transfer cap.
 - [x] M4.2 Expose per-session/global queue quota tuning in config/UI.
-- [ ] M4.3 Validate small-file batch throughput and fairness regression. (Harness scaffold added, awaiting environment run)
+- [ ] M4.3 Validate small-file batch throughput and fairness regression. (Harness + suite orchestrator ready, awaiting target-environment run)
 
 ### Config/UI/Data
 - [x] C1 Add SFTP tuning config schema fields.
@@ -75,6 +75,7 @@ Source plan: `speed_sftp.md`
 - [x] Scope-I: Complete M4.1 (per-session scheduler fairness cap)
 - [x] Scope-J: Complete M4.2 (queue quota config + runtime command + settings UI)
 - [x] Scope-K: Add fairness regression script scaffold + baseline script runtime fix
+- [x] Scope-L: Add perf-suite orchestrator + npm harness entries + execution docs
 
 ## Progress Log
 
@@ -92,3 +93,4 @@ Source plan: `speed_sftp.md`
 - 2026-03-23 22:59 (M4.1): Updated transfer scheduler to enforce per-session active-task cap (default `2`) under existing global concurrent cap, preventing single-session starvation of queued tasks from other sessions; verified by `cargo fmt` + `cargo check`.
 - 2026-03-24 00:02 (M4.2): Added queue quota tuning field `maxConcurrentTransfersPerSession` in backend/frontend settings schema, wired runtime command `sftp_set_max_concurrent_per_session`, and updated SFTP settings UI/i18n to edit global/per-session caps; enqueue path now syncs queue caps from current config before scheduling; verified by `cargo fmt`, `cargo check`, `prettier`, and `tsc`.
 - 2026-03-24 00:07 (M4.3 scaffold): Added `scripts/sftp_fairness_regression.ps1` to run concurrent dual-session small-file upload fairness checks with `fairness_ratio` report output; fixed `scripts/sftp_baseline_matrix.ps1` runtime parameter conflict by renaming `Host` -> `ServerHost`; validated both scripts with PowerShell parser.
+- 2026-03-24 00:16 (M4.3 tooling): Added `scripts/sftp_perf_suite.ps1` orchestrator to run baseline+fairness and emit consolidated `suite-summary.md`; added npm script entries (`sftp:baseline`, `sftp:fairness`, `sftp:perf-suite`) and updated README usage docs for reproducible harness execution.

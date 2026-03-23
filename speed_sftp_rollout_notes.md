@@ -39,6 +39,13 @@ Last updated: 2026-03-24
 - Added fairness regression scaffold script:
   - `scripts/sftp_fairness_regression.ps1`
   - dual-session concurrent upload run + `fairness_ratio` report
+- Added performance suite orchestrator script:
+  - `scripts/sftp_perf_suite.ps1`
+  - runs baseline + fairness scripts and writes consolidated `suite-summary.md`
+- Added npm script entries for harness execution:
+  - `npm run sftp:baseline -- ...`
+  - `npm run sftp:fairness -- ...`
+  - `npm run sftp:perf-suite -- ...`
 - Fixed baseline script runtime param conflict:
   - renamed `Host` parameter to `ServerHost` in `sftp_baseline_matrix.ps1`
 

@@ -104,7 +104,14 @@ npm run build            # Build frontend (TypeScript + Vite)
 npm run tauri-dev        # Run Tauri in development mode
 npm run tauri-build      # Build production Tauri app
 npm run tauri            # Direct access to Tauri CLI
+
+# SFTP performance harness (pass args after --)
+npm run sftp:baseline -- -ServerHost <host> -User <user>
+npm run sftp:fairness -- -ServerHost <host> -User <user>
+npm run sftp:perf-suite -- -ServerHost <host> -User <user>
 ```
+
+SFTP harness outputs are written under `artifacts/` by default. Use script flags (for example `-PrivateKeyPath`, `-Port`, `-OutputDir`) to adapt runs for your environment.
 
 
 ### Adding New Features
