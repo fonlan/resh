@@ -1,3 +1,5 @@
+use crate::commands::AppState;
+use crate::config::types::SftpSettings;
 use crate::db::DatabaseManager;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::stream::FuturesUnordered;
@@ -5,6 +7,7 @@ use futures::FutureExt;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use russh_sftp::client::RawSftpSession;
+use russh_sftp::extensions::{self, LimitsExtension};
 use russh_sftp::protocol::{FileAttributes, OpenFlags, Packet, Status, StatusCode};
 use russh_sftp::ser;
 use serde::Serialize;
@@ -13,8 +16,8 @@ use std::io::SeekFrom;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
-use tauri::{AppHandle, Emitter};
+use std::time::{Duration, Instant};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncSeekExt;
 use tokio::io::AsyncWriteExt;
@@ -127,6 +130,179 @@ const COPY_TRANSFER_TYPE: &str = "copy";
 const COPY_DATA_UNSUPPORTED_ERROR: &str = "SFTP_COPY_DATA_UNSUPPORTED";
 const SFTP_REQUEST_TIMEOUT_SECS: u64 = 60;
 const DOWNLOAD_CHUNK_SIZE: u64 = 256 * 1024;
+const MIN_CHUNK_SIZE_BYTES: u64 = 4 * 1024;
+const MAX_CHUNK_SIZE_BYTES: u64 = 1024 * 1024;
+const UPLOAD_CHUNK_SIZE_SAFE: u64 = 64 * 1024;
+const UPLOAD_CHUNK_SIZE_BALANCED: u64 = 128 * 1024;
+const UPLOAD_CHUNK_SIZE_FAST: u64 = 256 * 1024;
+const UPLOAD_MAX_INFLIGHT_SAFE: usize = 6;
+const UPLOAD_MAX_INFLIGHT_BALANCED: usize = 12;
+const UPLOAD_MAX_INFLIGHT_FAST: usize = 16;
+const UPLOAD_CHUNK_WRITE_TIMEOUT_SECS: u64 = 30;
+const UPLOAD_TIMEOUT_DOWNGRADE_THRESHOLD: u32 = 2;
+const UPLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
+const MAX_INFLIGHT_LIMIT: usize = 64;
+const TRANSFER_DIAG_INTERVAL_SECS: u64 = 2;
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SftpServerLimits {
+    max_packet_len: Option<u64>,
+    max_read_len: Option<u64>,
+    max_write_len: Option<u64>,
+    max_open_handles: Option<u64>,
+}
+
+impl SftpServerLimits {
+    fn from_extension(limits: LimitsExtension) -> Self {
+        Self {
+            max_packet_len: (limits.max_packet_len > 0).then_some(limits.max_packet_len),
+            max_read_len: (limits.max_read_len > 0).then_some(limits.max_read_len),
+            max_write_len: (limits.max_write_len > 0).then_some(limits.max_write_len),
+            max_open_handles: (limits.max_open_handles > 0).then_some(limits.max_open_handles),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TransferProfile {
+    Safe,
+    Balanced,
+    Fast,
+}
+
+impl TransferProfile {
+    fn from_str(raw: &str) -> Self {
+        match raw {
+            "safe" => Self::Safe,
+            "fast" => Self::Fast,
+            _ => Self::Balanced,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Safe => "safe",
+            Self::Balanced => "balanced",
+            Self::Fast => "fast",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TransferRuntimeConfig {
+    profile: TransferProfile,
+    download_max_inflight: usize,
+    upload_max_inflight: usize,
+    chunk_size_min: u64,
+    chunk_size_max: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TransferTuning {
+    profile: TransferProfile,
+    download_chunk_size: u64,
+    upload_chunk_size: u64,
+    download_max_inflight: usize,
+    upload_max_inflight: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SpeedSampler {
+    display_speed: f64,
+    last_sample_at: Instant,
+    last_sample_bytes: u64,
+}
+
+impl SpeedSampler {
+    fn new(start_at: Instant) -> Self {
+        Self {
+            display_speed: 0.0,
+            last_sample_at: start_at,
+            last_sample_bytes: 0,
+        }
+    }
+
+    fn sample(&mut self, now: Instant, transferred_bytes: u64) -> f64 {
+        let sample_secs = now.duration_since(self.last_sample_at).as_secs_f64();
+        if sample_secs > 0.0 && transferred_bytes >= self.last_sample_bytes {
+            let instant_speed = (transferred_bytes - self.last_sample_bytes) as f64 / sample_secs;
+            self.display_speed = if self.display_speed > 0.0 {
+                (self.display_speed * 0.6) + (instant_speed * 0.4)
+            } else {
+                instant_speed
+            };
+        }
+        self.last_sample_at = now;
+        self.last_sample_bytes = transferred_bytes;
+        self.display_speed
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct TransferDiagnostics {
+    started_at: Instant,
+    last_logged_at: Instant,
+    timeout_count: u32,
+    consecutive_timeout_count: u32,
+    downgrade_count: u32,
+    retry_count: u32,
+    rtt_total_ms: f64,
+    rtt_samples: u64,
+}
+
+impl TransferDiagnostics {
+    fn new(now: Instant) -> Self {
+        Self {
+            started_at: now,
+            last_logged_at: now,
+            timeout_count: 0,
+            consecutive_timeout_count: 0,
+            downgrade_count: 0,
+            retry_count: 0,
+            rtt_total_ms: 0.0,
+            rtt_samples: 0,
+        }
+    }
+
+    fn record_rtt(&mut self, elapsed: Duration) {
+        self.rtt_total_ms += elapsed.as_secs_f64() * 1000.0;
+        self.rtt_samples += 1;
+    }
+
+    fn avg_rtt_ms(&self) -> Option<f64> {
+        if self.rtt_samples == 0 {
+            None
+        } else {
+            Some(self.rtt_total_ms / self.rtt_samples as f64)
+        }
+    }
+
+    fn mark_timeout(&mut self) {
+        self.timeout_count += 1;
+        self.consecutive_timeout_count += 1;
+    }
+
+    fn mark_retry(&mut self) {
+        self.retry_count += 1;
+    }
+
+    fn mark_success(&mut self) {
+        self.consecutive_timeout_count = 0;
+    }
+
+    fn mark_downgrade(&mut self) {
+        self.downgrade_count += 1;
+        self.consecutive_timeout_count = 0;
+    }
+
+    fn should_log_progress(&self, now: Instant) -> bool {
+        now.duration_since(self.last_logged_at) >= Duration::from_secs(TRANSFER_DIAG_INTERVAL_SECS)
+    }
+
+    fn touch_log_time(&mut self, now: Instant) {
+        self.last_logged_at = now;
+    }
+}
 
 #[derive(Serialize)]
 struct CopyDataExtension {
@@ -168,6 +344,8 @@ lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> =
         Mutex::new(HashMap::new());
     static ref SFTP_COPY_DATA_SUPPORT: Mutex<HashMap<String, bool>> = Mutex::new(HashMap::new());
+    static ref SFTP_SERVER_LIMITS: Mutex<HashMap<String, SftpServerLimits>> =
+        Mutex::new(HashMap::new());
     static ref TRANSFER_TASKS: Mutex<HashMap<String, Arc<AtomicBool>>> = Mutex::new(HashMap::new());
     static ref CONFLICT_RESPONSES: Mutex<HashMap<String, oneshot::Sender<ConflictResolution>>> =
         Mutex::new(HashMap::new());
@@ -210,6 +388,212 @@ impl SftpManager {
 
             comparison
         });
+    }
+
+    fn clamp_chunk_size(value: u64, min_size: u64, max_size: u64) -> u64 {
+        let min_size = min_size.max(MIN_CHUNK_SIZE_BYTES);
+        let max_size = max_size.max(min_size).min(MAX_CHUNK_SIZE_BYTES);
+        value.clamp(min_size, max_size)
+    }
+
+    fn clamp_inflight(value: usize) -> usize {
+        value.clamp(1, MAX_INFLIGHT_LIMIT)
+    }
+
+    fn default_transfer_runtime_config() -> TransferRuntimeConfig {
+        TransferRuntimeConfig {
+            profile: TransferProfile::Balanced,
+            download_max_inflight: 8,
+            upload_max_inflight: UPLOAD_MAX_INFLIGHT_BALANCED,
+            chunk_size_min: UPLOAD_CHUNK_SIZE_SAFE,
+            chunk_size_max: UPLOAD_CHUNK_SIZE_FAST,
+        }
+    }
+
+    fn transfer_runtime_config_from_settings(settings: &SftpSettings) -> TransferRuntimeConfig {
+        let min_chunk = settings.chunk_size_min.max(MIN_CHUNK_SIZE_BYTES);
+        let max_chunk = settings
+            .chunk_size_max
+            .max(min_chunk)
+            .min(MAX_CHUNK_SIZE_BYTES);
+        TransferRuntimeConfig {
+            profile: TransferProfile::from_str(&settings.transfer_profile),
+            download_max_inflight: Self::clamp_inflight(settings.download_max_inflight as usize),
+            upload_max_inflight: Self::clamp_inflight(settings.upload_max_inflight as usize),
+            chunk_size_min: min_chunk,
+            chunk_size_max: max_chunk,
+        }
+    }
+
+    async fn resolve_transfer_runtime_config(app: &AppHandle) -> TransferRuntimeConfig {
+        if let Some(state) = app.try_state::<Arc<AppState>>() {
+            let config = state.config.lock().await;
+            return Self::transfer_runtime_config_from_settings(&config.general.sftp);
+        }
+        Self::default_transfer_runtime_config()
+    }
+
+    async fn get_server_limits(session_id: &str) -> Option<SftpServerLimits> {
+        let limits = SFTP_SERVER_LIMITS.lock().await;
+        limits.get(session_id).copied()
+    }
+
+    fn calculate_transfer_tuning(
+        runtime: TransferRuntimeConfig,
+        limits: Option<SftpServerLimits>,
+    ) -> TransferTuning {
+        let (profile_upload_chunk, profile_upload_inflight) = match runtime.profile {
+            TransferProfile::Safe => (UPLOAD_CHUNK_SIZE_SAFE, UPLOAD_MAX_INFLIGHT_SAFE),
+            TransferProfile::Balanced => (UPLOAD_CHUNK_SIZE_BALANCED, UPLOAD_MAX_INFLIGHT_BALANCED),
+            TransferProfile::Fast => (UPLOAD_CHUNK_SIZE_FAST, UPLOAD_MAX_INFLIGHT_FAST),
+        };
+
+        let mut download_chunk = Self::clamp_chunk_size(
+            DOWNLOAD_CHUNK_SIZE,
+            runtime.chunk_size_min,
+            runtime.chunk_size_max,
+        );
+        let mut upload_chunk = Self::clamp_chunk_size(
+            profile_upload_chunk,
+            runtime.chunk_size_min,
+            runtime.chunk_size_max,
+        );
+
+        if let Some(limits) = limits {
+            if let Some(max_read_len) = limits.max_read_len {
+                download_chunk = download_chunk.min(max_read_len.max(MIN_CHUNK_SIZE_BYTES));
+            }
+            if let Some(max_write_len) = limits.max_write_len {
+                upload_chunk = upload_chunk.min(max_write_len.max(MIN_CHUNK_SIZE_BYTES));
+            }
+            if let Some(max_packet_len) = limits.max_packet_len {
+                download_chunk = download_chunk.min(max_packet_len.max(MIN_CHUNK_SIZE_BYTES));
+                upload_chunk = upload_chunk.min(max_packet_len.max(MIN_CHUNK_SIZE_BYTES));
+            }
+        }
+
+        download_chunk = Self::clamp_chunk_size(
+            download_chunk,
+            runtime.chunk_size_min,
+            runtime.chunk_size_max,
+        );
+        upload_chunk =
+            Self::clamp_chunk_size(upload_chunk, runtime.chunk_size_min, runtime.chunk_size_max);
+
+        let mut download_max_inflight = runtime.download_max_inflight;
+        let mut upload_max_inflight = profile_upload_inflight.min(runtime.upload_max_inflight);
+        if let Some(max_handles) = limits.and_then(|v| v.max_open_handles) {
+            if max_handles > 2 {
+                let handle_cap = (max_handles - 2) as usize;
+                if handle_cap > 0 {
+                    download_max_inflight = download_max_inflight.min(handle_cap);
+                    upload_max_inflight = upload_max_inflight.min(handle_cap);
+                }
+            }
+        }
+
+        TransferTuning {
+            profile: runtime.profile,
+            download_chunk_size: download_chunk,
+            upload_chunk_size: upload_chunk,
+            download_max_inflight: Self::clamp_inflight(download_max_inflight),
+            upload_max_inflight: Self::clamp_inflight(upload_max_inflight),
+        }
+    }
+
+    async fn resolve_transfer_tuning(app: &AppHandle, session_id: &str) -> TransferTuning {
+        let runtime = Self::resolve_transfer_runtime_config(app).await;
+        let limits = Self::get_server_limits(session_id).await;
+        Self::calculate_transfer_tuning(runtime, limits)
+    }
+
+    async fn log_transfer_start(
+        task_id: &str,
+        session_id: &str,
+        transfer_type: &str,
+        source: &str,
+        destination: &str,
+        total_bytes: u64,
+        tuning: TransferTuning,
+    ) {
+        let limits = Self::get_server_limits(session_id).await;
+        tracing::info!(
+            target: "sftp::transfer",
+            task_id = task_id,
+            session_id = session_id,
+            transfer_type = transfer_type,
+            source = source,
+            destination = destination,
+            total_bytes = total_bytes,
+            profile = tuning.profile.as_str(),
+            download_chunk_size = tuning.download_chunk_size,
+            upload_chunk_size = tuning.upload_chunk_size,
+            download_max_inflight = tuning.download_max_inflight,
+            upload_max_inflight = tuning.upload_max_inflight,
+            server_max_packet_len = ?limits.and_then(|v| v.max_packet_len),
+            server_max_read_len = ?limits.and_then(|v| v.max_read_len),
+            server_max_write_len = ?limits.and_then(|v| v.max_write_len),
+            server_max_open_handles = ?limits.and_then(|v| v.max_open_handles),
+            "transfer started"
+        );
+    }
+
+    fn log_transfer_progress(
+        task_id: &str,
+        session_id: &str,
+        transfer_type: &str,
+        total_bytes: u64,
+        transferred_bytes: u64,
+        speed_bytes_per_sec: f64,
+        inflight: usize,
+        diagnostics: &TransferDiagnostics,
+    ) {
+        tracing::debug!(
+            target: "sftp::transfer",
+            task_id = task_id,
+            session_id = session_id,
+            transfer_type = transfer_type,
+            total_bytes = total_bytes,
+            transferred_bytes = transferred_bytes,
+            speed_bytes_per_sec = speed_bytes_per_sec,
+            inflight = inflight,
+            elapsed_ms = diagnostics.started_at.elapsed().as_millis() as u64,
+            timeout_count = diagnostics.timeout_count,
+            consecutive_timeout_count = diagnostics.consecutive_timeout_count,
+            downgrade_count = diagnostics.downgrade_count,
+            retry_count = diagnostics.retry_count,
+            avg_rtt_ms = ?diagnostics.avg_rtt_ms(),
+            "transfer progress"
+        );
+    }
+
+    fn log_transfer_finish(
+        task_id: &str,
+        session_id: &str,
+        transfer_type: &str,
+        status: &str,
+        total_bytes: u64,
+        transferred_bytes: u64,
+        diagnostics: &TransferDiagnostics,
+        error: Option<&str>,
+    ) {
+        tracing::info!(
+            target: "sftp::transfer",
+            task_id = task_id,
+            session_id = session_id,
+            transfer_type = transfer_type,
+            status = status,
+            total_bytes = total_bytes,
+            transferred_bytes = transferred_bytes,
+            elapsed_ms = diagnostics.started_at.elapsed().as_millis() as u64,
+            timeout_count = diagnostics.timeout_count,
+            consecutive_timeout_count = diagnostics.consecutive_timeout_count,
+            downgrade_count = diagnostics.downgrade_count,
+            retry_count = diagnostics.retry_count,
+            avg_rtt_ms = ?diagnostics.avg_rtt_ms(),
+            error = ?error,
+            "transfer finished"
+        );
     }
 
     pub async fn set_max_concurrent_transfers(max: u32) {
@@ -554,6 +938,26 @@ impl SftpManager {
             .extensions
             .get(COPY_DATA_EXTENSION_NAME)
             .is_some_and(|value| value == COPY_DATA_EXTENSION_VERSION);
+        let limits = if version
+            .extensions
+            .get(extensions::LIMITS)
+            .is_some_and(|value| value == "1")
+        {
+            match sftp.limits().await {
+                Ok(limits) => Some(SftpServerLimits::from_extension(limits)),
+                Err(error) => {
+                    tracing::warn!(
+                        target: "sftp::transfer",
+                        session_id = session_id,
+                        error = %error,
+                        "Failed to query limits@openssh.com, fallback to local defaults"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let sftp = Arc::new(sftp);
         sessions.insert(session_id.to_string(), sftp.clone());
@@ -561,6 +965,23 @@ impl SftpManager {
 
         let mut copy_data_support = SFTP_COPY_DATA_SUPPORT.lock().await;
         copy_data_support.insert(session_id.to_string(), supports_copy_data);
+        drop(copy_data_support);
+        if let Some(limits) = limits {
+            let mut limits_cache = SFTP_SERVER_LIMITS.lock().await;
+            limits_cache.insert(session_id.to_string(), limits);
+            tracing::info!(
+                target: "sftp::transfer",
+                session_id = session_id,
+                max_packet_len = ?limits.max_packet_len,
+                max_read_len = ?limits.max_read_len,
+                max_write_len = ?limits.max_write_len,
+                max_open_handles = ?limits.max_open_handles,
+                "SFTP server limits cached"
+            );
+        } else {
+            let mut limits_cache = SFTP_SERVER_LIMITS.lock().await;
+            limits_cache.remove(session_id);
+        }
 
         Ok(sftp)
     }
@@ -572,6 +993,9 @@ impl SftpManager {
 
         let mut copy_data_support = SFTP_COPY_DATA_SUPPORT.lock().await;
         copy_data_support.remove(session_id);
+        drop(copy_data_support);
+        let mut limits_cache = SFTP_SERVER_LIMITS.lock().await;
+        limits_cache.remove(session_id);
 
         let mut cache = DIRECTORY_LISTING_CACHE.lock().await;
         cache.retain(|_, listing| listing.session_id != session_id);
@@ -977,13 +1401,24 @@ impl SftpManager {
                     .await
                     .map_err(|e| e.to_string())?;
 
+                let tuning = Self::resolve_transfer_tuning(&app, &session_id_inner).await;
                 let mut transferred = 0u64;
-                let chunk_size = DOWNLOAD_CHUNK_SIZE;
+                let chunk_size = tuning.download_chunk_size;
                 let start_time = Instant::now();
                 let mut last_emit = Instant::now();
-                let mut display_speed = 0.0f64;
-                let mut last_speed_sample_at = start_time;
-                let mut last_speed_sample_bytes = 0u64;
+                let mut speed_sampler = SpeedSampler::new(start_time);
+                let mut diagnostics = TransferDiagnostics::new(start_time);
+
+                Self::log_transfer_start(
+                    &task_id_inner,
+                    &session_id_inner,
+                    "download",
+                    &remote_path_inner,
+                    &local_path_inner,
+                    total_bytes,
+                    tuning,
+                )
+                .await;
 
                 let _ = app.emit(
                     "transfer-progress",
@@ -1012,6 +1447,7 @@ impl SftpManager {
                         let request_size =
                             std::cmp::min(chunk_size, total_bytes.saturating_sub(transferred));
                         let read_size = std::cmp::min(request_size, u32::MAX as u64) as u32;
+                        let read_started_at = Instant::now();
                         let data = match sftp.read(&handle, transferred, read_size).await {
                             Ok(data) => data,
                             Err(russh_sftp::client::error::Error::Status(status))
@@ -1022,8 +1458,16 @@ impl SftpManager {
                                     transferred, total_bytes
                                 ));
                             }
-                            Err(e) => return Err(e.to_string()),
+                            Err(e) => {
+                                let error = e.to_string();
+                                if error.to_ascii_lowercase().contains("timeout") {
+                                    diagnostics.mark_timeout();
+                                }
+                                return Err(error);
+                            }
                         };
+                        diagnostics.record_rtt(read_started_at.elapsed());
+                        diagnostics.mark_success();
 
                         if data.data.is_empty() {
                             return Err(format!(
@@ -1041,19 +1485,7 @@ impl SftpManager {
 
                         if last_emit.elapsed().as_millis() > 500 {
                             let now = Instant::now();
-                            let sample_secs =
-                                now.duration_since(last_speed_sample_at).as_secs_f64();
-                            if sample_secs > 0.0 && transferred >= last_speed_sample_bytes {
-                                let instant_speed =
-                                    (transferred - last_speed_sample_bytes) as f64 / sample_secs;
-                                display_speed = if display_speed > 0.0 {
-                                    (display_speed * 0.6) + (instant_speed * 0.4)
-                                } else {
-                                    instant_speed
-                                };
-                            }
-                            last_speed_sample_at = now;
-                            last_speed_sample_bytes = transferred;
+                            let display_speed = speed_sampler.sample(now, transferred);
 
                             let eta = if display_speed > 0.0 {
                                 Some(
@@ -1081,6 +1513,19 @@ impl SftpManager {
                                     error: None,
                                 },
                             );
+                            if diagnostics.should_log_progress(now) {
+                                Self::log_transfer_progress(
+                                    &task_id_inner,
+                                    &session_id_inner,
+                                    "download",
+                                    total_bytes,
+                                    transferred,
+                                    display_speed,
+                                    1,
+                                    &diagnostics,
+                                );
+                                diagnostics.touch_log_time(now);
+                            }
                             last_emit = Instant::now();
                         }
                     }
@@ -1110,6 +1555,32 @@ impl SftpManager {
                 .await;
 
                 let _ = sftp.close(handle).await;
+                let finish_status = if transfer_result.is_ok() {
+                    "completed"
+                } else if transfer_result
+                    .as_ref()
+                    .err()
+                    .is_some_and(|e| e == "Cancelled")
+                {
+                    "cancelled"
+                } else {
+                    "failed"
+                };
+                let finish_error = transfer_result.as_ref().err().map(|e| e.as_str());
+                Self::log_transfer_finish(
+                    &task_id_inner,
+                    &session_id_inner,
+                    "download",
+                    finish_status,
+                    total_bytes,
+                    if transfer_result.is_ok() {
+                        total_bytes
+                    } else {
+                        transferred
+                    },
+                    &diagnostics,
+                    finish_error,
+                );
                 transfer_result
             }
         }
@@ -1658,11 +2129,25 @@ impl SftpManager {
                     .map_err(|e| e.to_string())?
                     .handle;
 
+                let tuning = Self::resolve_transfer_tuning(&app, &session_id_inner).await;
                 let mut transferred = 0u64;
-                let chunk_size = 32 * 1024;
-                let max_concurrent_requests = 16;
+                let chunk_size = tuning.upload_chunk_size;
+                let mut adaptive_max_concurrent_requests = tuning.upload_max_inflight;
                 let start_time = Instant::now();
                 let mut last_emit = Instant::now();
+                let mut speed_sampler = SpeedSampler::new(start_time);
+                let mut diagnostics = TransferDiagnostics::new(start_time);
+
+                Self::log_transfer_start(
+                    &task_id_inner,
+                    &session_id_inner,
+                    "upload",
+                    &local_path_inner,
+                    &remote_path_inner,
+                    total_bytes,
+                    tuning,
+                )
+                .await;
 
                 let _ = app.emit(
                     "transfer-progress",
@@ -1684,11 +2169,10 @@ impl SftpManager {
 
                 let mut futures = FuturesUnordered::new();
                 let mut next_offset = 0u64;
+                let mut retry_counts: HashMap<u64, u8> = HashMap::new();
 
-                for _ in 0..max_concurrent_requests {
-                    if next_offset >= total_bytes {
-                        break;
-                    }
+                while futures.len() < adaptive_max_concurrent_requests && next_offset < total_bytes
+                {
                     let current_chunk_size = std::cmp::min(chunk_size, total_bytes - next_offset);
                     let offset = next_offset;
 
@@ -1707,42 +2191,134 @@ impl SftpManager {
 
                     futures.push(
                         async move {
+                            let submitted_at = Instant::now();
                             let res = tokio::time::timeout(
-                                std::time::Duration::from_secs(30),
+                                std::time::Duration::from_secs(UPLOAD_CHUNK_WRITE_TIMEOUT_SECS),
                                 sftp_clone.write(handle_clone, offset, buffer),
                             )
                             .await;
-                            match res {
+                            let result = match res {
                                 Ok(r) => r,
-                                Err(_) => Err(russh_sftp::client::error::Error::IO(
-                                    "Chunk upload timeout (30s)".to_string(),
-                                )),
-                            }
+                                Err(_) => Err(russh_sftp::client::error::Error::IO(format!(
+                                    "Chunk upload timeout ({}s)",
+                                    UPLOAD_CHUNK_WRITE_TIMEOUT_SECS
+                                ))),
+                            };
+                            (offset, current_chunk_size, submitted_at, result)
                         }
                         .boxed(),
                     );
                     next_offset += current_chunk_size;
                 }
 
-                while let Some(result) = futures.next().await {
+                while let Some((offset, written_chunk_size, submitted_at, result)) =
+                    futures.next().await
+                {
                     if cancel_token.load(Ordering::SeqCst) {
+                        Self::log_transfer_finish(
+                            &task_id_inner,
+                            &session_id_inner,
+                            "upload",
+                            "cancelled",
+                            total_bytes,
+                            transferred,
+                            &diagnostics,
+                            Some("Cancelled"),
+                        );
                         return Err("Cancelled".to_string());
                     }
 
-                    result.map_err(|e| e.to_string())?;
+                    match result {
+                        Ok(_) => {
+                            diagnostics.record_rtt(submitted_at.elapsed());
+                            diagnostics.mark_success();
+                            retry_counts.remove(&offset);
+                        }
+                        Err(error) => {
+                            let error = error.to_string();
+                            if error.to_ascii_lowercase().contains("timeout") {
+                                diagnostics.mark_timeout();
 
-                    transferred += chunk_size;
+                                let retry_count = retry_counts.entry(offset).or_insert(0);
+                                if *retry_count < UPLOAD_MAX_RETRIES_PER_CHUNK {
+                                    *retry_count += 1;
+                                    diagnostics.mark_retry();
+
+                                    if diagnostics.consecutive_timeout_count
+                                        >= UPLOAD_TIMEOUT_DOWNGRADE_THRESHOLD
+                                        && adaptive_max_concurrent_requests > 1
+                                    {
+                                        let previous = adaptive_max_concurrent_requests;
+                                        adaptive_max_concurrent_requests =
+                                            (adaptive_max_concurrent_requests / 2).max(1);
+                                        diagnostics.mark_downgrade();
+                                        tracing::warn!(
+                                            target: "sftp::transfer",
+                                            task_id = &task_id_inner,
+                                            session_id = &session_id_inner,
+                                            previous_inflight = previous,
+                                            downgraded_inflight = adaptive_max_concurrent_requests,
+                                            timeout_count = diagnostics.timeout_count,
+                                            "upload inflight downgraded due to timeout streak"
+                                        );
+                                    }
+
+                                    let mut buffer = vec![0u8; written_chunk_size as usize];
+                                    local_file
+                                        .seek(SeekFrom::Start(offset))
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                    local_file
+                                        .read_exact(&mut buffer)
+                                        .await
+                                        .map_err(|e| e.to_string())?;
+                                    let sftp_clone = sftp.clone();
+                                    let handle_clone = handle.clone();
+                                    futures.push(Box::pin(async move {
+                                        let submitted_at = Instant::now();
+                                        let res = tokio::time::timeout(
+                                            std::time::Duration::from_secs(
+                                                UPLOAD_CHUNK_WRITE_TIMEOUT_SECS,
+                                            ),
+                                            sftp_clone.write(handle_clone, offset, buffer),
+                                        )
+                                        .await;
+                                        let result = match res {
+                                            Ok(r) => r,
+                                            Err(_) => {
+                                                Err(russh_sftp::client::error::Error::IO(format!(
+                                                    "Chunk upload timeout ({}s)",
+                                                    UPLOAD_CHUNK_WRITE_TIMEOUT_SECS
+                                                )))
+                                            }
+                                        };
+                                        (offset, written_chunk_size, submitted_at, result)
+                                    }));
+                                    continue;
+                                }
+                            }
+                            Self::log_transfer_finish(
+                                &task_id_inner,
+                                &session_id_inner,
+                                "upload",
+                                "failed",
+                                total_bytes,
+                                transferred,
+                                &diagnostics,
+                                Some(error.as_str()),
+                            );
+                            return Err(error);
+                        }
+                    }
+
+                    transferred += written_chunk_size;
                     if transferred > total_bytes {
                         transferred = total_bytes;
                     }
 
                     if last_emit.elapsed().as_millis() > 500 {
-                        let duration = start_time.elapsed().as_secs_f64();
-                        let speed = if duration > 0.0 {
-                            transferred as f64 / duration
-                        } else {
-                            0.0
-                        };
+                        let now = Instant::now();
+                        let speed = speed_sampler.sample(now, transferred);
                         let eta = if speed > 0.0 {
                             Some(((total_bytes.saturating_sub(transferred)) as f64 / speed) as u64)
                         } else {
@@ -1766,10 +2342,25 @@ impl SftpManager {
                                 error: None,
                             },
                         );
+                        if diagnostics.should_log_progress(now) {
+                            Self::log_transfer_progress(
+                                &task_id_inner,
+                                &session_id_inner,
+                                "upload",
+                                total_bytes,
+                                transferred,
+                                speed,
+                                adaptive_max_concurrent_requests,
+                                &diagnostics,
+                            );
+                            diagnostics.touch_log_time(now);
+                        }
                         last_emit = Instant::now();
                     }
 
-                    if next_offset < total_bytes {
+                    while futures.len() < adaptive_max_concurrent_requests
+                        && next_offset < total_bytes
+                    {
                         let current_chunk_size =
                             std::cmp::min(chunk_size, total_bytes - next_offset);
                         let offset = next_offset;
@@ -1788,22 +2379,36 @@ impl SftpManager {
                         let handle_clone = handle.clone();
 
                         futures.push(Box::pin(async move {
+                            let submitted_at = Instant::now();
                             let res = tokio::time::timeout(
-                                std::time::Duration::from_secs(30),
+                                std::time::Duration::from_secs(UPLOAD_CHUNK_WRITE_TIMEOUT_SECS),
                                 sftp_clone.write(handle_clone, offset, buffer),
                             )
                             .await;
-                            match res {
+                            let result = match res {
                                 Ok(r) => r,
-                                Err(_) => Err(russh_sftp::client::error::Error::IO(
-                                    "Chunk upload timeout (30s)".to_string(),
-                                )),
-                            }
+                                Err(_) => Err(russh_sftp::client::error::Error::IO(format!(
+                                    "Chunk upload timeout ({}s)",
+                                    UPLOAD_CHUNK_WRITE_TIMEOUT_SECS
+                                ))),
+                            };
+                            (offset, current_chunk_size, submitted_at, result)
                         }));
                         next_offset += current_chunk_size;
                     }
                 }
                 let _ = sftp.close(handle).await;
+                let finish_status = "completed";
+                Self::log_transfer_finish(
+                    &task_id_inner,
+                    &session_id_inner,
+                    "upload",
+                    finish_status,
+                    total_bytes,
+                    transferred,
+                    &diagnostics,
+                    None,
+                );
                 Ok(())
             }
         }

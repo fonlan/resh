@@ -431,6 +431,28 @@ export const locales = {
         maxConcurrentTransfers: "Max Concurrent Transfers",
         maxConcurrentTransfersDesc:
           "Number of simultaneous download/upload tasks. Recommended: 2-4.",
+        transferProfile: "Transfer Profile",
+        transferProfileDesc:
+          "Balanced is recommended. Safe reduces risk on unstable links, Fast favors throughput.",
+        profileSafe: "Safe (Conservative)",
+        profileBalanced: "Balanced (Recommended)",
+        profileFast: "Fast (Aggressive)",
+        downloadMaxInflight: "Download Max In-Flight",
+        downloadMaxInflightDesc:
+          "Upper bound for pipelined read requests (future download pipeline phase).",
+        uploadMaxInflight: "Upload Max In-Flight",
+        uploadMaxInflightDesc:
+          "Upper bound for concurrent chunk writes in a single upload task.",
+        chunkSizeMinKb: "Chunk Size Min (KB)",
+        chunkSizeMaxKb: "Chunk Size Max (KB)",
+        chunkSizeDesc:
+          "Chunk size range used by transfer tuning. Effective size is bounded by server limits.",
+        enableMultiConnectionForSmallFiles:
+          "Enable multi-connection mode for many small files",
+        enableLargeFileStriping:
+          "Enable large-file striping mode (experimental)",
+        experimentalTuningDesc:
+          "Experimental switches are off by default and may change in future releases.",
         browse: "Select Folder",
         editorAssociations: "Editor Associations",
         addRule: "Add Rule",
@@ -899,6 +921,22 @@ export const locales = {
         maxConcurrentTransfers: "最大并行传输任务数",
         maxConcurrentTransfersDesc:
           "同时进行的下载/上传任务数量。推荐值：2-4。",
+        transferProfile: "传输策略",
+        transferProfileDesc:
+          "推荐使用 balanced。safe 在不稳定链路下更稳，fast 优先追求吞吐。",
+        profileSafe: "Safe（保守）",
+        profileBalanced: "Balanced（推荐）",
+        profileFast: "Fast（激进）",
+        downloadMaxInflight: "下载最大并发请求",
+        downloadMaxInflightDesc: "下载流水线阶段使用的读取并发上限。",
+        uploadMaxInflight: "上传最大并发请求",
+        uploadMaxInflightDesc: "单任务上传时并发写入块请求上限。",
+        chunkSizeMinKb: "分块最小值 (KB)",
+        chunkSizeMaxKb: "分块最大值 (KB)",
+        chunkSizeDesc: "传输调参使用的分块范围，最终值会受服务端能力限制。",
+        enableMultiConnectionForSmallFiles: "启用小文件多连接模式",
+        enableLargeFileStriping: "启用大文件分段模式（实验）",
+        experimentalTuningDesc: "实验开关默认关闭，后续版本可能继续调整策略。",
         browse: "选择文件夹",
         editorAssociations: "编辑器关联",
         addRule: "添加规则",

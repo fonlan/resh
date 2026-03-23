@@ -34,6 +34,22 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   const editors = config.general.sftp.editors
   const customCommands = config.sftpCustomCommands || []
 
+  const updateSftpSettings = useCallback(
+    (updates: Partial<Config["general"]["sftp"]>) => {
+      onChange({
+        ...config,
+        general: {
+          ...config.general,
+          sftp: {
+            ...config.general.sftp,
+            ...updates,
+          },
+        },
+      })
+    },
+    [config, onChange],
+  )
+
   const handleReorderEditors = useCallback(
     (newEditors: EditorRule[]) => {
       onChange({
@@ -51,16 +67,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   )
 
   const handleDownloadPathChange = (path: string) => {
-    onChange({
-      ...config,
-      general: {
-        ...config.general,
-        sftp: {
-          ...config.general.sftp,
-          defaultDownloadPath: path,
-        },
-      },
-    })
+    updateSftpSettings({ defaultDownloadPath: path })
   }
 
   const handlePickDownloadPath = async () => {
@@ -72,6 +79,45 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
     } catch (error) {
       console.error("Failed to pick folder", error)
     }
+  }
+
+  const handleTransferProfileChange = (value: "safe" | "balanced" | "fast") => {
+    updateSftpSettings({ transferProfile: value })
+  }
+
+  const handleSftpNumericChange = (
+    field:
+      | "downloadMaxInflight"
+      | "uploadMaxInflight"
+      | "chunkSizeMin"
+      | "chunkSizeMax",
+    value: number,
+    min: number,
+    max: number,
+  ) => {
+    const normalized = Math.max(
+      min,
+      Math.min(max, Number.isFinite(value) ? value : min),
+    )
+    if (field === "chunkSizeMin" || field === "chunkSizeMax") {
+      // UI exposes KB for readability while config stores bytes.
+      updateSftpSettings({
+        [field]: normalized * 1024,
+      } as Partial<Config["general"]["sftp"]>)
+      return
+    }
+    updateSftpSettings({
+      [field]: normalized,
+    } as Partial<Config["general"]["sftp"]>)
+  }
+
+  const handleSftpToggleChange = (
+    field: "enableMultiConnectionForSmallFiles" | "enableLargeFileStriping",
+    checked: boolean,
+  ) => {
+    updateSftpSettings({
+      [field]: checked,
+    } as Partial<Config["general"]["sftp"]>)
   }
 
   const handleAddRule = () => {
@@ -231,6 +277,18 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
     })
   }
 
+  const transferProfile = config.general.sftp.transferProfile || "balanced"
+  const downloadMaxInflight = config.general.sftp.downloadMaxInflight || 8
+  const uploadMaxInflight = config.general.sftp.uploadMaxInflight || 12
+  const chunkSizeMinKB = Math.max(
+    4,
+    Math.round((config.general.sftp.chunkSizeMin || 64 * 1024) / 1024),
+  )
+  const chunkSizeMaxKB = Math.max(
+    chunkSizeMinKB,
+    Math.round((config.general.sftp.chunkSizeMax || 256 * 1024) / 1024),
+  )
+
   return (
     <div className="flex flex-col gap-8">
       <div className="form-group">
@@ -293,6 +351,166 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
         />
         <p className="mt-1.5 text-xs text-zinc-500 leading-6">
           {t.sftp.settings.maxConcurrentTransfersDesc}
+        </p>
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="sftp-transfer-profile" className="form-label">
+          {t.sftp.settings.transferProfile}
+        </label>
+        <select
+          id="sftp-transfer-profile"
+          className="form-select w-56"
+          value={transferProfile}
+          onChange={(e) =>
+            handleTransferProfileChange(
+              (e.target.value as "safe" | "balanced" | "fast") || "balanced",
+            )
+          }
+        >
+          <option value="safe">{t.sftp.settings.profileSafe}</option>
+          <option value="balanced">{t.sftp.settings.profileBalanced}</option>
+          <option value="fast">{t.sftp.settings.profileFast}</option>
+        </select>
+        <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+          {t.sftp.settings.transferProfileDesc}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="form-group">
+          <label htmlFor="sftp-download-max-inflight" className="form-label">
+            {t.sftp.settings.downloadMaxInflight}
+          </label>
+          <input
+            id="sftp-download-max-inflight"
+            type="number"
+            min="1"
+            max="64"
+            value={downloadMaxInflight}
+            onChange={(e) =>
+              handleSftpNumericChange(
+                "downloadMaxInflight",
+                parseInt(e.target.value) || 1,
+                1,
+                64,
+              )
+            }
+            className="form-input w-32"
+          />
+          <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.downloadMaxInflightDesc}
+          </p>
+        </div>
+        <div className="form-group">
+          <label htmlFor="sftp-upload-max-inflight" className="form-label">
+            {t.sftp.settings.uploadMaxInflight}
+          </label>
+          <input
+            id="sftp-upload-max-inflight"
+            type="number"
+            min="1"
+            max="64"
+            value={uploadMaxInflight}
+            onChange={(e) =>
+              handleSftpNumericChange(
+                "uploadMaxInflight",
+                parseInt(e.target.value) || 1,
+                1,
+                64,
+              )
+            }
+            className="form-input w-32"
+          />
+          <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+            {t.sftp.settings.uploadMaxInflightDesc}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="form-group">
+          <label htmlFor="sftp-chunk-size-min" className="form-label">
+            {t.sftp.settings.chunkSizeMinKb}
+          </label>
+          <input
+            id="sftp-chunk-size-min"
+            type="number"
+            min="4"
+            max="1024"
+            value={chunkSizeMinKB}
+            onChange={(e) =>
+              handleSftpNumericChange(
+                "chunkSizeMin",
+                parseInt(e.target.value) || 4,
+                4,
+                1024,
+              )
+            }
+            className="form-input w-32"
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="sftp-chunk-size-max" className="form-label">
+            {t.sftp.settings.chunkSizeMaxKb}
+          </label>
+          <input
+            id="sftp-chunk-size-max"
+            type="number"
+            min={chunkSizeMinKB}
+            max="1024"
+            value={chunkSizeMaxKB}
+            onChange={(e) =>
+              handleSftpNumericChange(
+                "chunkSizeMax",
+                parseInt(e.target.value) || chunkSizeMinKB,
+                chunkSizeMinKB,
+                1024,
+              )
+            }
+            className="form-input w-32"
+          />
+        </div>
+      </div>
+      <p className="mt-1.5 text-xs text-zinc-500 leading-6">
+        {t.sftp.settings.chunkSizeDesc}
+      </p>
+
+      <div className="form-group space-y-2">
+        <label className="inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={
+              config.general.sftp.enableMultiConnectionForSmallFiles || false
+            }
+            onChange={(e) =>
+              handleSftpToggleChange(
+                "enableMultiConnectionForSmallFiles",
+                e.target.checked,
+              )
+            }
+          />
+          <span className="text-sm text-[var(--text-primary)]">
+            {t.sftp.settings.enableMultiConnectionForSmallFiles}
+          </span>
+        </label>
+        <label className="inline-flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={config.general.sftp.enableLargeFileStriping || false}
+            onChange={(e) =>
+              handleSftpToggleChange(
+                "enableLargeFileStriping",
+                e.target.checked,
+              )
+            }
+          />
+          <span className="text-sm text-[var(--text-primary)]">
+            {t.sftp.settings.enableLargeFileStriping}
+          </span>
+        </label>
+        <p className="text-xs text-zinc-500 leading-6">
+          {t.sftp.settings.experimentalTuningDesc}
         </p>
       </div>
 

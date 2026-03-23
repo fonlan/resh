@@ -32,6 +32,13 @@ export interface SftpSettings {
   defaultDownloadPath: string
   editors: EditorRule[]
   maxConcurrentTransfers: number
+  transferProfile: "safe" | "balanced" | "fast"
+  downloadMaxInflight: number
+  uploadMaxInflight: number
+  chunkSizeMin: number
+  chunkSizeMax: number
+  enableMultiConnectionForSmallFiles: boolean
+  enableLargeFileStriping: boolean
 }
 
 export type Theme = "light" | "dark" | "orange" | "green" | "system"

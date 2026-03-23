@@ -199,10 +199,57 @@ pub struct SftpSettings {
     pub editors: Vec<EditorRule>,
     #[serde(default = "default_max_concurrent_transfers")]
     pub max_concurrent_transfers: u32,
+    #[serde(default = "default_transfer_profile")]
+    #[serde(alias = "transferProfile", alias = "transfer_profile")]
+    pub transfer_profile: String,
+    #[serde(default = "default_download_max_inflight")]
+    #[serde(alias = "downloadMaxInflight", alias = "download_max_inflight")]
+    pub download_max_inflight: u32,
+    #[serde(default = "default_upload_max_inflight")]
+    #[serde(alias = "uploadMaxInflight", alias = "upload_max_inflight")]
+    pub upload_max_inflight: u32,
+    #[serde(default = "default_chunk_size_min")]
+    #[serde(alias = "chunkSizeMin", alias = "chunk_size_min")]
+    pub chunk_size_min: u64,
+    #[serde(default = "default_chunk_size_max")]
+    #[serde(alias = "chunkSizeMax", alias = "chunk_size_max")]
+    pub chunk_size_max: u64,
+    #[serde(default)]
+    #[serde(
+        alias = "enableMultiConnectionForSmallFiles",
+        alias = "enable_multi_connection_for_small_files"
+    )]
+    pub enable_multi_connection_for_small_files: bool,
+    #[serde(default)]
+    #[serde(
+        alias = "enableLargeFileStriping",
+        alias = "enable_large_file_striping"
+    )]
+    pub enable_large_file_striping: bool,
 }
 
 fn default_max_concurrent_transfers() -> u32 {
     2
+}
+
+fn default_transfer_profile() -> String {
+    "balanced".to_string()
+}
+
+fn default_download_max_inflight() -> u32 {
+    8
+}
+
+fn default_upload_max_inflight() -> u32 {
+    12
+}
+
+fn default_chunk_size_min() -> u64 {
+    64 * 1024
+}
+
+fn default_chunk_size_max() -> u64 {
+    256 * 1024
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -420,6 +467,13 @@ impl Config {
                     default_download_path: String::new(),
                     editors: vec![],
                     max_concurrent_transfers: 2,
+                    transfer_profile: default_transfer_profile(),
+                    download_max_inflight: default_download_max_inflight(),
+                    upload_max_inflight: default_upload_max_inflight(),
+                    chunk_size_min: default_chunk_size_min(),
+                    chunk_size_max: default_chunk_size_max(),
+                    enable_multi_connection_for_small_files: false,
+                    enable_large_file_striping: false,
                 },
                 ai_mode: default_ai_mode(),
                 ai_max_history: 20,
