@@ -1,7 +1,6 @@
 use crate::ssh_manager::ssh::SSHClient;
-use async_trait::async_trait;
 use russh::client;
-use russh_keys::key;
+use russh::keys;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -35,73 +34,74 @@ impl ClientHandler {
     }
 }
 
-#[async_trait]
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(
+    fn check_server_key(
         &mut self,
-        _server_public_key: &key::PublicKey,
-    ) -> Result<bool, Self::Error> {
-        Ok(true) // Accept all keys
+        _server_public_key: &keys::PublicKey,
+    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+        async { Ok(true) } // Accept all keys
     }
 
-    async fn data(
+    fn data(
         &mut self,
         channel: russh::ChannelId,
         data: &[u8],
         _session: &mut russh::client::Session,
-    ) -> Result<(), Self::Error> {
-        // Only forward data if it comes from the shell channel
-        let should_forward = {
-            let id_guard = self.shell_channel_id.lock().await;
-            match *id_guard {
-                Some(id) => id == channel,
-                None => true, // Forward everything if shell channel is not set yet (e.g. pre-shell phase? though data usually comes after shell)
-                              // Actually, if we use SFTP, we don't want to forward if id is unknown?
-                              // But establishing connection might have some data? usually not.
-                              // Let's assume safely: if None, we forward (maybe banner?)
-                              // But once Shell is open, we set it.
-            }
-        };
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+        let shell_channel_id = self.shell_channel_id.clone();
+        let session_id = self.session_id.clone();
+        let tx = self.tx.clone();
+        let owned_data = data.to_vec();
 
-        if should_forward {
-            if let (Some(session_id), Some(tx)) = (&self.session_id, &self.tx) {
-                let text = String::from_utf8_lossy(data);
-                if let Err(e) =
-                    SSHClient::append_command_recorder_chunk(session_id, text.as_ref()).await
-                {
-                    if e != "Session not found" {
-                        debug!(
-                            "[SSH] Failed to append recorder chunk for {}: {}",
-                            session_id, e
-                        );
-                    }
+        async move {
+            let should_forward = {
+                let id_guard = shell_channel_id.lock().await;
+                match *id_guard {
+                    Some(id) => id == channel,
+                    None => true,
                 }
-                let _ = tx.send((session_id.clone(), data.to_vec()));
+            };
+
+            if should_forward {
+                if let (Some(session_id), Some(tx)) = (session_id.as_ref(), tx.as_ref()) {
+                    let text = String::from_utf8_lossy(&owned_data);
+                    if let Err(e) =
+                        SSHClient::append_command_recorder_chunk(session_id, text.as_ref()).await
+                    {
+                        if e != "Session not found" {
+                            debug!(
+                                "[SSH] Failed to append recorder chunk for {}: {}",
+                                session_id, e
+                            );
+                        }
+                    }
+                    let _ = tx.send((session_id.clone(), owned_data));
+                }
             }
+
+            Ok(())
         }
-        Ok(())
     }
 
-    async fn channel_close(
+    fn channel_close(
         &mut self,
-        _channel: russh::ChannelId,
+        channel: russh::ChannelId,
         _session: &mut russh::client::Session,
-    ) -> Result<(), Self::Error> {
-        // Only drop tx if the SHELL channel closes
-        // If SFTP channel closes, we shouldn't disconnect the terminal
-        let is_shell_closed = {
-            let id_guard = self.shell_channel_id.lock().await;
-            match *id_guard {
-                Some(id) => id == _channel,
-                None => true, // Default to closing if unknown
-            }
-        };
-
-        if is_shell_closed {
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>> + Send {
+        let should_clear_tx = self
+            .shell_channel_id
+            .try_lock()
+            .map(|guard| match *guard {
+                Some(id) => id == channel,
+                None => true,
+            })
+            .unwrap_or(true);
+        if should_clear_tx {
             self.tx = None;
         }
-        Ok(())
+
+        async { Ok(()) }
     }
 }

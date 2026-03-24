@@ -247,7 +247,7 @@ fn default_transfer_profile() -> String {
 }
 
 fn default_download_max_inflight() -> u32 {
-    8
+    32
 }
 
 fn default_upload_max_inflight() -> u32 {
@@ -255,7 +255,7 @@ fn default_upload_max_inflight() -> u32 {
 }
 
 fn default_chunk_size_min() -> u64 {
-    64 * 1024
+    32 * 1024
 }
 
 fn default_chunk_size_max() -> u64 {

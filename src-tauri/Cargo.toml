@@ -4,7 +4,7 @@ version = "1.0.0"
 description = "Resh SSH Client"
 authors = [""]
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.85"
 license = "MIT"
 repository = ""
 default-run = "resh"
@@ -17,10 +17,9 @@ tauri = { version = "2.10.2", features = [] }
 tauri-plugin-single-instance = "2.4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-russh = "0.45.0"
-russh-sftp = "2.0"
-russh-keys = "0.45.0"
-bytes = "=1.9.0"
+russh = { version = "0.58.0", features = ["async-trait"] }
+russh-sftp = "2.1.1"
+bytes = "1.10"
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 aes-gcm = "0.10"
@@ -68,6 +67,9 @@ path = "src/main.rs"
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[patch.crates-io]
+russh-sftp = { git = "https://github.com/fonlan/russh-sftp.git", rev = "1a5e1c5c9ac225851025930a1e3e69b19fcbdab9" }
 
 [profile.release]
 codegen-units = 1 # 最大化优化，牺牲编译速度

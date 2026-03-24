@@ -2,9 +2,10 @@ use crate::config::types::Proxy;
 use crate::sftp_manager::SftpManager;
 use crate::ssh_manager::handler::ClientHandler;
 use base64::prelude::*;
+use bytes::Bytes;
 use lazy_static::lazy_static;
-use russh::client;
-use russh_keys;
+use russh::client::{self, AuthResult};
+use russh::keys::{self, PrivateKeyWithHashAlg};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -18,6 +19,10 @@ const START_MARKER_PREFIX: &str = "RESH_CMD_START_";
 const COMPLETION_MARKER_HISTORY_LIMIT: usize = 24;
 const PROMPT_DETECTION_TAIL_BYTES: usize = 4096;
 const PROMPT_MATCH_STREAK_REQUIRED: u8 = 2;
+const SSH_WINDOW_SIZE_BYTES: u32 = 64 * 1024 * 1024;
+const SSH_MAXIMUM_PACKET_SIZE_BYTES: u32 = 128 * 1024;
+const SSH_CHANNEL_BUFFER_SIZE: usize = 100;
+const SSH_NODELAY: bool = false;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectParams {
@@ -50,11 +55,19 @@ pub struct SystemInfo {
     pub shell: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshTransportDiagnostics {
+    pub window_size: u32,
+    pub maximum_packet_size: u32,
+    pub channel_buffer_size: usize,
+    pub nodelay: bool,
+}
 struct SessionData {
     channel: russh::Channel<russh::client::Msg>,
     session: Arc<russh::client::Handle<ClientHandler>>,
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
     config: ConnectParams,
+    transport_diagnostics: SshTransportDiagnostics,
     tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
     cols: u32,
     rows: u32,
@@ -104,6 +117,23 @@ lazy_static! {
 pub struct SSHClient;
 
 impl SSHClient {
+    fn default_transport_diagnostics() -> SshTransportDiagnostics {
+        SshTransportDiagnostics {
+            window_size: SSH_WINDOW_SIZE_BYTES,
+            maximum_packet_size: SSH_MAXIMUM_PACKET_SIZE_BYTES,
+            channel_buffer_size: SSH_CHANNEL_BUFFER_SIZE,
+            nodelay: SSH_NODELAY,
+        }
+    }
+    fn build_client_config() -> Arc<client::Config> {
+        let transport = Self::default_transport_diagnostics();
+        let mut client_config = client::Config::default();
+        client_config.window_size = transport.window_size;
+        client_config.maximum_packet_size = transport.maximum_packet_size;
+        client_config.channel_buffer_size = transport.channel_buffer_size;
+        client_config.nodelay = transport.nodelay;
+        Arc::new(client_config)
+    }
     async fn get_session_route(
         session_id: &str,
     ) -> Result<(Arc<russh::client::Handle<ClientHandler>>, russh::ChannelId), String> {
@@ -140,6 +170,7 @@ impl SSHClient {
                     session: Arc::new(session),
                     jumphost_session: jh_session,
                     config: params,
+                    transport_diagnostics: Self::default_transport_diagnostics(),
                     tx,
                     cols: initial_cols,
                     rows: initial_rows,
@@ -178,11 +209,8 @@ impl SSHClient {
         ),
         String,
     > {
-        let mut config = client::Config::default();
-        config.window_size = 64 * 1024 * 1024; // 64MB window size
-        config.maximum_packet_size = 128 * 1024; // 128KB packet size
+        let config = Self::build_client_config();
 
-        let config = Arc::new(config);
         let shell_channel_id = Arc::new(Mutex::new(None));
         let handler =
             ClientHandler::with_channel(session_id.clone(), tx.clone(), shell_channel_id.clone());
@@ -563,19 +591,36 @@ impl SSHClient {
                 username,
                 passphrase.is_some()
             );
-            let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(
-                |e| {
+            let key =
+                keys::decode_secret_key(&key_content, passphrase.as_deref()).map_err(|e| {
                     error!("[SSH] Failed to decode private key: {}", e);
                     format!("Failed to decode private key: {}", e)
-                },
-            )?;
+                })?;
             let key_pair = Arc::new(key);
-            match session.authenticate_publickey(username, key_pair).await {
-                Ok(true) => {
+            let hash_alg = match session.best_supported_rsa_hash().await {
+                Ok(best) => best.flatten(),
+                Err(error) => {
+                    warn!(
+                        "[SSH] Failed to query best RSA hash, falling back to default ordering: {}",
+                        error
+                    );
+                    None
+                }
+            };
+            let auth_key = PrivateKeyWithHashAlg::new(key_pair, hash_alg);
+            match session.authenticate_publickey(username, auth_key).await {
+                Ok(AuthResult::Success) => {
                     authenticated = true;
                     info!("[SSH] Publickey authentication successful.");
                 }
-                Ok(false) => warn!("[SSH] Publickey authentication rejected."),
+                Ok(AuthResult::Failure {
+                    remaining_methods,
+                    partial_success,
+                }) => warn!(
+                    "[SSH] Publickey authentication rejected. remaining_methods={:?}, partial_success={}",
+                    remaining_methods,
+                    partial_success
+                ),
                 Err(e) => error!("[SSH] Publickey authentication error: {}", e),
             }
         }
@@ -583,12 +628,19 @@ impl SSHClient {
         if !authenticated {
             if let Some(pwd) = password {
                 info!("[SSH] Attempting password auth for user: '{}'...", username);
-                match session.authenticate_password(username, &pwd).await {
-                    Ok(true) => {
+                match session.authenticate_password(username, pwd).await {
+                    Ok(AuthResult::Success) => {
                         authenticated = true;
                         info!("[SSH] Password authentication successful.");
                     }
-                    Ok(false) => warn!("[SSH] Password authentication failed."),
+                    Ok(AuthResult::Failure {
+                        remaining_methods,
+                        partial_success,
+                    }) => warn!(
+                        "[SSH] Password authentication rejected. remaining_methods={:?}, partial_success={}",
+                        remaining_methods,
+                        partial_success
+                    ),
                     Err(e) => error!("[SSH] Password authentication error: {}", e),
                 }
             }
@@ -611,9 +663,7 @@ impl SSHClient {
 
     pub async fn send_input(session_id: &str, data: &[u8]) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
-        let result = session
-            .data(channel_id, russh::CryptoVec::from_slice(data))
-            .await;
+        let result = session.data(channel_id, Bytes::copy_from_slice(data)).await;
 
         if result.is_err() {
             info!(
@@ -631,7 +681,7 @@ impl SSHClient {
                 .map_err(|_| "Session lost during reconnect".to_string())?;
 
             session
-                .data(channel_id, russh::CryptoVec::from_slice(data))
+                .data(channel_id, Bytes::copy_from_slice(data))
                 .await
                 .map_err(|_| "Failed to send data after reconnect".to_string())?;
         }
@@ -669,6 +719,7 @@ impl SSHClient {
                     data.channel = channel;
                     data.session = Arc::new(session);
                     data.jumphost_session = jh_session;
+                    data.transport_diagnostics = Self::default_transport_diagnostics();
                     // Reset terminal state for new connection
                     data.terminal_buffer.clear();
                     data.command_recorder = None;
@@ -731,6 +782,14 @@ impl SSHClient {
     ) -> Option<Arc<russh::client::Handle<ClientHandler>>> {
         let sessions = SESSIONS.lock().await;
         sessions.get(session_id).map(|s| s.session.clone())
+    }
+    pub async fn get_session_transport_diagnostics(
+        session_id: &str,
+    ) -> Option<SshTransportDiagnostics> {
+        let sessions = SESSIONS.lock().await;
+        sessions
+            .get(session_id)
+            .map(|session| session.transport_diagnostics.clone())
     }
 
     /// Get the current terminal buffer content (last 100KB)
@@ -1059,7 +1118,7 @@ impl SSHClient {
     pub async fn send_interrupt(session_id: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
         session
-            .data(channel_id, russh::CryptoVec::from_slice(&[3u8][..]))
+            .data(channel_id, Bytes::copy_from_slice(&[3u8][..]))
             .await
             .map_err(|e| {
                 // Do not auto-reconnect here: replacing the foreground PTY during TUI interaction
@@ -1075,7 +1134,7 @@ impl SSHClient {
     pub async fn send_terminal_input(session_id: &str, input: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
         session
-            .data(channel_id, russh::CryptoVec::from_slice(input.as_bytes()))
+            .data(channel_id, Bytes::copy_from_slice(input.as_bytes()))
             .await
             .map_err(|e| {
                 // Do not auto-reconnect for interactive key input: reconnecting here can detach
@@ -1148,10 +1207,7 @@ impl SSHClient {
     }
 
     pub async fn gather_system_info(params: ConnectParams) -> Result<SystemInfo, String> {
-        let mut config = client::Config::default();
-        config.window_size = 64 * 1024 * 1024; // 64MB window size
-        config.maximum_packet_size = 128 * 1024; // 128KB packet size
-        let config = Arc::new(config);
+        let config = Self::build_client_config();
         let handler = ClientHandler::new();
 
         // Keep route selection consistent with establish_connection:

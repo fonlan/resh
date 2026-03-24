@@ -281,11 +281,11 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
   const maxConcurrentTransfers = config.general.sftp.maxConcurrentTransfers || 2
   const maxConcurrentTransfersPerSession =
     config.general.sftp.maxConcurrentTransfersPerSession || 2
-  const downloadMaxInflight = config.general.sftp.downloadMaxInflight || 8
+  const downloadMaxInflight = config.general.sftp.downloadMaxInflight || 32
   const uploadMaxInflight = config.general.sftp.uploadMaxInflight || 12
   const chunkSizeMinKB = Math.max(
     4,
-    Math.round((config.general.sftp.chunkSizeMin || 64 * 1024) / 1024),
+    Math.round((config.general.sftp.chunkSizeMin || 32 * 1024) / 1024),
   )
   const chunkSizeMaxKB = Math.max(
     chunkSizeMinKB,
