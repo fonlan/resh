@@ -37,7 +37,17 @@ impl ConfigManager {
 
         let content =
             fs::read_to_string(&path).map_err(|e| format!("Failed to read local config: {}", e))?;
-        serde_json::from_str(&content).map_err(|e| format!("Failed to parse local config: {}", e))
+        let mut config: Config = serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse local config: {}", e))?;
+        if config.normalize_legacy_defaults() {
+            tracing::info!(
+                transfer_profile = %config.general.sftp.transfer_profile,
+                migrated_download_max_inflight = config.general.sftp.download_max_inflight,
+                migrated_chunk_size_min = config.general.sftp.chunk_size_min,
+                "normalized legacy SFTP throughput defaults from persisted local config"
+            );
+        }
+        Ok(config)
     }
 
     pub fn load_encrypted_local_config(&self, password: &str) -> Result<Config, String> {
@@ -52,8 +62,16 @@ impl ConfigManager {
             .map_err(|e| format!("Failed to parse encrypted data: {}", e))?;
         let json_bytes = decrypt(&encrypted, password)
             .map_err(|e| format!("Failed to decrypt local config: {}", e))?;
-        let config: Config = serde_json::from_slice(&json_bytes)
+        let mut config: Config = serde_json::from_slice(&json_bytes)
             .map_err(|e| format!("Failed to parse decrypted config: {}", e))?;
+        if config.normalize_legacy_defaults() {
+            tracing::info!(
+                transfer_profile = %config.general.sftp.transfer_profile,
+                migrated_download_max_inflight = config.general.sftp.download_max_inflight,
+                migrated_chunk_size_min = config.general.sftp.chunk_size_min,
+                "normalized legacy SFTP throughput defaults from encrypted local config"
+            );
+        }
 
         Ok(config)
     }

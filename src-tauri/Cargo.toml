@@ -69,7 +69,7 @@ path = "src/main.rs"
 tempfile = "3.8"
 
 [patch.crates-io]
-russh-sftp = { git = "https://github.com/fonlan/russh-sftp.git", rev = "1a5e1c5c9ac225851025930a1e3e69b19fcbdab9" }
+russh-sftp = { git = "https://github.com/fonlan/russh-sftp.git", rev = "18ffe9276577191a7652d94684e284ba9a11dda7" }
 
 [profile.release]
 codegen-units = 1 # 最大化优化，牺牲编译速度

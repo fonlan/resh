@@ -250,6 +250,10 @@ fn default_download_max_inflight() -> u32 {
     32
 }
 
+fn default_fast_download_max_inflight() -> u32 {
+    48
+}
+
 fn default_upload_max_inflight() -> u32 {
     12
 }
@@ -260,6 +264,34 @@ fn default_chunk_size_min() -> u64 {
 
 fn default_chunk_size_max() -> u64 {
     256 * 1024
+}
+
+impl SftpSettings {
+    pub fn normalize_legacy_defaults(&mut self) -> bool {
+        let looks_like_legacy_download_defaults = self.download_max_inflight == 8
+            && self.upload_max_inflight == default_upload_max_inflight()
+            && self.chunk_size_min == 64 * 1024
+            && self.chunk_size_max == default_chunk_size_max()
+            && self.max_concurrent_transfers == default_max_concurrent_transfers()
+            && self.max_concurrent_transfers_per_session
+                == default_max_concurrent_transfers_per_session()
+            && !self.enable_multi_connection_for_small_files
+            && !self.enable_large_file_striping;
+
+        if !looks_like_legacy_download_defaults {
+            return false;
+        }
+
+        let migrated_download_max_inflight = match self.transfer_profile.as_str() {
+            "balanced" => default_download_max_inflight(),
+            "fast" => default_fast_download_max_inflight(),
+            _ => return false,
+        };
+
+        self.download_max_inflight = migrated_download_max_inflight;
+        self.chunk_size_min = default_chunk_size_min();
+        true
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -438,6 +470,10 @@ pub struct SyncConfig {
 }
 
 impl Config {
+    pub fn normalize_legacy_defaults(&mut self) -> bool {
+        self.general.sftp.normalize_legacy_defaults()
+    }
+
     pub fn empty() -> Self {
         Self {
             version: "1.0".to_string(),

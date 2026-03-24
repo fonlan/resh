@@ -43,10 +43,19 @@ pub async fn get_config(app: AppHandle) -> Result<Config, String> {
 
 #[tauri::command]
 pub async fn save_config(
-    config: Config,
+    mut config: Config,
     state: State<'_, Arc<AppState>>,
     window: Window,
 ) -> Result<(), String> {
+    if config.normalize_legacy_defaults() {
+        tracing::info!(
+            transfer_profile = %config.general.sftp.transfer_profile,
+            migrated_download_max_inflight = config.general.sftp.download_max_inflight,
+            migrated_chunk_size_min = config.general.sftp.chunk_size_min,
+            "normalized legacy SFTP throughput defaults before saving config"
+        );
+    }
+
     let mut current_config = state.config.lock().await;
 
     // Calculate removed IDs to prevent them from being resurrected by sync
@@ -132,6 +141,14 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
     );
 
     sync_manager.sync(&mut config, vec![]).await?;
+    if config.normalize_legacy_defaults() {
+        tracing::info!(
+            transfer_profile = %config.general.sftp.transfer_profile,
+            migrated_download_max_inflight = config.general.sftp.download_max_inflight,
+            migrated_chunk_size_min = config.general.sftp.chunk_size_min,
+            "normalized legacy SFTP throughput defaults after sync merge"
+        );
+    }
 
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
