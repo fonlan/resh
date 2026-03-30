@@ -225,10 +225,9 @@ pub async fn send_command(
     params: CommandParams,
     _state: State<'_, Arc<AppState>>,
 ) -> Result<CommandResponse, String> {
-    // Convert string input to bytes
-    let data = params.command.as_bytes();
-
-    SSHClient::send_input(&params.session_id, data).await?;
+    // Interactive terminal input must not auto-reconnect, otherwise the visible
+    // PTY can detach from the foreground process and appear frozen.
+    SSHClient::send_terminal_input(&params.session_id, &params.command).await?;
 
     // No echo here - the SSH server will echo back if appropriate (default for PTY)
     Ok(CommandResponse {
