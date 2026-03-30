@@ -63,7 +63,7 @@ pub struct SshTransportDiagnostics {
     pub nodelay: bool,
 }
 struct SessionData {
-    channel: russh::Channel<russh::client::Msg>,
+    channel: russh::ChannelWriteHalf<russh::client::Msg>,
     session: Arc<russh::client::Handle<ClientHandler>>,
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
     config: ConnectParams,
@@ -134,6 +134,26 @@ impl SSHClient {
         client_config.nodelay = transport.nodelay;
         Arc::new(client_config)
     }
+
+    fn spawn_shell_channel_drain(session_id: String, mut read_half: russh::ChannelReadHalf) {
+        tokio::spawn(async move {
+            while let Some(msg) = read_half.wait().await {
+                match msg {
+                    russh::ChannelMsg::Close => {
+                        tracing::debug!("[SSH] Shell channel closed for {}", session_id);
+                        break;
+                    }
+                    russh::ChannelMsg::Eof => {
+                        tracing::debug!("[SSH] Shell channel EOF for {}", session_id);
+                    }
+                    _ => {}
+                }
+            }
+
+            tracing::debug!("[SSH] Shell channel drain task ended for {}", session_id);
+        });
+    }
+
     async fn get_session_route(
         session_id: &str,
     ) -> Result<(Arc<russh::client::Handle<ClientHandler>>, russh::ChannelId), String> {
@@ -203,7 +223,7 @@ impl SSHClient {
         rows: u32,
     ) -> Result<
         (
-            russh::Channel<russh::client::Msg>,
+            russh::ChannelWriteHalf<russh::client::Msg>,
             russh::client::Handle<ClientHandler>,
             Option<russh::client::Handle<ClientHandler>>,
         ),
@@ -573,7 +593,10 @@ impl SSHClient {
             .await
             .map_err(|e| format!("Shell request failed: {}", e))?;
 
-        Ok((channel, session, jh_handle_to_store))
+        let (read_half, write_half) = channel.split();
+        Self::spawn_shell_channel_drain(session_id, read_half);
+
+        Ok((write_half, session, jh_handle_to_store))
     }
 
     async fn authenticate_session<H: client::Handler>(
