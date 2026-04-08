@@ -1,12 +1,434 @@
 use crate::commands::AppState;
 use crate::sftp_manager::{SftpManager, TransferProgress};
-use russh_sftp::protocol::StatusCode;
-use std::path::Path;
+use russh_sftp::protocol::{OpenFlags, StatusCode};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
+
+const SFTP_EDIT_DOWNLOAD_CHUNK_SIZE: u32 = 255 * 1024;
+const SFTP_TEXT_SAVE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
+const UTF8_BOM: &[u8; 3] = b"\xEF\xBB\xBF";
+const UTF16LE_BOM: &[u8; 2] = b"\xFF\xFE";
+const UTF16BE_BOM: &[u8; 2] = b"\xFE\xFF";
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpOpenTextFileResult {
+    pub session_id: String,
+    pub remote_path: String,
+    pub local_path: String,
+    pub content: String,
+    pub encoding: String,
+    pub language_hint: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpSaveTextFileResult {
+    pub session_id: String,
+    pub remote_path: String,
+    pub local_path: String,
+    pub bytes_written: u64,
+    pub encoding: String,
+}
+
+fn infer_language_hint(remote_path: &str) -> Option<String> {
+    let path = Path::new(remote_path);
+    let file_name = path.file_name()?.to_string_lossy().to_ascii_lowercase();
+
+    let from_name = match file_name.as_str() {
+        "dockerfile" => Some("dockerfile"),
+        "makefile" => Some("makefile"),
+        _ => None,
+    };
+    if let Some(language) = from_name {
+        return Some(language.to_string());
+    }
+
+    let extension = path
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_ascii_lowercase())?;
+    let language = match extension.as_str() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "json" => "json",
+        "md" | "markdown" => "markdown",
+        "py" => "python",
+        "java" => "java",
+        "c" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" | "hxx" => "cpp",
+        "go" => "go",
+        "yaml" | "yml" => "yaml",
+        "toml" => "toml",
+        "sh" | "bash" | "zsh" => "shell",
+        "sql" => "sql",
+        "html" | "htm" => "html",
+        "css" | "scss" | "less" => "css",
+        "xml" => "xml",
+        "php" => "php",
+        "swift" => "swift",
+        "kt" | "kts" => "kotlin",
+        "ini" | "conf" | "cfg" => "ini",
+        _ => return None,
+    };
+    Some(language.to_string())
+}
+
+fn looks_like_binary(bytes: &[u8]) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    if bytes.contains(&0) {
+        return true;
+    }
+
+    let mut suspicious = 0usize;
+    for &b in bytes {
+        let is_common_text =
+            matches!(b, b'\n' | b'\r' | b'\t' | 0x0C) || (0x20..=0x7E).contains(&b) || b >= 0x80;
+        if !is_common_text {
+            suspicious += 1;
+        }
+    }
+
+    suspicious * 100 > bytes.len() * 30
+}
+
+fn decode_utf16_bytes(bytes: &[u8], little_endian: bool) -> Result<String, String> {
+    if !bytes.len().is_multiple_of(2) {
+        return Err("Invalid UTF-16 byte length".to_string());
+    }
+
+    let utf16_units = bytes
+        .chunks_exact(2)
+        .map(|chunk| {
+            if little_endian {
+                u16::from_le_bytes([chunk[0], chunk[1]])
+            } else {
+                u16::from_be_bytes([chunk[0], chunk[1]])
+            }
+        })
+        .collect::<Vec<u16>>();
+
+    String::from_utf16(&utf16_units).map_err(|e| format!("Invalid UTF-16 content: {}", e))
+}
+
+fn decode_text_bytes(bytes: &[u8]) -> Result<(String, String), String> {
+    if bytes.starts_with(UTF8_BOM) {
+        let content = std::str::from_utf8(&bytes[UTF8_BOM.len()..])
+            .map_err(|e| format!("Invalid UTF-8 content with BOM: {}", e))?
+            .to_string();
+        return Ok((content, "utf-8-bom".to_string()));
+    }
+
+    if bytes.starts_with(UTF16LE_BOM) {
+        let content = decode_utf16_bytes(&bytes[UTF16LE_BOM.len()..], true)?;
+        return Ok((content, "utf-16le".to_string()));
+    }
+
+    if bytes.starts_with(UTF16BE_BOM) {
+        let content = decode_utf16_bytes(&bytes[UTF16BE_BOM.len()..], false)?;
+        return Ok((content, "utf-16be".to_string()));
+    }
+
+    if looks_like_binary(bytes) {
+        return Err("File appears to be binary and cannot be opened as text".to_string());
+    }
+
+    let content = std::str::from_utf8(bytes)
+        .map_err(|e| format!("File is not valid UTF-8 text: {}", e))?
+        .to_string();
+    Ok((content, "utf-8".to_string()))
+}
+
+fn encode_text_content(content: &str, encoding: &str) -> Result<Vec<u8>, String> {
+    match encoding.to_ascii_lowercase().as_str() {
+        "utf-8" => Ok(content.as_bytes().to_vec()),
+        "utf-8-bom" => {
+            let mut encoded = UTF8_BOM.to_vec();
+            encoded.extend_from_slice(content.as_bytes());
+            Ok(encoded)
+        }
+        "utf-16le" => {
+            let mut encoded = UTF16LE_BOM.to_vec();
+            for unit in content.encode_utf16() {
+                encoded.extend_from_slice(&unit.to_le_bytes());
+            }
+            Ok(encoded)
+        }
+        "utf-16be" => {
+            let mut encoded = UTF16BE_BOM.to_vec();
+            for unit in content.encode_utf16() {
+                encoded.extend_from_slice(&unit.to_be_bytes());
+            }
+            Ok(encoded)
+        }
+        other => Err(format!("Unsupported text encoding: {}", other)),
+    }
+}
+
+async fn create_temp_local_path(session_id: &str, remote_path: &str) -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir()
+        .join("resh_sftp")
+        .join(session_id)
+        .join(Uuid::new_v4().to_string());
+    fs::create_dir_all(&temp_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let file_name = Path::new(remote_path)
+        .file_name()
+        .ok_or("Invalid remote path")?
+        .to_string_lossy()
+        .to_string();
+    Ok(temp_dir.join(file_name))
+}
+
+async fn download_remote_file_to_local(
+    session_id: &str,
+    remote_path: &str,
+    local_path: &Path,
+    expected_size: u64,
+) -> Result<u64, String> {
+    let sftp = SftpManager::get_session(session_id).await?;
+    let handle = sftp
+        .open(
+            remote_path,
+            OpenFlags::READ,
+            russh_sftp::protocol::FileAttributes::default(),
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .handle;
+
+    let mut local_file = fs::File::create(local_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let download_result: Result<u64, String> = async {
+        let mut offset = 0u64;
+        loop {
+            let read_len = if expected_size > 0 {
+                let remaining = expected_size.saturating_sub(offset);
+                if remaining == 0 {
+                    break;
+                }
+                std::cmp::min(remaining, SFTP_EDIT_DOWNLOAD_CHUNK_SIZE as u64) as u32
+            } else {
+                SFTP_EDIT_DOWNLOAD_CHUNK_SIZE
+            };
+
+            match sftp.read(&handle, offset, read_len).await {
+                Ok(data) => {
+                    if data.data.is_empty() {
+                        if expected_size == 0 || offset >= expected_size {
+                            break;
+                        }
+                        return Err(format!(
+                            "Download incomplete: received empty data before EOF ({} / {} bytes)",
+                            offset, expected_size
+                        ));
+                    }
+
+                    local_file
+                        .write_all(&data.data)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    offset += data.data.len() as u64;
+                }
+                Err(russh_sftp::client::error::Error::Status(status))
+                    if status.status_code == StatusCode::Eof =>
+                {
+                    if expected_size > 0 && offset < expected_size {
+                        return Err(format!(
+                            "Download incomplete: EOF before full content received ({} / {} bytes)",
+                            offset, expected_size
+                        ));
+                    }
+                    break;
+                }
+                Err(e) => {
+                    return Err(e.to_string());
+                }
+            }
+        }
+
+        local_file.flush().await.map_err(|e| e.to_string())?;
+        local_file.sync_all().await.map_err(|e| e.to_string())?;
+        drop(local_file);
+        Ok(offset)
+    }
+    .await;
+
+    let _ = sftp.close(handle).await;
+    download_result
+}
+
+async fn write_local_file_atomically(local_path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = local_path
+        .parent()
+        .ok_or("Invalid local path: missing parent directory")?;
+    fs::create_dir_all(parent)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let file_name = local_path
+        .file_name()
+        .ok_or("Invalid local path: missing file name")?
+        .to_string_lossy()
+        .to_string();
+    let temp_path = parent.join(format!(".{}.{}.tmp", file_name, Uuid::new_v4()));
+
+    let mut temp_file = fs::File::create(&temp_path)
+        .await
+        .map_err(|e| format!("Failed to create temporary file: {}", e))?;
+    temp_file
+        .write_all(bytes)
+        .await
+        .map_err(|e| format!("Failed to write temporary file: {}", e))?;
+    temp_file
+        .flush()
+        .await
+        .map_err(|e| format!("Failed to flush temporary file: {}", e))?;
+    temp_file
+        .sync_all()
+        .await
+        .map_err(|e| format!("Failed to sync temporary file: {}", e))?;
+    drop(temp_file);
+
+    match fs::rename(&temp_path, local_path).await {
+        Ok(_) => Ok(()),
+        Err(rename_err) => {
+            let target_exists = fs::try_exists(local_path).await.map_err(|e| {
+                format!(
+                    "Failed to check destination path while replacing local file: {}",
+                    e
+                )
+            })?;
+
+            if !target_exists {
+                let _ = fs::remove_file(&temp_path).await;
+                return Err(format!(
+                    "Failed to replace local file with temporary file: {}",
+                    rename_err
+                ));
+            }
+
+            fs::remove_file(local_path).await.map_err(|e| {
+                format!("Failed to remove existing local file before replace: {}", e)
+            })?;
+            fs::rename(&temp_path, local_path)
+                .await
+                .map_err(|e| format!("Failed to move temporary file into place: {}", e))?;
+            Ok(())
+        }
+    }
+}
+
+async fn upload_text_bytes_to_remote(
+    session_id: &str,
+    remote_path: &str,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let sftp = SftpManager::get_session(session_id).await?;
+    let handle = sftp
+        .open(
+            remote_path,
+            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            russh_sftp::protocol::FileAttributes::default(),
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .handle;
+
+    let upload_result: Result<(), String> = async {
+        let mut offset = 0u64;
+        for chunk in bytes.chunks(SFTP_TEXT_SAVE_UPLOAD_CHUNK_SIZE) {
+            sftp.write(&handle, offset, chunk.to_vec())
+                .await
+                .map_err(|e| e.to_string())?;
+            offset += chunk.len() as u64;
+        }
+        Ok(())
+    }
+    .await;
+
+    let _ = sftp.close(handle).await;
+    upload_result?;
+
+    let remote_metadata = SftpManager::metadata(session_id, remote_path).await?;
+    let remote_size = remote_metadata.attrs.size.unwrap_or(0);
+    let expected_size = bytes.len() as u64;
+    if remote_size != expected_size {
+        return Err(format!(
+            "Remote save verification failed: expected {} bytes, got {} bytes",
+            expected_size, remote_size
+        ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn sftp_open_text_file(
+    session_id: String,
+    remote_path: String,
+) -> Result<SftpOpenTextFileResult, String> {
+    let metadata = SftpManager::metadata(&session_id, &remote_path).await?;
+    if metadata.attrs.is_dir() {
+        return Err("Not a file (is a directory)".to_string());
+    }
+    let total_bytes = metadata.attrs.size.unwrap_or(0);
+
+    let local_path = create_temp_local_path(&session_id, &remote_path).await?;
+    download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes).await?;
+
+    let file_bytes = fs::read(&local_path)
+        .await
+        .map_err(|e| format!("Failed to read downloaded local file: {}", e))?;
+    let (content, encoding) = decode_text_bytes(&file_bytes)?;
+    let language_hint = infer_language_hint(&remote_path);
+
+    Ok(SftpOpenTextFileResult {
+        session_id,
+        remote_path,
+        local_path: local_path.to_string_lossy().to_string(),
+        content,
+        encoding,
+        language_hint,
+    })
+}
+
+#[tauri::command]
+pub async fn sftp_save_text_file(
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+    content: String,
+    encoding: String,
+) -> Result<SftpSaveTextFileResult, String> {
+    let local_path_buf = PathBuf::from(&local_path);
+    if local_path_buf.file_name().is_none() {
+        return Err("Invalid local path".to_string());
+    }
+
+    let encoded_bytes = encode_text_content(&content, &encoding)?;
+    write_local_file_atomically(&local_path_buf, &encoded_bytes).await?;
+    upload_text_bytes_to_remote(&session_id, &remote_path, &encoded_bytes).await?;
+
+    Ok(SftpSaveTextFileResult {
+        session_id,
+        remote_path,
+        local_path,
+        bytes_written: encoded_bytes.len() as u64,
+        encoding,
+    })
+}
 
 #[tauri::command]
 pub async fn sftp_edit_file(
@@ -15,25 +437,15 @@ pub async fn sftp_edit_file(
     session_id: String,
     remote_path: String,
 ) -> Result<String, String> {
-    // 1. Create unique temp directory for this specific edit task
-    let task_uuid = Uuid::new_v4().to_string();
-    let temp_dir = std::env::temp_dir()
-        .join("resh_sftp")
-        .join(&session_id)
-        .join(&task_uuid);
-    fs::create_dir_all(&temp_dir)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 2. Determine local filename
-    let file_name_str = Path::new(&remote_path)
+    // 1. Create unique temp local path
+    let local_path = create_temp_local_path(&session_id, &remote_path).await?;
+    let file_name_str = local_path
         .file_name()
-        .ok_or("Invalid remote path")?
-        .to_string_lossy();
-    let local_path = temp_dir.join(file_name_str.as_ref());
+        .ok_or("Invalid local path generated for edit task")?
+        .to_string_lossy()
+        .to_string();
 
-    // Kill any existing watch for the same remote file in this session
-    // This ensures only one watcher exists per remote file
+    // 2. Kill any existing watch for the same remote file in this session.
     state
         .sftp_edit_manager
         .stop_watching_remote(&session_id, &remote_path);
@@ -54,7 +466,7 @@ pub async fn sftp_edit_file(
             task_id: task_id.clone(),
             type_: "download".to_string(),
             session_id: session_id.clone(),
-            file_name: file_name_str.to_string(),
+            file_name: file_name_str.clone(),
             source: remote_path.clone(),
             destination: local_path.to_string_lossy().to_string(),
             total_bytes,
@@ -66,76 +478,8 @@ pub async fn sftp_edit_file(
         },
     );
 
-    let result: Result<u64, String> = async {
-        let sftp = SftpManager::get_session(&session_id).await?;
-        let handle = sftp
-            .open(
-                &remote_path,
-                russh_sftp::protocol::OpenFlags::READ,
-                russh_sftp::protocol::FileAttributes::default(),
-            )
-            .await
-            .map_err(|e| e.to_string())?
-            .handle;
-        let mut local_file = fs::File::create(&local_path)
-            .await
-            .map_err(|e| e.to_string())?;
-
-        let mut offset = 0u64;
-        loop {
-            let read_len = if total_bytes > 0 {
-                let remaining = total_bytes.saturating_sub(offset);
-                if remaining == 0 {
-                    break;
-                }
-                std::cmp::min(remaining, (255 * 1024) as u64) as u32
-            } else {
-                (255 * 1024) as u32
-            };
-
-            match sftp.read(&handle, offset, read_len).await {
-                Ok(data) => {
-                    if data.data.is_empty() {
-                        if total_bytes == 0 || offset >= total_bytes {
-                            break;
-                        }
-                        let _ = sftp.close(handle).await;
-                        return Err(format!(
-                            "Download incomplete: received empty data before EOF ({} / {} bytes)",
-                            offset, total_bytes
-                        ));
-                    }
-                    local_file
-                        .write_all(&data.data)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    offset += data.data.len() as u64;
-                }
-                Err(russh_sftp::client::error::Error::Status(status))
-                    if status.status_code == StatusCode::Eof =>
-                {
-                    if total_bytes > 0 && offset < total_bytes {
-                        let _ = sftp.close(handle).await;
-                        return Err(format!(
-                            "Download incomplete: EOF before full content received ({} / {} bytes)",
-                            offset, total_bytes
-                        ));
-                    }
-                    break;
-                }
-                Err(e) => {
-                    let _ = sftp.close(handle).await;
-                    return Err(e.to_string());
-                }
-            }
-        }
-        local_file.flush().await.map_err(|e| e.to_string())?;
-        local_file.sync_all().await.map_err(|e| e.to_string())?;
-        drop(local_file);
-        let _ = sftp.close(handle).await;
-        Ok(offset)
-    }
-    .await;
+    let result =
+        download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes).await;
 
     // Emit Final Progress
     let final_status = if result.is_ok() {
@@ -152,7 +496,7 @@ pub async fn sftp_edit_file(
             task_id,
             type_: "download".to_string(),
             session_id: session_id.clone(),
-            file_name: file_name_str.to_string(),
+            file_name: file_name_str,
             source: remote_path.clone(),
             destination: local_path.to_string_lossy().to_string(),
             total_bytes,
