@@ -248,6 +248,12 @@ export const locales = {
       splitSelectTabsTitle: "Choose tabs for split view",
       splitSelectTabsHint: "Select {count} tabs for {layout}",
       splitSelectedCount: "{selected}/{required} selected",
+      editorUnsavedTitle: "Unsaved changes",
+      editorUnsavedSwitch:
+        '"{name}" has unsaved changes. Save before switching tabs?',
+      editorUnsavedClose:
+        '"{name}" has unsaved changes. Save before closing this tab?',
+      discardChanges: "Discard",
     },
     windowControls: {
       minimize: "Minimize",
@@ -746,6 +752,10 @@ export const locales = {
       splitSelectTabsTitle: "选择要加入分屏的标签",
       splitSelectTabsHint: "请为 {layout} 选择 {count} 个标签",
       splitSelectedCount: "已选择 {selected}/{required}",
+      editorUnsavedTitle: "未保存的更改",
+      editorUnsavedSwitch: "“{name}”有未保存更改，切换标签前是否保存？",
+      editorUnsavedClose: "“{name}”有未保存更改，关闭标签前是否保存？",
+      discardChanges: "放弃更改",
     },
     windowControls: {
       minimize: "最小化",

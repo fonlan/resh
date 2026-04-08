@@ -1299,6 +1299,8 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             sessionId: opened.sessionId || sessionId,
             remotePath: opened.remotePath || entry.path,
             localPath: opened.localPath,
+            content: opened.content,
+            encoding: opened.encoding,
             language: opened.languageHint || "plaintext",
             dirty: false,
             label: entry.name,

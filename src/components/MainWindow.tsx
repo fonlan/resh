@@ -30,6 +30,9 @@ const SnippetsSidebar = React.lazy(() =>
 const TerminalTab = React.lazy(() =>
   import("./TerminalTab").then((module) => ({ default: module.TerminalTab })),
 )
+const EditorTab = React.lazy(() =>
+  import("./EditorTab").then((module) => ({ default: module.EditorTab })),
+)
 import { WindowControls } from "./WindowControls"
 import { WelcomeScreen } from "./WelcomeScreen"
 import { NewTabButton } from "./NewTabButton"
@@ -82,10 +85,28 @@ interface OpenEditorTabPayload {
   sessionId: string
   remotePath: string
   localPath: string
+  content: string
+  encoding: string
   language: string
   dirty?: boolean
   label?: string
 }
+interface EditorDocumentState {
+  content: string
+  savedContent: string
+  encoding: string
+  isSaving: boolean
+}
+type PendingDirtyEditorAction =
+  | {
+      type: "switch"
+      sourceTabId: string
+      nextTabId: string
+    }
+  | {
+      type: "close"
+      tabId: string
+    }
 const getFileNameFromPath = (path: string): string => {
   const normalized = path.replace(/\\/g, "/")
   const segments = normalized.split("/")
@@ -209,6 +230,11 @@ export const MainWindow: React.FC = () => {
   const [editServerId, setEditServerId] = useState<string | null>(null)
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set())
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}) // tabId -> sessionId
+  const [editorDocuments, setEditorDocuments] = useState<
+    Record<string, EditorDocumentState>
+  >({})
+  const [pendingDirtyAction, setPendingDirtyAction] =
+    useState<PendingDirtyEditorAction | null>(null)
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [pendingSplitLayout, setPendingSplitLayout] =
     useState<SplitLayout | null>(null)
@@ -315,7 +341,7 @@ export const MainWindow: React.FC = () => {
     [pendingSplitLayout, activeTabId, triggerTerminalResize],
   )
 
-  const handleTabSelect = useCallback(
+  const selectTabImmediate = useCallback(
     (tabId: string) => {
       if (!splitView) {
         setActiveTabId(tabId)
@@ -346,6 +372,27 @@ export const MainWindow: React.FC = () => {
       triggerTerminalResize()
     },
     [splitView, activeTabId, triggerTerminalResize],
+  )
+
+  const handleTabSelect = useCallback(
+    (tabId: string) => {
+      if (tabId === activeTabId) {
+        return
+      }
+      const currentTab = activeTabId
+        ? tabs.find((tab) => tab.id === activeTabId) || null
+        : null
+      if (currentTab && isEditorTab(currentTab) && currentTab.dirty) {
+        setPendingDirtyAction({
+          type: "switch",
+          sourceTabId: currentTab.id,
+          nextTabId: tabId,
+        })
+        return
+      }
+      selectTabImmediate(tabId)
+    },
+    [activeTabId, tabs, selectTabImmediate],
   )
 
   useEffect(() => {
@@ -448,7 +495,7 @@ export const MainWindow: React.FC = () => {
     }
   }
 
-  const handleCloseTab = useCallback(
+  const closeTabImmediate = useCallback(
     (tabId: string) => {
       const targetTab = tabs.find((tab) => tab.id === tabId)
       if (!targetTab) {
@@ -464,6 +511,16 @@ export const MainWindow: React.FC = () => {
         delete next[tabId]
         return next
       })
+      if (isEditorTab(targetTab)) {
+        setEditorDocuments((prev) => {
+          if (!prev[tabId]) {
+            return prev
+          }
+          const next = { ...prev }
+          delete next[tabId]
+          return next
+        })
+      }
       if (isTerminalTab(targetTab)) {
         setRecordingTabs((prev) => {
           if (!prev.has(tabId)) {
@@ -476,6 +533,24 @@ export const MainWindow: React.FC = () => {
       }
     },
     [tabs, activeTabId],
+  )
+
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      const targetTab = tabs.find((tab) => tab.id === tabId)
+      if (!targetTab) {
+        return
+      }
+      if (isEditorTab(targetTab) && targetTab.dirty) {
+        setPendingDirtyAction({
+          type: "close",
+          tabId: targetTab.id,
+        })
+        return
+      }
+      closeTabImmediate(tabId)
+    },
+    [tabs, closeTabImmediate],
   )
 
   const handleAddTab = useCallback(
@@ -548,31 +623,172 @@ export const MainWindow: React.FC = () => {
     setActiveTabId(newTab.id)
   }, [])
 
-  const handleAddEditorTab = useCallback((payload: OpenEditorTabPayload) => {
-    const serverId = payload.serverId?.trim()
-    const sessionId = payload.sessionId?.trim()
-    const remotePath = payload.remotePath?.trim()
-    const localPath = payload.localPath?.trim()
-    const language = payload.language?.trim() || "plaintext"
-    if (!serverId || !sessionId || !remotePath || !localPath) {
-      return
-    }
-    const explicitLabel = payload.label?.trim()
-    const label = explicitLabel || getFileNameFromPath(remotePath)
-    const newTab: Tab = {
-      id: generateId(),
-      kind: "editor",
-      label,
-      serverId,
-      sessionId,
-      remotePath,
-      localPath,
-      dirty: payload.dirty === true,
-      language,
-    }
-    setTabs((prev) => [...prev, newTab])
-    setActiveTabId(newTab.id)
-  }, [])
+  const handleAddEditorTab = useCallback(
+    (payload: OpenEditorTabPayload) => {
+      const serverId = payload.serverId?.trim()
+      const sessionId = payload.sessionId?.trim()
+      const remotePath = payload.remotePath?.trim()
+      const localPath = payload.localPath?.trim()
+      const content = payload.content
+      const encoding = payload.encoding?.trim()
+      const language = payload.language?.trim() || "plaintext"
+      if (
+        !serverId ||
+        !sessionId ||
+        !remotePath ||
+        !localPath ||
+        typeof content !== "string" ||
+        !encoding
+      ) {
+        showToast("Invalid editor payload.", "error")
+        return
+      }
+      const explicitLabel = payload.label?.trim()
+      const label = explicitLabel || getFileNameFromPath(remotePath)
+      const nextDirty = payload.dirty === true
+      const newTab: Tab = {
+        id: generateId(),
+        kind: "editor",
+        label,
+        serverId,
+        sessionId,
+        remotePath,
+        localPath,
+        dirty: nextDirty,
+        language,
+      }
+      setTabs((prev) => [...prev, newTab])
+      setEditorDocuments((prev) => ({
+        ...prev,
+        [newTab.id]: {
+          content,
+          savedContent: content,
+          encoding,
+          isSaving: false,
+        },
+      }))
+      setActiveTabId(newTab.id)
+    },
+    [showToast],
+  )
+
+  const handleEditorContentChange = useCallback(
+    (tabId: string, next: string) => {
+      let nextDirty = false
+      setEditorDocuments((prev) => {
+        const current = prev[tabId]
+        if (!current) {
+          return prev
+        }
+        nextDirty = next !== current.savedContent
+        if (current.content === next) {
+          return prev
+        }
+        return {
+          ...prev,
+          [tabId]: {
+            ...current,
+            content: next,
+          },
+        }
+      })
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (
+            !isEditorTab(tab) ||
+            tab.id !== tabId ||
+            tab.dirty === nextDirty
+          ) {
+            return tab
+          }
+          return { ...tab, dirty: nextDirty }
+        }),
+      )
+    },
+    [],
+  )
+
+  const handleSaveEditorTab = useCallback(
+    async (tabId: string): Promise<boolean> => {
+      const targetTab = tabs.find((tab): tab is EditorTabState => {
+        return tab.id === tabId && isEditorTab(tab)
+      })
+      if (!targetTab) {
+        return false
+      }
+      const currentDocument = editorDocuments[tabId]
+      if (!currentDocument) {
+        showToast("Editor document not found.", "error")
+        return false
+      }
+      if (currentDocument.isSaving) {
+        return false
+      }
+      setEditorDocuments((prev) => {
+        const doc = prev[tabId]
+        if (!doc) {
+          return prev
+        }
+        return {
+          ...prev,
+          [tabId]: {
+            ...doc,
+            isSaving: true,
+          },
+        }
+      })
+      try {
+        await invoke("sftp_save_text_file", {
+          sessionId: targetTab.sessionId,
+          remotePath: targetTab.remotePath,
+          localPath: targetTab.localPath,
+          content: currentDocument.content,
+          encoding: currentDocument.encoding,
+        })
+        setEditorDocuments((prev) => {
+          const doc = prev[tabId]
+          if (!doc) {
+            return prev
+          }
+          return {
+            ...prev,
+            [tabId]: {
+              ...doc,
+              savedContent: doc.content,
+              isSaving: false,
+            },
+          }
+        })
+        setTabs((prev) =>
+          prev.map((tab) =>
+            isEditorTab(tab) && tab.id === tabId
+              ? { ...tab, dirty: false }
+              : tab,
+          ),
+        )
+        showToast(t.saveStatus.saved, "success")
+        return true
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        showToast(message, "error")
+        setEditorDocuments((prev) => {
+          const doc = prev[tabId]
+          if (!doc) {
+            return prev
+          }
+          return {
+            ...prev,
+            [tabId]: {
+              ...doc,
+              isSaving: false,
+            },
+          }
+        })
+        return false
+      }
+    },
+    [tabs, editorDocuments, showToast, t.saveStatus.saved],
+  )
   useEffect(() => {
     const handleOpenEditorTab = (event: Event) => {
       const detail = (event as CustomEvent<OpenEditorTabPayload>).detail
@@ -590,6 +806,13 @@ export const MainWindow: React.FC = () => {
     (tabId: string) => {
       const sourceTab = tabs.find((t) => t.id === tabId)
       if (!sourceTab) return
+      const sourceDocument = isEditorTab(sourceTab)
+        ? editorDocuments[sourceTab.id]
+        : null
+      if (isEditorTab(sourceTab) && !sourceDocument) {
+        showToast("Editor document not found.", "error")
+        return
+      }
 
       const sourceIndex = tabs.findIndex((t) => t.id === tabId)
       const newTab: Tab = isTerminalTab(sourceTab)
@@ -615,9 +838,20 @@ export const MainWindow: React.FC = () => {
       const newTabs = [...tabs]
       newTabs.splice(sourceIndex + 1, 0, newTab)
       setTabs(newTabs)
+      if (sourceDocument) {
+        setEditorDocuments((prev) => ({
+          ...prev,
+          [newTab.id]: {
+            content: sourceDocument.content,
+            savedContent: sourceDocument.savedContent,
+            encoding: sourceDocument.encoding,
+            isSaving: false,
+          },
+        }))
+      }
       setActiveTabId(newTab.id)
     },
-    [tabs],
+    [tabs, editorDocuments, showToast],
   )
 
   const handleCloseOthers = useCallback(
@@ -628,6 +862,18 @@ export const MainWindow: React.FC = () => {
       }
       setTabs([targetTab])
       setActiveTabId(tabId)
+      setEditorDocuments((prev) => {
+        if (!isEditorTab(targetTab)) {
+          return {}
+        }
+        const targetDocument = prev[targetTab.id]
+        if (!targetDocument) {
+          return {}
+        }
+        return {
+          [targetTab.id]: targetDocument,
+        }
+      })
       setTabSessions((prev) => {
         if (isEditorTab(targetTab)) {
           return {}
@@ -647,6 +893,79 @@ export const MainWindow: React.FC = () => {
     },
     [tabs],
   )
+
+  const pendingDirtyTab = pendingDirtyAction
+    ? pendingDirtyAction.type === "switch"
+      ? tabs.find((tab) => tab.id === pendingDirtyAction.sourceTabId) || null
+      : tabs.find((tab) => tab.id === pendingDirtyAction.tabId) || null
+    : null
+
+  useEffect(() => {
+    if (pendingDirtyAction && !pendingDirtyTab) {
+      setPendingDirtyAction(null)
+    }
+  }, [pendingDirtyAction, pendingDirtyTab])
+
+  const handleCancelPendingDirtyAction = useCallback(() => {
+    setPendingDirtyAction(null)
+  }, [])
+
+  const handleDiscardPendingDirtyAction = useCallback(() => {
+    if (!pendingDirtyAction) {
+      return
+    }
+    if (pendingDirtyAction.type === "switch") {
+      setEditorDocuments((prev) => {
+        const sourceDoc = prev[pendingDirtyAction.sourceTabId]
+        if (!sourceDoc) {
+          return prev
+        }
+        return {
+          ...prev,
+          [pendingDirtyAction.sourceTabId]: {
+            ...sourceDoc,
+            content: sourceDoc.savedContent,
+          },
+        }
+      })
+      setTabs((prev) =>
+        prev.map((tab) =>
+          isEditorTab(tab) && tab.id === pendingDirtyAction.sourceTabId
+            ? { ...tab, dirty: false }
+            : tab,
+        ),
+      )
+      selectTabImmediate(pendingDirtyAction.nextTabId)
+    } else {
+      closeTabImmediate(pendingDirtyAction.tabId)
+    }
+    setPendingDirtyAction(null)
+  }, [pendingDirtyAction, selectTabImmediate, closeTabImmediate])
+
+  const handleSavePendingDirtyAction = useCallback(async () => {
+    if (!pendingDirtyAction) {
+      return
+    }
+    const targetTabId =
+      pendingDirtyAction.type === "switch"
+        ? pendingDirtyAction.sourceTabId
+        : pendingDirtyAction.tabId
+    const saved = await handleSaveEditorTab(targetTabId)
+    if (!saved) {
+      return
+    }
+    if (pendingDirtyAction.type === "switch") {
+      selectTabImmediate(pendingDirtyAction.nextTabId)
+    } else {
+      closeTabImmediate(pendingDirtyAction.tabId)
+    }
+    setPendingDirtyAction(null)
+  }, [
+    pendingDirtyAction,
+    handleSaveEditorTab,
+    selectTabImmediate,
+    closeTabImmediate,
+  ])
 
   const handleExportLogs = (tabId: string) => {
     const targetTab = tabs.find((tab) => tab.id === tabId)
@@ -1047,7 +1366,11 @@ export const MainWindow: React.FC = () => {
                 />
               )}
               <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
-                <EmojiText text={tab.label} />
+                <EmojiText
+                  text={
+                    isEditorTab(tab) && tab.dirty ? `${tab.label} *` : tab.label
+                  }
+                />
               </span>
               <button
                 type="button"
@@ -1199,6 +1522,9 @@ export const MainWindow: React.FC = () => {
                 null
               if (!server) return null
 
+              const editorDocument = isEditorTab(tab)
+                ? editorDocuments[tab.id]
+                : null
               const isVisibleInLayout = splitView
                 ? splitView.tabIds.includes(tab.id)
                 : activeTabId === tab.id
@@ -1245,24 +1571,31 @@ export const MainWindow: React.FC = () => {
                         />
                       </Suspense>
                     ) : (
-                      <div className="w-full h-full bg-[var(--bg-primary)] text-[var(--text-primary)] p-6 overflow-auto">
-                        <div className="max-w-[960px] mx-auto space-y-3">
-                          <h2 className="text-[16px] font-semibold">
-                            Editor Tab
-                          </h2>
-                          <p className="text-[13px] text-[var(--text-secondary)]">
-                            Monaco editor surface will be implemented in M4.
-                          </p>
-                          <div className="text-[12px] font-mono bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-sm)] p-3">
-                            <div>serverId: {tab.serverId}</div>
-                            <div>sessionId: {tab.sessionId}</div>
-                            <div>remotePath: {tab.remotePath}</div>
-                            <div>localPath: {tab.localPath}</div>
-                            <div>language: {tab.language}</div>
-                            <div>dirty: {String(tab.dirty)}</div>
+                      <Suspense
+                        fallback={
+                          <div className="flex-1 bg-[var(--bg-primary)]" />
+                        }
+                      >
+                        {editorDocument ? (
+                          <EditorTab
+                            tabId={tab.id}
+                            remotePath={tab.remotePath}
+                            languageHint={tab.language}
+                            content={editorDocument.content}
+                            isSaving={editorDocument.isSaving}
+                            onChange={(value) =>
+                              handleEditorContentChange(tab.id, value)
+                            }
+                            onSave={() => handleSaveEditorTab(tab.id)}
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-[var(--bg-primary)] text-[var(--text-primary)] p-6">
+                            <div className="max-w-[960px] mx-auto text-[13px] text-[var(--danger)]">
+                              Editor document is missing for this tab.
+                            </div>
                           </div>
-                        </div>
-                      </div>
+                        )}
+                      </Suspense>
                     )}
                   </div>
                 </div>
@@ -1324,6 +1657,49 @@ export const MainWindow: React.FC = () => {
           />
         )}
       </Suspense>
+
+      {pendingDirtyAction &&
+        pendingDirtyTab &&
+        isEditorTab(pendingDirtyTab) && (
+          <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/45 backdrop-blur-sm">
+            <div className="w-[420px] max-w-[92vw] rounded-[var(--radius-md)] border border-[var(--glass-border)] bg-[var(--bg-secondary)] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+              <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                {t.mainWindow.editorUnsavedTitle}
+              </h2>
+              <p className="mt-2 text-[13px] leading-relaxed text-[var(--text-secondary)]">
+                {(pendingDirtyAction.type === "switch"
+                  ? t.mainWindow.editorUnsavedSwitch
+                  : t.mainWindow.editorUnsavedClose
+                ).replace("{name}", pendingDirtyTab.label)}
+              </p>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  className="h-8 px-3 rounded border border-[var(--glass-border)] bg-transparent text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)]"
+                  onClick={handleCancelPendingDirtyAction}
+                >
+                  {t.common.cancel}
+                </button>
+                <button
+                  type="button"
+                  className="h-8 px-3 rounded border border-[var(--glass-border)] bg-transparent text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                  onClick={handleDiscardPendingDirtyAction}
+                >
+                  {t.mainWindow.discardChanges}
+                </button>
+                <button
+                  type="button"
+                  className="h-8 px-3 rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)]/15 text-[12px] text-[var(--text-primary)] hover:bg-[var(--accent-primary)]/25"
+                  onClick={() => {
+                    void handleSavePendingDirtyAction()
+                  }}
+                >
+                  {t.common.save}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* Tab Context Menu */}
       {contextMenu && contextMenuTab && (
