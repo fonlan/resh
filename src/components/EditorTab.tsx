@@ -271,6 +271,16 @@ export const EditorTab: React.FC<EditorTabProps> = ({
     })
   }, [terminalFontFamily, terminalFontSize])
 
+  const applyEditorReadOnly = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    editor.updateOptions({
+      readOnly: isSaving,
+    })
+  }, [isSaving])
+
   const handleSave = useCallback(() => {
     void onSave()
   }, [onSave])
@@ -305,9 +315,16 @@ export const EditorTab: React.FC<EditorTabProps> = ({
       applyModelLanguage()
       applyMonacoTheme()
       applyEditorTypography()
+      applyEditorReadOnly()
       editor.focus()
     },
-    [applyModelLanguage, applyMonacoTheme, applyEditorTypography, onSave],
+    [
+      applyModelLanguage,
+      applyMonacoTheme,
+      applyEditorTypography,
+      applyEditorReadOnly,
+      onSave,
+    ],
   )
 
   useEffect(() => {
@@ -333,6 +350,10 @@ export const EditorTab: React.FC<EditorTabProps> = ({
   useEffect(() => {
     applyEditorTypography()
   }, [applyEditorTypography])
+
+  useEffect(() => {
+    applyEditorReadOnly()
+  }, [applyEditorReadOnly])
 
   useEffect(() => {
     return () => {
@@ -395,6 +416,7 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             insertSpaces: true,
             fontFamily: terminalFontFamily,
             fontSize: terminalFontSize,
+            readOnly: isSaving,
           }}
         />
       </div>

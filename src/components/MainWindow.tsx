@@ -754,6 +754,7 @@ export const MainWindow: React.FC = () => {
       if (currentDocument.isSaving) {
         return false
       }
+      const savingContent = currentDocument.content
       setEditorDocuments((prev) => {
         const doc = prev[tabId]
         if (!doc) {
@@ -772,19 +773,21 @@ export const MainWindow: React.FC = () => {
           sessionId: targetTab.sessionId,
           remotePath: targetTab.remotePath,
           localPath: targetTab.localPath,
-          content: currentDocument.content,
+          content: savingContent,
           encoding: currentDocument.encoding,
         })
+        let nextDirtyAfterSave = false
         setEditorDocuments((prev) => {
           const doc = prev[tabId]
           if (!doc) {
             return prev
           }
+          nextDirtyAfterSave = doc.content !== savingContent
           return {
             ...prev,
             [tabId]: {
               ...doc,
-              savedContent: doc.content,
+              savedContent: savingContent,
               isSaving: false,
             },
           }
@@ -792,7 +795,7 @@ export const MainWindow: React.FC = () => {
         setTabs((prev) =>
           prev.map((tab) =>
             isEditorTab(tab) && tab.id === tabId
-              ? { ...tab, dirty: false }
+              ? { ...tab, dirty: nextDirtyAfterSave }
               : tab,
           ),
         )
