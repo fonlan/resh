@@ -47,13 +47,51 @@ import { useTabDragDrop } from "../hooks/useTabDragDrop"
 import { EmojiText } from "./EmojiText"
 import { useTransferStore } from "../stores/transferStore"
 
-interface Tab {
+type TabKind = "terminal" | "editor"
+
+interface BaseTab {
   id: string
   label: string
   serverId: string
+  kind: TabKind
+}
+
+interface TerminalTabState extends BaseTab {
+  kind: "terminal"
   temporaryServer?: Config["servers"][number]
 }
 
+interface EditorTabState extends BaseTab {
+  kind: "editor"
+  sessionId: string
+  remotePath: string
+  localPath: string
+  dirty: boolean
+  language: string
+}
+
+type Tab = TerminalTabState | EditorTabState
+
+const isTerminalTab = (tab: Tab): tab is TerminalTabState =>
+  tab.kind === "terminal"
+
+const isEditorTab = (tab: Tab): tab is EditorTabState => tab.kind === "editor"
+
+interface OpenEditorTabPayload {
+  serverId: string
+  sessionId: string
+  remotePath: string
+  localPath: string
+  language: string
+  dirty?: boolean
+  label?: string
+}
+const getFileNameFromPath = (path: string): string => {
+  const normalized = path.replace(/\\/g, "/")
+  const segments = normalized.split("/")
+  const fileName = segments[segments.length - 1]?.trim()
+  return fileName || normalized
+}
 interface SplitViewState {
   layout: SplitLayout
   tabIds: string[]
@@ -193,7 +231,7 @@ export const MainWindow: React.FC = () => {
   const temporaryServerById = useMemo(() => {
     const map = new Map<string, Config["servers"][number]>()
     tabs.forEach((tab) => {
-      if (tab.temporaryServer) {
+      if (isTerminalTab(tab) && tab.temporaryServer) {
         map.set(tab.serverId, tab.temporaryServer)
       }
     })
@@ -204,6 +242,7 @@ export const MainWindow: React.FC = () => {
     () => [
       ...servers,
       ...tabs
+        .filter(isTerminalTab)
         .map((tab) => tab.temporaryServer)
         .filter((server): server is Config["servers"][number] => !!server),
     ],
@@ -213,6 +252,11 @@ export const MainWindow: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
 
   const activeServerId = activeTab?.serverId
+  const activeTabSessionId = activeTab
+    ? isEditorTab(activeTab)
+      ? activeTab.sessionId
+      : tabSessions[activeTab.id] || undefined
+    : undefined
 
   const handleTabSessionChange = (tabId: string, sessionId: string | null) => {
     const normalizedSessionId = sessionId || ""
@@ -359,6 +403,9 @@ export const MainWindow: React.FC = () => {
     setTabs((prevTabs) => {
       let hasChanges = false
       const newTabs = prevTabs.map((tab) => {
+        if (!isTerminalTab(tab) || tab.temporaryServer) {
+          return tab
+        }
         const server = serverById.get(tab.serverId)
         if (server && server.name !== tab.label) {
           hasChanges = true
@@ -403,6 +450,10 @@ export const MainWindow: React.FC = () => {
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
+      const targetTab = tabs.find((tab) => tab.id === tabId)
+      if (!targetTab) {
+        return
+      }
       const newTabs = tabs.filter((t) => t.id !== tabId)
       setTabs(newTabs)
       if (activeTabId === tabId) {
@@ -413,6 +464,16 @@ export const MainWindow: React.FC = () => {
         delete next[tabId]
         return next
       })
+      if (isTerminalTab(targetTab)) {
+        setRecordingTabs((prev) => {
+          if (!prev.has(tabId)) {
+            return prev
+          }
+          const next = new Set(prev)
+          next.delete(tabId)
+          return next
+        })
+      }
     },
     [tabs, activeTabId],
   )
@@ -430,6 +491,7 @@ export const MainWindow: React.FC = () => {
 
       const newTab: Tab = {
         id: generateId(),
+        kind: "terminal",
         label: server.name,
         serverId: server.id,
       }
@@ -476,6 +538,7 @@ export const MainWindow: React.FC = () => {
 
     const newTab: Tab = {
       id: generateId(),
+      kind: "terminal",
       label: temporaryServer.name,
       serverId: temporaryServer.id,
       temporaryServer,
@@ -485,18 +548,69 @@ export const MainWindow: React.FC = () => {
     setActiveTabId(newTab.id)
   }, [])
 
+  const handleAddEditorTab = useCallback((payload: OpenEditorTabPayload) => {
+    const serverId = payload.serverId?.trim()
+    const sessionId = payload.sessionId?.trim()
+    const remotePath = payload.remotePath?.trim()
+    const localPath = payload.localPath?.trim()
+    const language = payload.language?.trim() || "plaintext"
+    if (!serverId || !sessionId || !remotePath || !localPath) {
+      return
+    }
+    const explicitLabel = payload.label?.trim()
+    const label = explicitLabel || getFileNameFromPath(remotePath)
+    const newTab: Tab = {
+      id: generateId(),
+      kind: "editor",
+      label,
+      serverId,
+      sessionId,
+      remotePath,
+      localPath,
+      dirty: payload.dirty === true,
+      language,
+    }
+    setTabs((prev) => [...prev, newTab])
+    setActiveTabId(newTab.id)
+  }, [])
+  useEffect(() => {
+    const handleOpenEditorTab = (event: Event) => {
+      const detail = (event as CustomEvent<OpenEditorTabPayload>).detail
+      if (!detail) {
+        return
+      }
+      handleAddEditorTab(detail)
+    }
+    window.addEventListener("open-editor-tab", handleOpenEditorTab)
+    return () => {
+      window.removeEventListener("open-editor-tab", handleOpenEditorTab)
+    }
+  }, [handleAddEditorTab])
   const handleCloneTab = useCallback(
     (tabId: string) => {
       const sourceTab = tabs.find((t) => t.id === tabId)
       if (!sourceTab) return
 
       const sourceIndex = tabs.findIndex((t) => t.id === tabId)
-      const newTab: Tab = {
-        id: generateId(),
-        label: sourceTab.label,
-        serverId: sourceTab.serverId,
-        temporaryServer: sourceTab.temporaryServer,
-      }
+      const newTab: Tab = isTerminalTab(sourceTab)
+        ? {
+            id: generateId(),
+            kind: "terminal",
+            label: sourceTab.label,
+            serverId: sourceTab.serverId,
+            temporaryServer: sourceTab.temporaryServer,
+          }
+        : {
+            id: generateId(),
+            kind: "editor",
+            label: sourceTab.label,
+            serverId: sourceTab.serverId,
+            sessionId: sourceTab.sessionId,
+            remotePath: sourceTab.remotePath,
+            localPath: sourceTab.localPath,
+            dirty: sourceTab.dirty,
+            language: sourceTab.language,
+          }
 
       const newTabs = [...tabs]
       newTabs.splice(sourceIndex + 1, 0, newTab)
@@ -508,14 +622,37 @@ export const MainWindow: React.FC = () => {
 
   const handleCloseOthers = useCallback(
     (tabId: string) => {
-      const newTabs = tabs.filter((t) => t.id === tabId)
-      setTabs(newTabs)
+      const targetTab = tabs.find((tab) => tab.id === tabId)
+      if (!targetTab) {
+        return
+      }
+      setTabs([targetTab])
       setActiveTabId(tabId)
+      setTabSessions((prev) => {
+        if (isEditorTab(targetTab)) {
+          return {}
+        }
+        const currentSessionId = prev[targetTab.id]
+        if (!currentSessionId) {
+          return {}
+        }
+        return { [targetTab.id]: currentSessionId }
+      })
+      setRecordingTabs((prev) => {
+        if (!isTerminalTab(targetTab) || !prev.has(targetTab.id)) {
+          return new Set()
+        }
+        return new Set([targetTab.id])
+      })
     },
     [tabs],
   )
 
   const handleExportLogs = (tabId: string) => {
+    const targetTab = tabs.find((tab) => tab.id === tabId)
+    if (!targetTab || !isTerminalTab(targetTab)) {
+      return
+    }
     const event = new CustomEvent(`export-terminal-logs:${tabId}`)
     window.dispatchEvent(event)
   }
@@ -545,8 +682,11 @@ export const MainWindow: React.FC = () => {
       // TerminalTab knows its session_id.
 
       const tab = tabs.find((t) => t.id === tabId)
+      if (!tab || !isTerminalTab(tab)) {
+        return
+      }
       let defaultName = `recording-${tabId}.txt`
-      if (tab && config) {
+      if (config) {
         const server = config.servers.find((s) => s.id === tab.serverId)
         if (server) {
           defaultName = `recording-${server.host.replace(/[^a-z0-9]/gi, "_")}-${new Date().toISOString().replace(/[:.]/g, "-")}.txt`
@@ -572,6 +712,10 @@ export const MainWindow: React.FC = () => {
   )
 
   const handleStopRecording = (tabId: string) => {
+    const targetTab = tabs.find((tab) => tab.id === tabId)
+    if (!targetTab || !isTerminalTab(targetTab)) {
+      return
+    }
     window.dispatchEvent(new CustomEvent(`stop-recording:${tabId}`))
     setRecordingTabs((prev) => {
       const next = new Set(prev)
@@ -581,6 +725,10 @@ export const MainWindow: React.FC = () => {
   }
 
   const handleReconnect = (tabId: string) => {
+    const targetTab = tabs.find((tab) => tab.id === tabId)
+    if (!targetTab || !isTerminalTab(targetTab)) {
+      return
+    }
     window.dispatchEvent(new CustomEvent(`reconnect:${tabId}`))
   }
 
@@ -837,6 +985,9 @@ export const MainWindow: React.FC = () => {
   const aiZIndex = config?.general.aiSidebarLocked ? 10 : 50
   const snippetsZIndex = config?.general.snippetsSidebarLocked ? 10 : 50
   const sftpZIndex = config?.general.sftpSidebarLocked ? 10 : 50
+  const contextMenuTab = contextMenu
+    ? tabs.find((tab) => tab.id === contextMenu.tabId) || null
+    : null
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden animate-[fadeIn_0.4s_ease-out]">
@@ -887,7 +1038,7 @@ export const MainWindow: React.FC = () => {
               onClick={() => handleTabSelect(tab.id)}
               onContextMenu={(e) => handleContextMenu(e, tab.id)}
             >
-              {recordingTabs.has(tab.id) && (
+              {isTerminalTab(tab) && recordingTabs.has(tab.id) && (
                 <Circle
                   size={8}
                   fill="#ef4444"
@@ -1026,9 +1177,7 @@ export const MainWindow: React.FC = () => {
               isLocked={config?.general.sftpSidebarLocked || false}
               onToggleLock={handleToggleSFTPLock}
               serverId={activeServerId}
-              sessionId={
-                activeTabId ? tabSessions[activeTabId] || undefined : undefined
-              }
+              sessionId={activeTabSessionId}
               zIndex={sftpZIndex}
             />
           )}
@@ -1044,7 +1193,9 @@ export const MainWindow: React.FC = () => {
           ) : (
             tabs.map((tab) => {
               const server =
-                serverById.get(tab.serverId) || tab.temporaryServer || null
+                serverById.get(tab.serverId) ||
+                (isTerminalTab(tab) ? tab.temporaryServer : null) ||
+                null
               if (!server) return null
 
               const isVisibleInLayout = splitView
@@ -1067,30 +1218,51 @@ export const MainWindow: React.FC = () => {
                   <div
                     className={`w-full h-full min-w-0 min-h-0 overflow-hidden ${isSplitMode ? `rounded-[var(--radius-md)] border ${isFocusedTab ? "border-[var(--accent-primary)] ring-2 ring-[var(--accent-primary)]/40" : "border-[var(--glass-border)]"}` : ""}`}
                   >
-                    <Suspense
-                      fallback={
-                        <div className="flex-1 bg-[var(--bg-primary)]" />
-                      }
-                    >
-                      <TerminalTab
-                        tabId={tab.id}
-                        serverId={tab.serverId}
-                        isActive={isFocusedTab}
-                        isVisible={isVisibleInLayout}
-                        onClose={handleCloseTab}
-                        onActivate={() => handleTabSelect(tab.id)}
-                        server={server}
-                        servers={allServers}
-                        authentications={authentications}
-                        proxies={proxies}
-                        terminalSettings={config?.general.terminal}
-                        theme={config?.general.theme}
-                        onSessionChange={(sessionId) =>
-                          handleTabSessionChange(tab.id, sessionId)
+                    {isTerminalTab(tab) ? (
+                      <Suspense
+                        fallback={
+                          <div className="flex-1 bg-[var(--bg-primary)]" />
                         }
-                        onShowToast={showToast}
-                      />
-                    </Suspense>
+                      >
+                        <TerminalTab
+                          tabId={tab.id}
+                          serverId={tab.serverId}
+                          isActive={isFocusedTab}
+                          isVisible={isVisibleInLayout}
+                          onClose={handleCloseTab}
+                          onActivate={() => handleTabSelect(tab.id)}
+                          server={server}
+                          servers={allServers}
+                          authentications={authentications}
+                          proxies={proxies}
+                          terminalSettings={config?.general.terminal}
+                          theme={config?.general.theme}
+                          onSessionChange={(sessionId) =>
+                            handleTabSessionChange(tab.id, sessionId)
+                          }
+                          onShowToast={showToast}
+                        />
+                      </Suspense>
+                    ) : (
+                      <div className="w-full h-full bg-[var(--bg-primary)] text-[var(--text-primary)] p-6 overflow-auto">
+                        <div className="max-w-[960px] mx-auto space-y-3">
+                          <h2 className="text-[16px] font-semibold">
+                            Editor Tab
+                          </h2>
+                          <p className="text-[13px] text-[var(--text-secondary)]">
+                            Monaco editor surface will be implemented in M4.
+                          </p>
+                          <div className="text-[12px] font-mono bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-sm)] p-3">
+                            <div>serverId: {tab.serverId}</div>
+                            <div>sessionId: {tab.sessionId}</div>
+                            <div>remotePath: {tab.remotePath}</div>
+                            <div>localPath: {tab.localPath}</div>
+                            <div>language: {tab.language}</div>
+                            <div>dirty: {String(tab.dirty)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )
@@ -1106,9 +1278,7 @@ export const MainWindow: React.FC = () => {
               onToggleLock={handleToggleAILock}
               onShowToast={showToast}
               currentServerId={activeServerId}
-              currentTabId={
-                activeTabId ? tabSessions[activeTabId] || undefined : undefined
-              }
+              currentTabId={activeTabSessionId}
               zIndex={aiZIndex}
             />
           )}
@@ -1155,12 +1325,16 @@ export const MainWindow: React.FC = () => {
       </Suspense>
 
       {/* Tab Context Menu */}
-      {contextMenu && (
+      {contextMenu && contextMenuTab && (
         <TabContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           tabId={contextMenu.tabId}
-          isRecording={recordingTabs.has(contextMenu.tabId)}
+          tabType={contextMenuTab.kind}
+          isRecording={
+            isTerminalTab(contextMenuTab) &&
+            recordingTabs.has(contextMenuTab.id)
+          }
           onClose={() => setContextMenu(null)}
           onClone={handleCloneTab}
           onReconnect={handleReconnect}

@@ -14,6 +14,7 @@ interface TabContextMenuProps {
   x: number
   y: number
   tabId: string
+  tabType: "terminal" | "editor"
   isRecording: boolean
   onClose: () => void
   onClone: (tabId: string) => void
@@ -29,6 +30,7 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
   x,
   y,
   tabId,
+  tabType,
   isRecording,
   onClose,
   onClone,
@@ -115,55 +117,58 @@ export const TabContextMenu: React.FC<TabContextMenuProps> = ({
         <Copy size={14} />
         <span>{t.mainWindow.cloneTab}</span>
       </button>
+      {tabType === "terminal" && (
+        <>
+          <button
+            type="button"
+            className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
+            onClick={() => {
+              onReconnect(tabId)
+              onClose()
+            }}
+          >
+            <RefreshCw size={14} />
+            <span>{t.mainWindow.reconnect}</span>
+          </button>
 
-      <button
-        type="button"
-        className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
-        onClick={() => {
-          onReconnect(tabId)
-          onClose()
-        }}
-      >
-        <RefreshCw size={14} />
-        <span>{t.mainWindow.reconnect}</span>
-      </button>
+          <button
+            type="button"
+            className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
+            onClick={() => {
+              onExport(tabId)
+              onClose()
+            }}
+          >
+            <FileDown size={14} />
+            <span>{t.mainWindow.exportLogs}</span>
+          </button>
 
-      <button
-        type="button"
-        className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
-        onClick={() => {
-          onExport(tabId)
-          onClose()
-        }}
-      >
-        <FileDown size={14} />
-        <span>{t.mainWindow.exportLogs}</span>
-      </button>
-
-      {isRecording ? (
-        <button
-          type="button"
-          className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
-          onClick={() => {
-            onStopRecording(tabId)
-            onClose()
-          }}
-        >
-          <Square size={14} fill="currentColor" className="text-red-500" />
-          <span>{t.mainWindow.stopRecording}</span>
-        </button>
-      ) : (
-        <button
-          type="button"
-          className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
-          onClick={() => {
-            onStartRecording(tabId)
-            onClose()
-          }}
-        >
-          <Circle size={14} fill="currentColor" className="text-red-500" />
-          <span>{t.mainWindow.startRecording}</span>
-        </button>
+          {isRecording ? (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
+              onClick={() => {
+                onStopRecording(tabId)
+                onClose()
+              }}
+            >
+              <Square size={14} fill="currentColor" className="text-red-500" />
+              <span>{t.mainWindow.stopRecording}</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2.5 p-[8px_12px] bg-transparent border-none rounded-[4px] text-[var(--text-primary)] text-[13px] font-[var(--font-ui)] cursor-pointer transition-all text-left hover:bg-[var(--accent-primary)] hover:text-white"
+              onClick={() => {
+                onStartRecording(tabId)
+                onClose()
+              }}
+            >
+              <Circle size={14} fill="currentColor" className="text-red-500" />
+              <span>{t.mainWindow.startRecording}</span>
+            </button>
+          )}
+        </>
       )}
 
       <div className="h-px bg-[var(--glass-border)] m-1" />
