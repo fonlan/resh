@@ -254,6 +254,11 @@ export const locales = {
       editorUnsavedClose:
         '"{name}" has unsaved changes. Save before closing this tab?',
       discardChanges: "Discard",
+      editor: {
+        invalidPayload: "Invalid editor payload.",
+        documentMissing: "Editor document not found.",
+        saveFailed: "Failed to save editor file: {error}",
+      },
     },
     windowControls: {
       minimize: "Minimize",
@@ -269,6 +274,15 @@ export const locales = {
       contextMenuCopied: "Copied to clipboard",
       contextMenuCopy: "Copy",
       contextMenuPaste: "Paste",
+    },
+    editorTab: {
+      undo: "Undo",
+      redo: "Redo",
+      save: "Save",
+      encoding: "Encoding: {encoding}",
+      dirty: "Modified",
+      saved: "Saved",
+      lineColumn: "Ln {line}, Col {column}",
     },
     newTabButton: {
       connectTo: "Connect to Server",
@@ -422,6 +436,12 @@ export const locales = {
         empty: "No favorite directories yet",
         remove: "Remove favorite path",
         pathNotFound: "Favorite path no longer exists: {path}",
+      },
+      editor: {
+        serverUnavailable: "Server is unavailable for this file.",
+        nonTextFile: "This file is not text and cannot be opened in editor.",
+        openFailed: "Failed to open file in editor: {error}",
+        unknownError: "Unknown error",
       },
       modals: {
         deleteConfirmTitle: "Delete Confirmation",
@@ -765,6 +785,11 @@ export const locales = {
       editorUnsavedSwitch: "“{name}”有未保存更改，切换标签前是否保存？",
       editorUnsavedClose: "“{name}”有未保存更改，关闭标签前是否保存？",
       discardChanges: "放弃更改",
+      editor: {
+        invalidPayload: "编辑器载荷无效。",
+        documentMissing: "未找到编辑器文档。",
+        saveFailed: "保存编辑器文件失败: {error}",
+      },
     },
     windowControls: {
       minimize: "最小化",
@@ -780,6 +805,15 @@ export const locales = {
       contextMenuCopied: "已复制到剪贴板",
       contextMenuCopy: "复制",
       contextMenuPaste: "粘贴",
+    },
+    editorTab: {
+      undo: "撤销",
+      redo: "重做",
+      save: "保存",
+      encoding: "编码: {encoding}",
+      dirty: "已修改",
+      saved: "已保存",
+      lineColumn: "行 {line}, 列 {column}",
     },
     newTabButton: {
       connectTo: "连接到服务器",
@@ -930,6 +964,12 @@ export const locales = {
         empty: "暂无收藏目录",
         remove: "删除收藏路径",
         pathNotFound: "收藏路径不存在：{path}",
+      },
+      editor: {
+        serverUnavailable: "此文件对应的服务器不可用。",
+        nonTextFile: "该文件不是文本文件，无法在编辑器中打开。",
+        openFailed: "在编辑器中打开文件失败: {error}",
+        unknownError: "未知错误",
       },
       modals: {
         deleteConfirmTitle: "删除确认",

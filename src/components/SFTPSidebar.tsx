@@ -1281,7 +1281,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       return
     }
     if (!serverId) {
-      notify("Server is unavailable for this file.", "error")
+      notify(t.sftp.editor.serverUnavailable, "error")
       return
     }
     try {
@@ -1310,8 +1310,17 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       handleCloseContextMenu()
     } catch (error) {
       console.error("Open in editor failed", error)
-      const message = error instanceof Error ? error.message : String(error)
-      notify(message, "error")
+      const rawMessage = error instanceof Error ? error.message : String(error)
+      const normalizedMessage = rawMessage.replace(/^Error:\s*/i, "").trim()
+      if (
+        /binary/i.test(normalizedMessage) ||
+        /cannot be opened as text/i.test(normalizedMessage)
+      ) {
+        notify(t.sftp.editor.nonTextFile, "error")
+        return
+      }
+      const detail = normalizedMessage || t.sftp.editor.unknownError
+      notify(t.sftp.editor.openFailed.replace("{error}", detail), "error")
     }
   }
   const matchPattern = (filename: string, pattern: string) => {

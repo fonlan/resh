@@ -670,7 +670,7 @@ export const MainWindow: React.FC = () => {
         typeof content !== "string" ||
         !encoding
       ) {
-        showToast("Invalid editor payload.", "error")
+        showToast(t.mainWindow.editor.invalidPayload, "error")
         return
       }
       const explicitLabel = payload.label?.trim()
@@ -699,7 +699,7 @@ export const MainWindow: React.FC = () => {
       }))
       setActiveTabId(newTab.id)
     },
-    [showToast],
+    [showToast, t.mainWindow.editor.invalidPayload],
   )
 
   const handleEditorContentChange = useCallback(
@@ -748,7 +748,7 @@ export const MainWindow: React.FC = () => {
       }
       const currentDocument = editorDocuments[tabId]
       if (!currentDocument) {
-        showToast("Editor document not found.", "error")
+        showToast(t.mainWindow.editor.documentMissing, "error")
         return false
       }
       if (currentDocument.isSaving) {
@@ -800,7 +800,10 @@ export const MainWindow: React.FC = () => {
         return true
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        showToast(message, "error")
+        showToast(
+          t.mainWindow.editor.saveFailed.replace("{error}", message),
+          "error",
+        )
         setEditorDocuments((prev) => {
           const doc = prev[tabId]
           if (!doc) {
@@ -817,7 +820,14 @@ export const MainWindow: React.FC = () => {
         return false
       }
     },
-    [tabs, editorDocuments, showToast, t.saveStatus.saved],
+    [
+      tabs,
+      editorDocuments,
+      showToast,
+      t.saveStatus.saved,
+      t.mainWindow.editor.documentMissing,
+      t.mainWindow.editor.saveFailed,
+    ],
   )
   useEffect(() => {
     const handleOpenEditorTab = (event: Event) => {
@@ -840,7 +850,7 @@ export const MainWindow: React.FC = () => {
         ? editorDocuments[sourceTab.id]
         : null
       if (isEditorTab(sourceTab) && !sourceDocument) {
-        showToast("Editor document not found.", "error")
+        showToast(t.mainWindow.editor.documentMissing, "error")
         return
       }
 
@@ -881,7 +891,7 @@ export const MainWindow: React.FC = () => {
       }
       setActiveTabId(newTab.id)
     },
-    [tabs, editorDocuments, showToast],
+    [tabs, editorDocuments, showToast, t.mainWindow.editor.documentMissing],
   )
 
   const handleCloseOthers = useCallback(
@@ -1395,7 +1405,10 @@ export const MainWindow: React.FC = () => {
                   className="mr-2 animate-pulse"
                 />
               )}
-              <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
+              <span
+                className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                title={isEditorTab(tab) ? tab.remotePath : tab.label}
+              >
                 <EmojiText
                   text={
                     isEditorTab(tab) && tab.dirty ? `${tab.label} *` : tab.label
@@ -1615,6 +1628,8 @@ export const MainWindow: React.FC = () => {
                             remotePath={tab.remotePath}
                             languageHint={tab.language}
                             content={editorDocument.content}
+                            encoding={editorDocument.encoding}
+                            dirty={tab.dirty}
                             terminalFontFamily={
                               config?.general.terminal.fontFamily ||
                               "Consolas, monospace"

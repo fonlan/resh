@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react"
+import React, { useCallback, useEffect, useRef, useState } from "react"
 import MonacoEditor, { OnMount } from "@monaco-editor/react"
 import type * as Monaco from "monaco-editor"
 import { Save, Undo2, Redo2 } from "lucide-react"
@@ -10,6 +10,8 @@ interface EditorTabProps {
   remotePath: string
   languageHint: string
   content: string
+  encoding: string
+  dirty: boolean
   terminalFontFamily: string
   terminalFontSize: number
   appTheme: Theme
@@ -150,6 +152,8 @@ export const EditorTab: React.FC<EditorTabProps> = ({
   remotePath,
   languageHint,
   content,
+  encoding,
+  dirty,
   terminalFontFamily,
   terminalFontSize,
   appTheme,
@@ -160,6 +164,9 @@ export const EditorTab: React.FC<EditorTabProps> = ({
   const { t } = useTranslation()
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null)
   const monacoRef = useRef<typeof Monaco | null>(null)
+  const cursorDisposableRef = useRef<Monaco.IDisposable | null>(null)
+  const [cursorLine, setCursorLine] = useState(1)
+  const [cursorColumn, setCursorColumn] = useState(1)
 
   const applyModelLanguage = useCallback(() => {
     const editor = editorRef.current
@@ -278,8 +285,20 @@ export const EditorTab: React.FC<EditorTabProps> = ({
 
   const handleEditorMount: OnMount = useCallback(
     (editor, monaco) => {
+      cursorDisposableRef.current?.dispose()
       editorRef.current = editor
       monacoRef.current = monaco
+      const position = editor.getPosition()
+      if (position) {
+        setCursorLine(position.lineNumber)
+        setCursorColumn(position.column)
+      }
+      cursorDisposableRef.current = editor.onDidChangeCursorPosition(
+        (event) => {
+          setCursorLine(event.position.lineNumber)
+          setCursorColumn(event.position.column)
+        },
+      )
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
         void onSave()
       })
@@ -315,10 +334,20 @@ export const EditorTab: React.FC<EditorTabProps> = ({
     applyEditorTypography()
   }, [applyEditorTypography])
 
+  useEffect(() => {
+    return () => {
+      cursorDisposableRef.current?.dispose()
+      cursorDisposableRef.current = null
+    }
+  }, [])
+
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <div className="h-10 shrink-0 px-3 border-b border-[var(--glass-border)] bg-[var(--bg-secondary)] flex items-center justify-between gap-2">
-        <div className="min-w-0 text-[12px] text-[var(--text-secondary)] truncate">
+        <div
+          className="min-w-0 text-[12px] text-[var(--text-secondary)] truncate"
+          title={remotePath}
+        >
           {remotePath}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -328,7 +357,7 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             onClick={handleUndo}
             disabled={isSaving}
           >
-            <Undo2 size={14} /> Undo
+            <Undo2 size={14} /> {t.editorTab.undo}
           </button>
           <button
             type="button"
@@ -336,7 +365,7 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             onClick={handleRedo}
             disabled={isSaving}
           >
-            <Redo2 size={14} /> Redo
+            <Redo2 size={14} /> {t.editorTab.redo}
           </button>
           <button
             type="button"
@@ -344,7 +373,8 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             onClick={handleSave}
             disabled={isSaving}
           >
-            <Save size={14} /> {isSaving ? t.saveStatus.saving : t.common.save}
+            <Save size={14} />{" "}
+            {isSaving ? t.saveStatus.saving : t.editorTab.save}
           </button>
         </div>
       </div>
@@ -367,6 +397,21 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             fontSize: terminalFontSize,
           }}
         />
+      </div>
+      <div className="h-7 shrink-0 px-3 border-t border-[var(--glass-border)] bg-[var(--bg-secondary)] flex items-center justify-between gap-3 text-[11px] text-[var(--text-secondary)]">
+        <div className="truncate" title={encoding}>
+          {t.editorTab.encoding.replace("{encoding}", encoding)}
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <span className={dirty ? "text-[var(--danger)]" : ""}>
+            {dirty ? t.editorTab.dirty : t.editorTab.saved}
+          </span>
+          <span>
+            {t.editorTab.lineColumn
+              .replace("{line}", String(cursorLine))
+              .replace("{column}", String(cursorColumn))}
+          </span>
+        </div>
       </div>
     </div>
   )
