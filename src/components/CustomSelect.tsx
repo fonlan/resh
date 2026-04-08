@@ -20,6 +20,8 @@ interface CustomSelectProps {
   triggerClassName?: string
 }
 
+const MAX_DROPDOWN_HEIGHT = 200
+
 export const CustomSelect: React.FC<CustomSelectProps> = ({
   value,
   onChange,
@@ -42,7 +44,10 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   const updatePosition = useCallback(() => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect()
-      const dropdownHeight = Math.min(options.length * 36 + 8, 300)
+      const dropdownHeight = Math.min(
+        options.length * 36 + 8,
+        MAX_DROPDOWN_HEIGHT,
+      )
       const top =
         placement === "top" ? rect.top - dropdownHeight - 4 : rect.bottom + 4
       setDropdownPosition({
@@ -102,13 +107,14 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
 
   const dropdownContent = (
     <div
-      className="fixed z-[9999] bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-md)] shadow-[0_10px_25px_rgba(0,0,0,0.5)] max-h-[200px] overflow-y-auto"
+      className="fixed z-[9999] bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded-[var(--radius-md)] shadow-[0_10px_25px_rgba(0,0,0,0.5)] overflow-y-auto"
       style={
         dropdownPosition
           ? {
               top: dropdownPosition.top,
               left: dropdownPosition.left,
               width: dropdownPosition.width,
+              maxHeight: MAX_DROPDOWN_HEIGHT,
             }
           : undefined
       }
