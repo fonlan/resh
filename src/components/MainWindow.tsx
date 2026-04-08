@@ -278,11 +278,16 @@ export const MainWindow: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
 
   const activeServerId = activeTab?.serverId
-  const activeTabSessionId = activeTab
+  const activeTerminalSessionId =
+    activeTab && isTerminalTab(activeTab)
+      ? tabSessions[activeTab.id] || undefined
+      : undefined
+  const activeAICurrentTabId = activeTab
     ? isEditorTab(activeTab)
-      ? activeTab.sessionId
+      ? activeTab.id
       : tabSessions[activeTab.id] || undefined
     : undefined
+  const shouldRenderSFTPSidebar = !activeTab || isTerminalTab(activeTab)
 
   const handleTabSessionChange = (tabId: string, sessionId: string | null) => {
     const normalizedSessionId = sessionId || ""
@@ -1405,9 +1410,12 @@ export const MainWindow: React.FC = () => {
         <div ref={rightControlsRef} className="flex items-center shrink-0">
           <button
             type="button"
-            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen ? "bg-[var(--bg-tertiary)] text-[var(--accent-primary)]" : "bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"}`}
+            className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen && shouldRenderSFTPSidebar ? "bg-[var(--bg-tertiary)] text-[var(--accent-primary)]" : "bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"}`}
             onMouseDown={(e) => {
               e.stopPropagation()
+              if (!shouldRenderSFTPSidebar) {
+                return
+              }
               if (!isSFTPOpen) {
                 setHasLoadedSFTPSidebar(true)
                 setIsSFTPOpen(true)
@@ -1493,14 +1501,14 @@ export const MainWindow: React.FC = () => {
         style={{ position: "relative", display: "flex", flexDirection: "row" }}
       >
         <Suspense fallback={null}>
-          {hasLoadedSFTPSidebar && (
+          {hasLoadedSFTPSidebar && shouldRenderSFTPSidebar && (
             <SFTPSidebar
               isOpen={isSFTPOpen}
               onClose={() => setIsSFTPOpen(false)}
               isLocked={config?.general.sftpSidebarLocked || false}
               onToggleLock={handleToggleSFTPLock}
               serverId={activeServerId}
-              sessionId={activeTabSessionId}
+              sessionId={activeTerminalSessionId}
               onShowToast={showToast}
               zIndex={sftpZIndex}
             />
@@ -1620,7 +1628,7 @@ export const MainWindow: React.FC = () => {
               onToggleLock={handleToggleAILock}
               onShowToast={showToast}
               currentServerId={activeServerId}
-              currentTabId={activeTabSessionId}
+              currentTabId={activeAICurrentTabId}
               zIndex={aiZIndex}
             />
           )}
