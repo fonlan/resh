@@ -299,6 +299,15 @@ export const locales = {
       clearHistoryConfirm:
         "Are you sure you want to clear all history for this server?",
       selectServer: "Select a server and start a new chat to begin.",
+      editorContext: {
+        includeCurrentFile: "Include current editor file",
+        fileLabel: "File: {path}",
+        languageLabel: "Lang: {language}",
+        charCountLabel: "Chars: {count}",
+        readOnlyHint: "Sent as read-only context for analysis.",
+        tooLarge:
+          "Current editor content has {count} chars, exceeding limit {max}. Turn off this option or reduce file size.",
+      },
       globalAdditionalPrompt: "Global Additional Prompt",
       globalAdditionalPromptDesc:
         "This prompt will be appended to the system prompt for all AI requests. Syncs across devices.",
@@ -800,6 +809,15 @@ export const locales = {
       deleteSessionConfirm: "确定要删除此会话吗？",
       clearHistoryConfirm: "确定要清空此服务器的所有历史记录吗？",
       selectServer: "请选择一个服务器并开始新对话。",
+      editorContext: {
+        includeCurrentFile: "附带当前编辑文件",
+        fileLabel: "文件: {path}",
+        languageLabel: "语言: {language}",
+        charCountLabel: "字符: {count}",
+        readOnlyHint: "将作为只读上下文发送，仅用于分析。",
+        tooLarge:
+          "当前编辑内容为 {count} 个字符，超过上限 {max}。请关闭此选项或减少文件内容后再发送。",
+      },
       globalAdditionalPrompt: "全局附加提示词",
       globalAdditionalPromptDesc:
         "此提示词将附加到所有 AI 请求的系统提示词中。支持跨设备同步。",

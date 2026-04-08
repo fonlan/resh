@@ -9,7 +9,7 @@ import React, {
 import { Settings, X, Code, Circle, MessageSquare, Folder } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { Config } from "../types"
+import { Config, EditorAIContext } from "../types"
 // SettingsModal is now lazy loaded
 const SettingsModal = React.lazy(() =>
   import("./settings/SettingsModal").then((module) => ({
@@ -275,6 +275,26 @@ export const MainWindow: React.FC = () => {
     [servers, tabs],
   )
 
+  const editorContextByTabId = useMemo<Record<string, EditorAIContext>>(() => {
+    const next: Record<string, EditorAIContext> = {}
+    tabs.forEach((tab) => {
+      if (!isEditorTab(tab)) {
+        return
+      }
+      const doc = editorDocuments[tab.id]
+      if (!doc) {
+        return
+      }
+      next[tab.id] = {
+        tabId: tab.id,
+        remotePath: tab.remotePath,
+        language: tab.language,
+        content: doc.content,
+      }
+    })
+    return next
+  }, [tabs, editorDocuments])
+
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
 
   const activeServerId = activeTab?.serverId
@@ -282,6 +302,11 @@ export const MainWindow: React.FC = () => {
     activeTab && isTerminalTab(activeTab)
       ? tabSessions[activeTab.id] || undefined
       : undefined
+  const activeAISshSessionId = activeTab
+    ? isEditorTab(activeTab)
+      ? activeTab.sessionId
+      : tabSessions[activeTab.id] || undefined
+    : undefined
   const activeAICurrentTabId = activeTab
     ? isEditorTab(activeTab)
       ? activeTab.id
@@ -1629,6 +1654,8 @@ export const MainWindow: React.FC = () => {
               onShowToast={showToast}
               currentServerId={activeServerId}
               currentTabId={activeAICurrentTabId}
+              currentSshSessionId={activeAISshSessionId}
+              editorContextByTabId={editorContextByTabId}
               zIndex={aiZIndex}
             />
           )}

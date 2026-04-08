@@ -38,6 +38,7 @@ import {
 } from "lucide-react"
 import { listen } from "@tauri-apps/api/event"
 import { ToolCall, ChatMessage } from "../types/ai"
+import { EditorAIContext } from "../types"
 import { ConfirmationModal } from "./ConfirmationModal"
 import { CustomSelect } from "./CustomSelect"
 import { EmojiText } from "./EmojiText"
@@ -62,6 +63,8 @@ interface AISidebarProps {
   ) => void
   currentServerId?: string
   currentTabId?: string
+  currentSshSessionId?: string
+  editorContextByTabId?: Record<string, EditorAIContext>
   zIndex?: number
 }
 
@@ -106,10 +109,29 @@ const MARKDOWN_REMARK_PLUGINS = [remarkGfm]
 const VIRTUAL_MESSAGE_GAP_PX = 16
 const DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS = 30
 const COMMAND_OUTPUT_PREVIEW_MAX_LINES = 5
+const MAX_EDITOR_CONTEXT_CHARS = 20000
 
 const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
   contentVisibility: "auto",
   containIntrinsicSize: "180px",
+}
+
+const buildMessageWithEditorContext = (
+  userContent: string,
+  editorContext: EditorAIContext,
+): string => {
+  const normalizedLanguage = editorContext.language.trim() || "plaintext"
+  return `${userContent}
+
+[Current editor file context - read only]
+Path: ${editorContext.remotePath}
+Language: ${normalizedLanguage}
+Content:
+<<<RESH_EDITOR_FILE_START
+${editorContext.content}
+RESH_EDITOR_FILE_END>>>
+
+Please use this file context for analysis first. Do not assume write-back changes unless explicitly requested.`
 }
 
 const parseCommandExecutionToolArgs = (
@@ -964,6 +986,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   onShowToast,
   currentServerId,
   currentTabId,
+  currentSshSessionId,
+  editorContextByTabId,
   zIndex,
 }) => {
   const { t } = useTranslation()
@@ -1011,6 +1035,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [selectedModelId, setSelectedModelId] = useState<string>("")
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null)
   const [isClearingHistory, setIsClearingHistory] = useState(false)
+  const [includeEditorContext, setIncludeEditorContext] = useState(false)
 
   const [optimisticMessagesBySession, addOptimisticMessage] = useOptimistic(
     messages,
@@ -1030,8 +1055,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const pendingToolCalls = activeSessionId
     ? pendingToolCallsMap[activeSessionId] || null
     : null
+  const activeEditorContext = useMemo(() => {
+    if (!currentTabId || !editorContextByTabId) {
+      return null
+    }
+    return editorContextByTabId[currentTabId] || null
+  }, [currentTabId, editorContextByTabId])
+  const activeEditorContextCharCount = activeEditorContext?.content.length || 0
+  const isEditorContextTooLarge =
+    activeEditorContextCharCount > MAX_EDITOR_CONTEXT_CHARS
+  const shouldBlockEditorContextSend =
+    includeEditorContext && !!activeEditorContext && isEditorContextTooLarge
   const currentSession = sessions.find((s) => s.id === activeSessionId)
-  const boundSshSessionId = currentSession?.sshSessionId || currentTabId
+  const boundSshSessionId =
+    currentSession?.sshSessionId || currentSshSessionId || currentTabId
 
   const sidebarRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -1096,6 +1133,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     selectedModelId,
   ])
 
+  useEffect(() => {
+    if (!activeEditorContext && includeEditorContext) {
+      setIncludeEditorContext(false)
+    }
+  }, [activeEditorContext, includeEditorContext])
   // Load sessions when sidebar opens or server changes
   useEffect(() => {
     if (currentServerId && isOpen) {
@@ -1753,6 +1795,24 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const handleSendMessage = useCallback(async () => {
     if (!inputValue.trim() || isLoading || !!pendingToolCalls) return
 
+    if (shouldBlockEditorContextSend) {
+      const template =
+        t.ai.editorContext.tooLarge ||
+        "Current file length {count} exceeds the limit {max}."
+      showAiError(
+        template
+          .replace("{count}", String(activeEditorContextCharCount))
+          .replace("{max}", String(MAX_EDITOR_CONTEXT_CHARS)),
+      )
+      return
+    }
+    const content = inputValue
+    const requestContent =
+      includeEditorContext && activeEditorContext
+        ? buildMessageWithEditorContext(content, activeEditorContext)
+        : content
+    const sessionBindingId = currentSshSessionId || currentTabId
+    const sessionScopeId = currentTabId || currentSshSessionId
     let sessionId = activeSessionId
 
     if (!sessionId) {
@@ -1761,7 +1821,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         sessionId = await createSession(
           currentServerId,
           selectedModelId,
-          currentTabId,
+          sessionBindingId,
+          sessionScopeId,
         )
       } catch (err) {
         showAiError(err)
@@ -1773,8 +1834,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     // Clear the stopped flag when sending a new message
     clearSessionStopped(sessionId)
-
-    const content = inputValue
     setInputValue("")
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
@@ -1801,7 +1860,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
       await aiService.sendMessage(
         sessionId,
-        content,
+        requestContent,
         selectedModelId,
         channelId,
         mode,
@@ -1820,6 +1879,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     activeSessionId,
     currentServerId,
     selectedModelId,
+    currentSshSessionId,
     createSession,
     addMessage,
     setGenerating,
@@ -1829,8 +1889,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     boundSshSessionId,
     isLoading,
     pendingToolCalls,
+    includeEditorContext,
+    activeEditorContext,
+    activeEditorContextCharCount,
+    shouldBlockEditorContextSend,
     clearSessionStopped,
     loadSessions,
+    t.ai.editorContext.tooLarge,
     showAiError,
   ])
 
@@ -2284,6 +2349,51 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 />
               </div>
             </div>
+            {activeEditorContext && (
+              <div
+                className={`flex items-start justify-between gap-2 rounded-[var(--radius-sm)] border px-2 py-1.5 text-[11px] ${includeEditorContext ? "border-[var(--accent-primary)] bg-[var(--accent-primary)]/10" : "border-[var(--glass-border)] bg-[var(--bg-elevated)]"}`}
+              >
+                <label className="inline-flex items-center gap-1.5 text-[var(--text-primary)] cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="m-0"
+                    checked={includeEditorContext}
+                    onChange={(e) => setIncludeEditorContext(e.target.checked)}
+                    disabled={isLoading || !!pendingToolCalls}
+                  />
+                  <span>{t.ai.editorContext.includeCurrentFile}</span>
+                </label>
+                <div className="min-w-0 text-right leading-5">
+                  <div
+                    className="truncate text-[var(--text-secondary)]"
+                    title={activeEditorContext.remotePath}
+                  >
+                    {t.ai.editorContext.fileLabel.replace(
+                      "{path}",
+                      activeEditorContext.remotePath,
+                    )}
+                  </div>
+                  <div
+                    className={
+                      isEditorContextTooLarge
+                        ? "text-[var(--danger)]"
+                        : "text-[var(--text-secondary)]"
+                    }
+                  >
+                    {`${t.ai.editorContext.languageLabel.replace(
+                      "{language}",
+                      activeEditorContext.language || "plaintext",
+                    )} · ${t.ai.editorContext.charCountLabel.replace(
+                      "{count}",
+                      String(activeEditorContextCharCount),
+                    )} / ${MAX_EDITOR_CONTEXT_CHARS}`}
+                  </div>
+                  <div className="text-[var(--text-muted)]">
+                    {t.ai.editorContext.readOnlyHint}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2 items-end bg-[var(--bg-elevated)] border border-[var(--border-color)] rounded-[var(--radius-sm)] p-2 transition-colors duration-200 focus-within:border-[var(--accent-primary)]">
               <textarea
                 ref={textareaRef}
@@ -2312,7 +2422,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                   type="button"
                   className="bg-[var(--accent-primary)] text-white border-0 rounded w-7 h-7 flex items-center justify-center cursor-pointer transition-colors duration-200 flex-shrink-0 hover:bg-[var(--accent-hover)] disabled:bg-[var(--bg-tertiary)] disabled:text-[var(--text-muted)] disabled:cursor-not-allowed"
                   onClick={handleSendMessage}
-                  disabled={!inputValue.trim() || !selectedModelId}
+                  disabled={
+                    !inputValue.trim() ||
+                    !selectedModelId ||
+                    shouldBlockEditorContextSend
+                  }
                 >
                   <Send size={14} />
                 </button>

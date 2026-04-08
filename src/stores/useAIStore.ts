@@ -18,6 +18,7 @@ interface AIState {
     serverId: string,
     modelId?: string,
     sshSessionId?: string,
+    sessionScopeId?: string,
   ) => Promise<string>
   selectSession: (
     sessionId: string | null,
@@ -87,10 +88,10 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  createSession: async (serverId, modelId, sshSessionId) => {
+  createSession: async (serverId, modelId, sshSessionId, sessionScopeId) => {
     const id = await aiService.createSession(serverId, modelId, sshSessionId)
     await get().loadSessions(serverId)
-    await get().selectSession(id, serverId, sshSessionId)
+    await get().selectSession(id, serverId, sessionScopeId || sshSessionId)
     return id
   },
 

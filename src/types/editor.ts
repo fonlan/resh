@@ -11,3 +11,10 @@ export interface EditorDocument extends EditorFileRef {
   encoding: string
   isDirty: boolean
 }
+
+export interface EditorAIContext {
+  tabId: string
+  remotePath: string
+  language: string
+  content: string
+}
