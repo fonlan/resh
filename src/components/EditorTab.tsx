@@ -3,12 +3,16 @@ import MonacoEditor, { OnMount } from "@monaco-editor/react"
 import type * as Monaco from "monaco-editor"
 import { Save, Undo2, Redo2 } from "lucide-react"
 import { useTranslation } from "../i18n"
+import type { Theme } from "../types"
 
 interface EditorTabProps {
   tabId: string
   remotePath: string
   languageHint: string
   content: string
+  terminalFontFamily: string
+  terminalFontSize: number
+  appTheme: Theme
   isSaving: boolean
   onChange: (value: string) => void
   onSave: () => Promise<boolean>
@@ -121,11 +125,34 @@ const resolveLanguageId = (
   return "plaintext"
 }
 
+const MONACO_LIGHT_THEME = "resh-monaco-light"
+const MONACO_DARK_THEME = "resh-monaco-dark"
+
+const readCssVar = (
+  styles: CSSStyleDeclaration,
+  name: string,
+  fallback: string,
+): string => {
+  const value = styles.getPropertyValue(name).trim()
+  return value || fallback
+}
+
+const withAlpha = (color: string, alphaHex: string): string => {
+  const normalized = color.trim()
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return `${normalized}${alphaHex}`
+  }
+  return color
+}
+
 export const EditorTab: React.FC<EditorTabProps> = ({
   tabId,
   remotePath,
   languageHint,
   content,
+  terminalFontFamily,
+  terminalFontSize,
+  appTheme,
   isSaving,
   onChange,
   onSave,
@@ -150,6 +177,93 @@ export const EditorTab: React.FC<EditorTabProps> = ({
     }
   }, [languageHint, remotePath])
 
+  const applyMonacoTheme = useCallback(() => {
+    const monaco = monacoRef.current
+    if (!monaco) {
+      return
+    }
+    const root = document.documentElement
+    const styles = getComputedStyle(root)
+    const isLightTheme =
+      appTheme === "light" ||
+      (appTheme === "system" && root.classList.contains("theme-light"))
+    const bgPrimary = readCssVar(
+      styles,
+      "--bg-primary",
+      isLightTheme ? "#f8fafc" : "#020617",
+    )
+    const bgSecondary = readCssVar(
+      styles,
+      "--bg-secondary",
+      isLightTheme ? "#ffffff" : "#0f172a",
+    )
+    const textPrimary = readCssVar(
+      styles,
+      "--text-primary",
+      isLightTheme ? "#0f172a" : "#f8fafc",
+    )
+    const textSecondary = readCssVar(
+      styles,
+      "--text-secondary",
+      isLightTheme ? "#475569" : "#94a3b8",
+    )
+    const textMuted = readCssVar(
+      styles,
+      "--text-muted",
+      isLightTheme ? "#94a3b8" : "#64748b",
+    )
+    const accentPrimary = readCssVar(styles, "--accent-primary", "#3b82f6")
+    const selectionColor = withAlpha(accentPrimary, isLightTheme ? "33" : "55")
+    const inactiveSelectionColor = withAlpha(
+      accentPrimary,
+      isLightTheme ? "1f" : "3d",
+    )
+    monaco.editor.defineTheme(MONACO_LIGHT_THEME, {
+      base: "vs",
+      inherit: true,
+      rules: [],
+      colors: {
+        "editor.background": bgPrimary,
+        "editor.foreground": textPrimary,
+        "editor.lineHighlightBackground": bgSecondary,
+        "editor.selectionBackground": selectionColor,
+        "editor.inactiveSelectionBackground": inactiveSelectionColor,
+        "editorCursor.foreground": accentPrimary,
+        "editorLineNumber.foreground": textMuted,
+        "editorLineNumber.activeForeground": textSecondary,
+      },
+    })
+    monaco.editor.defineTheme(MONACO_DARK_THEME, {
+      base: "vs-dark",
+      inherit: true,
+      rules: [],
+      colors: {
+        "editor.background": bgPrimary,
+        "editor.foreground": textPrimary,
+        "editor.lineHighlightBackground": bgSecondary,
+        "editor.selectionBackground": selectionColor,
+        "editor.inactiveSelectionBackground": inactiveSelectionColor,
+        "editorCursor.foreground": accentPrimary,
+        "editorLineNumber.foreground": textMuted,
+        "editorLineNumber.activeForeground": textSecondary,
+      },
+    })
+    monaco.editor.setTheme(
+      isLightTheme ? MONACO_LIGHT_THEME : MONACO_DARK_THEME,
+    )
+  }, [appTheme])
+
+  const applyEditorTypography = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor) {
+      return
+    }
+    editor.updateOptions({
+      fontFamily: terminalFontFamily,
+      fontSize: terminalFontSize,
+    })
+  }, [terminalFontFamily, terminalFontSize])
+
   const handleSave = useCallback(() => {
     void onSave()
   }, [onSave])
@@ -170,14 +284,36 @@ export const EditorTab: React.FC<EditorTabProps> = ({
         void onSave()
       })
       applyModelLanguage()
+      applyMonacoTheme()
+      applyEditorTypography()
       editor.focus()
     },
-    [applyModelLanguage, onSave],
+    [applyModelLanguage, applyMonacoTheme, applyEditorTypography, onSave],
   )
 
   useEffect(() => {
     applyModelLanguage()
   }, [applyModelLanguage])
+
+  useEffect(() => {
+    applyMonacoTheme()
+  }, [applyMonacoTheme])
+
+  useEffect(() => {
+    const root = document.documentElement
+    const observer = new MutationObserver(() => {
+      applyMonacoTheme()
+    })
+    observer.observe(root, {
+      attributes: true,
+      attributeFilter: ["class"],
+    })
+    return () => observer.disconnect()
+  }, [applyMonacoTheme])
+
+  useEffect(() => {
+    applyEditorTypography()
+  }, [applyEditorTypography])
 
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-[var(--bg-primary)] text-[var(--text-primary)]">
@@ -227,6 +363,8 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             wordWrap: "on",
             tabSize: 2,
             insertSpaces: true,
+            fontFamily: terminalFontFamily,
+            fontSize: terminalFontSize,
           }}
         />
       </div>

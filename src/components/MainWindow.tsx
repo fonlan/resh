@@ -1582,6 +1582,14 @@ export const MainWindow: React.FC = () => {
                             remotePath={tab.remotePath}
                             languageHint={tab.language}
                             content={editorDocument.content}
+                            terminalFontFamily={
+                              config?.general.terminal.fontFamily ||
+                              "Consolas, monospace"
+                            }
+                            terminalFontSize={
+                              config?.general.terminal.fontSize || 13
+                            }
+                            appTheme={config?.general.theme || "dark"}
                             isSaving={editorDocument.isSaving}
                             onChange={(value) =>
                               handleEditorContentChange(tab.id, value)
