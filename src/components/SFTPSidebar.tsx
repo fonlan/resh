@@ -64,6 +64,11 @@ interface SFTPSidebarProps {
   onToggleLock: () => void
   serverId?: string
   sessionId?: string
+  onShowToast?: (
+    message: string,
+    type?: "success" | "error" | "info" | "warning",
+    duration?: number,
+  ) => void
   zIndex?: number
 }
 
@@ -99,6 +104,14 @@ interface DirectoryListingPage {
   next_offset: number | null
 }
 
+interface SftpOpenTextFileResult {
+  sessionId: string
+  remotePath: string
+  localPath: string
+  content: string
+  encoding: string
+  languageHint?: string
+}
 const SFTP_PATH_MIME_TYPE = "application/x-resh-sftp-path"
 const SFTP_ENTRY_MIME_TYPE = "application/x-resh-sftp-entry"
 const COPY_DATA_UNSUPPORTED_ERROR = "SFTP_COPY_DATA_UNSUPPORTED"
@@ -435,10 +448,21 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   onToggleLock,
   serverId,
   sessionId,
+  onShowToast,
   zIndex,
 }) => {
   const { t } = useTranslation()
   const { config, saveConfig } = useConfig()
+  const notify = useCallback(
+    (
+      message: string,
+      type: "success" | "error" | "info" | "warning" = "info",
+      duration?: number,
+    ) => {
+      onShowToast?.(message, type, duration)
+    },
+    [onShowToast],
+  )
   const [width, setWidth] = useState(300)
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
@@ -1246,6 +1270,48 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     handleCloseContextMenu()
   }
 
+  const handleOpenInEditor = async () => {
+    if (!contextMenu || !contextMenu.entry) return
+    const entry = contextMenu.entry
+    if (isDirectory(entry)) {
+      return
+    }
+    if (!sessionId) {
+      notify(t.sftp.notConnected, "error")
+      return
+    }
+    if (!serverId) {
+      notify("Server is unavailable for this file.", "error")
+      return
+    }
+    try {
+      const opened = await invoke<SftpOpenTextFileResult>(
+        "sftp_open_text_file",
+        {
+          sessionId,
+          remotePath: entry.path,
+        },
+      )
+      window.dispatchEvent(
+        new CustomEvent("open-editor-tab", {
+          detail: {
+            serverId,
+            sessionId: opened.sessionId || sessionId,
+            remotePath: opened.remotePath || entry.path,
+            localPath: opened.localPath,
+            language: opened.languageHint || "plaintext",
+            dirty: false,
+            label: entry.name,
+          },
+        }),
+      )
+      handleCloseContextMenu()
+    } catch (error) {
+      console.error("Open in editor failed", error)
+      const message = error instanceof Error ? error.message : String(error)
+      notify(message, "error")
+    }
+  }
   const matchPattern = (filename: string, pattern: string) => {
     const regex = new RegExp(
       "^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$",
@@ -2514,6 +2580,15 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             visibility: contextMenuPosition ? "visible" : "hidden",
           }}
         >
+          {contextMenu.entry && !isDirectory(contextMenu.entry) && (
+            <button
+              type="button"
+              onClick={handleOpenInEditor}
+              className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
+            >
+              <File size={14} /> {t.sftp.contextMenu.open}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleDownload}

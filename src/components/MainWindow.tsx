@@ -1178,6 +1178,7 @@ export const MainWindow: React.FC = () => {
               onToggleLock={handleToggleSFTPLock}
               serverId={activeServerId}
               sessionId={activeTabSessionId}
+              onShowToast={showToast}
               zIndex={sftpZIndex}
             />
           )}

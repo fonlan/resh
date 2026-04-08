@@ -370,6 +370,7 @@ export const locales = {
         dateModified: "Date Modified",
       },
       contextMenu: {
+        open: "Open",
         download: "Download",
         upload: "Upload",
         newFile: "New File",
@@ -864,6 +865,7 @@ export const locales = {
         dateModified: "修改日期",
       },
       contextMenu: {
+        open: "打开",
         download: "下载",
         upload: "上传",
         newFile: "新建文件",
