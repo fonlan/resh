@@ -275,6 +275,15 @@ export const MainWindow: React.FC = () => {
     [servers, tabs],
   )
 
+  const getEditorTabDisplayLabel = (tab: EditorTabState): string => {
+    const serverName =
+      serverById.get(tab.serverId)?.name ||
+      temporaryServerById.get(tab.serverId)?.name
+    if (!serverName) {
+      return tab.label
+    }
+    return `${tab.label}@${serverName}`
+  }
   const editorContextByTabId = useMemo<Record<string, EditorAIContext>>(() => {
     const next: Record<string, EditorAIContext> = {}
     tabs.forEach((tab) => {
@@ -1374,63 +1383,66 @@ export const MainWindow: React.FC = () => {
           }`}
           role="tablist"
         >
-          {tabs.map((tab, index) => (
-            <div
-              key={tab.id}
-              draggable
-              onDragStart={() => handleTabDragStart(index)}
-              onDragOver={(e) => handleTabDragOver(e, index)}
-              onDrop={(e) => handleTabDrop(e, index)}
-              onDragEnd={handleTabDragEnd}
-              onKeyDown={(e) => handleTabKeyDown(e, index)}
-              role="tab"
-              tabIndex={activeTabId === tab.id ? 0 : -1}
-              aria-selected={activeTabId === tab.id}
-              aria-label={t.mainWindow.tabAriaLabel
-                .replace("{index}", (index + 1).toString())
-                .replace("{total}", tabs.length.toString())}
-              className={`flex items-center gap-2 px-4 h-10 ${resolvedTabWidthMode === "adaptive" ? "w-auto min-w-[120px] max-w-[320px]" : "w-auto"} bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ""} ${
-                draggedTabIndex === index ? "opacity-40 cursor-grabbing" : ""
-              } ${dropTargetIndex === index ? "border-l-2 border-l-[var(--accent-primary)]" : ""}`}
-              style={
-                resolvedTabWidthMode === "fixed"
-                  ? { width: `${tabFixedWidth}px` }
-                  : undefined
-              }
-              onClick={() => handleTabSelect(tab.id)}
-              onContextMenu={(e) => handleContextMenu(e, tab.id)}
-            >
-              {isTerminalTab(tab) && recordingTabs.has(tab.id) && (
-                <Circle
-                  size={8}
-                  fill="#ef4444"
-                  stroke="#ef4444"
-                  className="mr-2 animate-pulse"
-                />
-              )}
-              <span
-                className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
-                title={isEditorTab(tab) ? tab.remotePath : tab.label}
+          {tabs.map((tab, index) => {
+            const visibleLabel = isEditorTab(tab)
+              ? getEditorTabDisplayLabel(tab)
+              : tab.label
+            const renderedLabel =
+              isEditorTab(tab) && tab.dirty ? `${visibleLabel} *` : visibleLabel
+            return (
+              <div
+                key={tab.id}
+                draggable
+                onDragStart={() => handleTabDragStart(index)}
+                onDragOver={(e) => handleTabDragOver(e, index)}
+                onDrop={(e) => handleTabDrop(e, index)}
+                onDragEnd={handleTabDragEnd}
+                onKeyDown={(e) => handleTabKeyDown(e, index)}
+                role="tab"
+                tabIndex={activeTabId === tab.id ? 0 : -1}
+                aria-selected={activeTabId === tab.id}
+                aria-label={t.mainWindow.tabAriaLabel
+                  .replace("{index}", (index + 1).toString())
+                  .replace("{total}", tabs.length.toString())}
+                className={`flex items-center gap-2 px-4 h-10 ${resolvedTabWidthMode === "adaptive" ? "w-auto min-w-[120px] max-w-[320px]" : "w-auto"} bg-transparent border-0 border-r border-r-[var(--glass-border)] rounded-none text-[var(--text-secondary)] cursor-pointer whitespace-nowrap transition-all relative overflow-hidden text-[13px] font-medium leading-snug shrink-0 hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] ${activeTabId === tab.id ? '!bg-[var(--bg-primary)] !border-t-[3px] !border-t-[var(--accent-primary)] !text-[var(--text-primary)] after:content-[""] after:absolute after:-bottom-px after:left-0 after:right-0 after:h-px after:bg-[var(--bg-primary)] after:z-10' : ""} ${
+                  draggedTabIndex === index ? "opacity-40 cursor-grabbing" : ""
+                } ${dropTargetIndex === index ? "border-l-2 border-l-[var(--accent-primary)]" : ""}`}
+                style={
+                  resolvedTabWidthMode === "fixed"
+                    ? { width: `${tabFixedWidth}px` }
+                    : undefined
+                }
+                onClick={() => handleTabSelect(tab.id)}
+                onContextMenu={(e) => handleContextMenu(e, tab.id)}
               >
-                <EmojiText
-                  text={
-                    isEditorTab(tab) && tab.dirty ? `${tab.label} *` : tab.label
-                  }
-                />
-              </span>
-              <button
-                type="button"
-                className="flex items-center justify-center w-[18px] h-[18px] bg-transparent border-none text-[var(--text-muted)] text-[14px] cursor-pointer rounded-[4px] transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleCloseTab(tab.id)
-                }}
-                aria-label={t.mainWindow.closeTab}
-              >
-                <X size={14} />
-              </button>
-            </div>
-          ))}
+                {isTerminalTab(tab) && recordingTabs.has(tab.id) && (
+                  <Circle
+                    size={8}
+                    fill="#ef4444"
+                    stroke="#ef4444"
+                    className="mr-2 animate-pulse"
+                  />
+                )}
+                <span
+                  className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap"
+                  title={isEditorTab(tab) ? tab.remotePath : visibleLabel}
+                >
+                  <EmojiText text={renderedLabel} />
+                </span>
+                <button
+                  type="button"
+                  className="flex items-center justify-center w-[18px] h-[18px] bg-transparent border-none text-[var(--text-muted)] text-[14px] cursor-pointer rounded-[4px] transition-all hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleCloseTab(tab.id)
+                  }}
+                  aria-label={t.mainWindow.closeTab}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )
+          })}
           <div ref={newTabButtonRef} className="shrink-0" role="presentation">
             <NewTabButton
               servers={config?.servers || []}

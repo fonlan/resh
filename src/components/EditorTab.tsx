@@ -364,39 +364,44 @@ export const EditorTab: React.FC<EditorTabProps> = ({
 
   return (
     <div className="w-full h-full flex flex-col min-h-0 bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <div className="h-10 shrink-0 px-3 border-b border-[var(--glass-border)] bg-[var(--bg-secondary)] flex items-center justify-between gap-2">
-        <div
-          className="min-w-0 text-[12px] text-[var(--text-secondary)] truncate"
-          title={remotePath}
-        >
-          {remotePath}
-        </div>
+      <div className="h-10 shrink-0 px-3 border-b border-[var(--glass-border)] bg-[var(--bg-secondary)] flex items-center gap-2">
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            className="h-7 px-2 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-primary)] text-[12px] flex items-center gap-1 hover:bg-[var(--bg-tertiary)] disabled:opacity-60 disabled:cursor-not-allowed"
-            onClick={handleUndo}
-            disabled={isSaving}
-          >
-            <Undo2 size={14} /> {t.editorTab.undo}
-          </button>
-          <button
-            type="button"
-            className="h-7 px-2 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-primary)] text-[12px] flex items-center gap-1 hover:bg-[var(--bg-tertiary)] disabled:opacity-60 disabled:cursor-not-allowed"
-            onClick={handleRedo}
-            disabled={isSaving}
-          >
-            <Redo2 size={14} /> {t.editorTab.redo}
-          </button>
-          <button
-            type="button"
-            className="h-7 px-2 rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)]/10 text-[var(--text-primary)] text-[12px] flex items-center gap-1 hover:bg-[var(--accent-primary)]/20 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="h-7 w-7 rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)]/10 text-[var(--text-primary)] flex items-center justify-center hover:bg-[var(--accent-primary)]/20 disabled:opacity-60 disabled:cursor-not-allowed"
             onClick={handleSave}
             disabled={isSaving}
+            title={isSaving ? t.saveStatus.saving : t.editorTab.save}
+            aria-label={isSaving ? t.saveStatus.saving : t.editorTab.save}
           >
-            <Save size={14} />{" "}
-            {isSaving ? t.saveStatus.saving : t.editorTab.save}
+            <Save size={14} />
           </button>
+          <button
+            type="button"
+            className="h-7 w-7 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-primary)] flex items-center justify-center hover:bg-[var(--bg-tertiary)] disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={handleUndo}
+            disabled={isSaving}
+            title={t.editorTab.undo}
+            aria-label={t.editorTab.undo}
+          >
+            <Undo2 size={14} />
+          </button>
+          <button
+            type="button"
+            className="h-7 w-7 rounded border border-[var(--glass-border)] bg-transparent text-[var(--text-primary)] flex items-center justify-center hover:bg-[var(--bg-tertiary)] disabled:opacity-60 disabled:cursor-not-allowed"
+            onClick={handleRedo}
+            disabled={isSaving}
+            title={t.editorTab.redo}
+            aria-label={t.editorTab.redo}
+          >
+            <Redo2 size={14} />
+          </button>
+        </div>
+        <div
+          className="min-w-0 flex-1 text-[12px] text-[var(--text-secondary)] truncate text-right"
+          title={remotePath}
+        >
+          {remotePath}
         </div>
       </div>
       <div className="flex-1 min-h-0">
