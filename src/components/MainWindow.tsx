@@ -747,6 +747,30 @@ export const MainWindow: React.FC = () => {
     [],
   )
 
+  const handleEditorLanguageChange = useCallback(
+    (tabId: string, nextLanguage: string) => {
+      const normalizedLanguage = nextLanguage.trim().toLowerCase()
+      if (!normalizedLanguage) {
+        return
+      }
+      setTabs((prev) =>
+        prev.map((tab) => {
+          if (
+            !isEditorTab(tab) ||
+            tab.id !== tabId ||
+            tab.language === normalizedLanguage
+          ) {
+            return tab
+          }
+          return {
+            ...tab,
+            language: normalizedLanguage,
+          }
+        }),
+      )
+    },
+    [],
+  )
   const handleSaveEditorTab = useCallback(
     async (tabId: string): Promise<boolean> => {
       const targetTab = tabs.find((tab): tab is EditorTabState => {
@@ -1658,6 +1682,9 @@ export const MainWindow: React.FC = () => {
                               handleEditorContentChange(tab.id, value)
                             }
                             onSave={() => handleSaveEditorTab(tab.id)}
+                            onLanguageChange={(languageId) =>
+                              handleEditorLanguageChange(tab.id, languageId)
+                            }
                           />
                         ) : (
                           <div className="w-full h-full bg-[var(--bg-primary)] text-[var(--text-primary)] p-6">
