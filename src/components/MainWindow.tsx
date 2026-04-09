@@ -307,10 +307,11 @@ export const MainWindow: React.FC = () => {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
 
   const activeServerId = activeTab?.serverId
-  const activeTerminalSessionId =
-    activeTab && isTerminalTab(activeTab)
-      ? tabSessions[activeTab.id] || undefined
-      : undefined
+  const activeSFTPSessionId = activeTab
+    ? isEditorTab(activeTab)
+      ? activeTab.sessionId
+      : tabSessions[activeTab.id] || undefined
+    : undefined
   const activeAISshSessionId = activeTab
     ? isEditorTab(activeTab)
       ? activeTab.sessionId
@@ -1585,7 +1586,7 @@ export const MainWindow: React.FC = () => {
               isLocked={config?.general.sftpSidebarLocked || false}
               onToggleLock={handleToggleSFTPLock}
               serverId={activeServerId}
-              sessionId={activeTerminalSessionId}
+              sessionId={activeSFTPSessionId}
               onShowToast={showToast}
               zIndex={sftpZIndex}
             />
