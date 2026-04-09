@@ -1578,9 +1578,9 @@ export const MainWindow: React.FC = () => {
         style={{ position: "relative", display: "flex", flexDirection: "row" }}
       >
         <Suspense fallback={null}>
-          {hasLoadedSFTPSidebar && shouldRenderSFTPSidebar && (
+          {hasLoadedSFTPSidebar && (
             <SFTPSidebar
-              isOpen={isSFTPOpen}
+              isOpen={isSFTPOpen && shouldRenderSFTPSidebar}
               onClose={() => setIsSFTPOpen(false)}
               isLocked={config?.general.sftpSidebarLocked || false}
               onToggleLock={handleToggleSFTPLock}
