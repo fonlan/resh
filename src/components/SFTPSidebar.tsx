@@ -250,6 +250,7 @@ const FileTreeItem: React.FC<{
   entry: FileEntry
   depth: number
   onToggle: (entry: FileEntry) => void
+  onOpen: (entry: FileEntry) => void
   onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void
   onDragStart: (e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => void
   clipboardSourcePath?: string
@@ -258,6 +259,7 @@ const FileTreeItem: React.FC<{
   entry,
   depth,
   onToggle,
+  onOpen,
   onContextMenu,
   onDragStart,
   clipboardSourcePath,
@@ -318,6 +320,7 @@ const FileTreeItem: React.FC<{
         data-sftp-path={entry.path}
         className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent min-w-full w-max text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? "opacity-50" : ""}`}
         onClick={() => onToggle(entry)}
+        onDoubleClick={() => onOpen(entry)}
         onContextMenu={(e) => onContextMenu(e, entry)}
         onDragStart={(e) => onDragStart(e, entry)}
         onMouseEnter={updateTooltipVisibility}
@@ -391,6 +394,7 @@ const FileTreeItem: React.FC<{
               entry={child}
               depth={depth + 1}
               onToggle={onToggle}
+              onOpen={onOpen}
               onContextMenu={onContextMenu}
               onDragStart={onDragStart}
               clipboardSourcePath={clipboardSourcePath}
@@ -1270,9 +1274,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     handleCloseContextMenu()
   }
 
-  const handleOpenInEditor = async () => {
-    if (!contextMenu || !contextMenu.entry) return
-    const entry = contextMenu.entry
+  const openFileEntryInEditor = async (
+    entry: FileEntry,
+    closeContextMenuOnSuccess = false,
+  ) => {
     if (isDirectory(entry)) {
       return
     }
@@ -1307,7 +1312,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
           },
         }),
       )
-      handleCloseContextMenu()
+      if (closeContextMenuOnSuccess) {
+        handleCloseContextMenu()
+      }
     } catch (error) {
       console.error("Open in editor failed", error)
       const rawMessage = error instanceof Error ? error.message : String(error)
@@ -1322,6 +1329,10 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       const detail = normalizedMessage || t.sftp.editor.unknownError
       notify(t.sftp.editor.openFailed.replace("{error}", detail), "error")
     }
+  }
+  const handleOpenInEditor = async () => {
+    if (!contextMenu || !contextMenu.entry) return
+    await openFileEntryInEditor(contextMenu.entry, true)
   }
   const matchPattern = (filename: string, pattern: string) => {
     const regex = new RegExp(
@@ -2548,6 +2559,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
                 entry={entry}
                 depth={0}
                 onToggle={handleToggle}
+                onOpen={openFileEntryInEditor}
                 onContextMenu={handleContextMenu}
                 onDragStart={handleTreeItemDragStart}
                 clipboardSourcePath={clipboard?.sourcePath}
