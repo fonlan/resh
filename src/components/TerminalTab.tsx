@@ -633,12 +633,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(
 
       const handlePasteSnippet = (e: CustomEvent<string>) => {
         const content = e.detail
-        if (content) {
-          if (sessionIdRef.current) {
-            invoke("send_command", {
-              params: { session_id: sessionIdRef.current, command: content },
-            })
-          }
+        if (content && terminal) {
+          terminal.paste(content)
           focus()
         }
       }
@@ -653,7 +649,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
           handlePasteSnippet as EventListener,
         )
       }
-    }, [isActive, focus])
+    }, [isActive, focus, terminal])
 
     const handleTerminalDragOver = useCallback(
       (e: React.DragEvent<HTMLDivElement>) => {
