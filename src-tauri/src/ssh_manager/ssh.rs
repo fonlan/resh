@@ -9,6 +9,9 @@ use russh::keys::{self, PrivateKeyWithHashAlg};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::OnceLock;
+use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 use tokio::net::lookup_host;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -22,7 +25,10 @@ const PROMPT_MATCH_STREAK_REQUIRED: u8 = 2;
 const SSH_WINDOW_SIZE_BYTES: u32 = 64 * 1024 * 1024;
 const SSH_MAXIMUM_PACKET_SIZE_BYTES: u32 = 128 * 1024;
 const SSH_CHANNEL_BUFFER_SIZE: usize = 100;
+const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+const SSH_KEEPALIVE_MAX: usize = 3;
 const SSH_NODELAY: bool = false;
+const SESSION_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ConnectParams {
@@ -66,6 +72,7 @@ struct SessionData {
     channel: russh::ChannelWriteHalf<russh::client::Msg>,
     session: Arc<russh::client::Handle<ClientHandler>>,
     jumphost_session: Option<russh::client::Handle<ClientHandler>>,
+    connection_generation: u64,
     config: ConnectParams,
     transport_diagnostics: SshTransportDiagnostics,
     tx: mpsc::UnboundedSender<(String, Vec<u8>)>,
@@ -114,9 +121,14 @@ lazy_static! {
     static ref SESSIONS: Mutex<HashMap<String, SessionData>> = Mutex::new(HashMap::new());
 }
 
+static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 pub struct SSHClient;
 
 impl SSHClient {
+    pub fn set_app_handle(app_handle: AppHandle) {
+        let _ = APP_HANDLE.set(app_handle);
+    }
+
     fn default_transport_diagnostics() -> SshTransportDiagnostics {
         SshTransportDiagnostics {
             window_size: SSH_WINDOW_SIZE_BYTES,
@@ -131,10 +143,76 @@ impl SSHClient {
         client_config.window_size = transport.window_size;
         client_config.maximum_packet_size = transport.maximum_packet_size;
         client_config.channel_buffer_size = transport.channel_buffer_size;
+        client_config.keepalive_interval = Some(SSH_KEEPALIVE_INTERVAL);
+        client_config.keepalive_max = SSH_KEEPALIVE_MAX;
         client_config.nodelay = transport.nodelay;
         Arc::new(client_config)
     }
 
+    fn emit_connection_closed(session_id: &str) {
+        let Some(app_handle) = APP_HANDLE.get() else {
+            warn!(
+                "[SSH] Unable to emit connection-closed for {}: app handle not initialized",
+                session_id
+            );
+            return;
+        };
+
+        if let Err(e) = app_handle.emit(&format!("connection-closed:{}", session_id), ()) {
+            warn!(
+                "[SSH] Failed to emit connection-closed event for {}: {}",
+                session_id, e
+            );
+        }
+    }
+    fn spawn_session_monitor(session_id: String, generation: u64) {
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(SESSION_MONITOR_INTERVAL);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                interval.tick().await;
+
+                let session_closed = {
+                    let sessions = SESSIONS.lock().await;
+                    match sessions.get(&session_id) {
+                        Some(session_data) if session_data.connection_generation == generation => {
+                            session_data.session.is_closed()
+                        }
+                        Some(_) => return,
+                        None => return,
+                    }
+                };
+
+                if !session_closed {
+                    continue;
+                }
+
+                warn!(
+                    "[SSH] Session handle closed for {} (generation {})",
+                    session_id, generation
+                );
+
+                match Self::reconnect(&session_id).await {
+                    Ok(()) => {
+                        info!(
+                            "[SSH] Session {} auto-reconnected after handle closure",
+                            session_id
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            "[SSH] Auto reconnect failed for {} (generation {}): {}",
+                            session_id, generation, e
+                        );
+                        Self::emit_connection_closed(&session_id);
+                    }
+                }
+
+                return;
+            }
+        });
+    }
     fn spawn_shell_channel_drain(session_id: String, mut read_half: russh::ChannelReadHalf) {
         tokio::spawn(async move {
             while let Some(msg) = read_half.wait().await {
@@ -171,6 +249,7 @@ impl SSHClient {
         let session_id = uuid::Uuid::new_v4().to_string();
         let initial_cols = 80;
         let initial_rows = 24;
+        let connection_generation = 1;
 
         let (channel, session, jh_session) = Self::establish_connection(
             session_id.clone(),
@@ -189,6 +268,7 @@ impl SSHClient {
                     channel,
                     session: Arc::new(session),
                     jumphost_session: jh_session,
+                    connection_generation,
                     config: params,
                     transport_diagnostics: Self::default_transport_diagnostics(),
                     tx,
@@ -212,6 +292,7 @@ impl SSHClient {
             );
         }
 
+        Self::spawn_session_monitor(session_id.clone(), connection_generation);
         Ok(session_id)
     }
 
@@ -713,10 +794,16 @@ impl SSHClient {
     }
 
     pub async fn reconnect(session_id: &str) -> Result<(), String> {
-        let (config, tx, cols, rows) = {
+        let (config, tx, cols, rows, previous_generation) = {
             let sessions = SESSIONS.lock().await;
             if let Some(data) = sessions.get(session_id) {
-                (data.config.clone(), data.tx.clone(), data.cols, data.rows)
+                (
+                    data.config.clone(),
+                    data.tx.clone(),
+                    data.cols,
+                    data.rows,
+                    data.connection_generation,
+                )
             } else {
                 return Err("Session not found".to_string());
             }
@@ -737,29 +824,40 @@ impl SSHClient {
             .await
         {
             Ok((channel, session, jh_session)) => {
-                let mut sessions = SESSIONS.lock().await;
-                if let Some(data) = sessions.get_mut(session_id) {
-                    data.channel = channel;
-                    data.session = Arc::new(session);
-                    data.jumphost_session = jh_session;
-                    data.transport_diagnostics = Self::default_transport_diagnostics();
-                    // Reset terminal state for new connection
-                    data.terminal_buffer.clear();
-                    data.command_recorder = None;
-                    data.last_output_len = 0;
-                    data.recording_prompt = None;
-                    data.recording_start_marker = None;
-                    data.recording_completion_marker = None;
-                    data.recent_completion_markers.clear();
-                    data.command_finished = false;
-                    data.last_completion_check_state = None;
-                    data.last_completion_probe_recorder_len = 0;
-                    data.prompt_match_streak = 0;
-                    info!("[SSH] Reconnection successful for {}", session_id);
-                    Ok(())
-                } else {
-                    Err("Session removed during reconnection".to_string())
+                let next_generation = previous_generation.saturating_add(1);
+                let reconnected = {
+                    let mut sessions = SESSIONS.lock().await;
+                    if let Some(data) = sessions.get_mut(session_id) {
+                        data.channel = channel;
+                        data.session = Arc::new(session);
+                        data.jumphost_session = jh_session;
+                        data.connection_generation = next_generation;
+                        data.transport_diagnostics = Self::default_transport_diagnostics();
+                        // Reset terminal state for new connection
+                        data.terminal_buffer.clear();
+                        data.command_recorder = None;
+                        data.last_output_len = 0;
+                        data.recording_prompt = None;
+                        data.recording_start_marker = None;
+                        data.recording_completion_marker = None;
+                        data.recent_completion_markers.clear();
+                        data.command_finished = false;
+                        data.last_completion_check_state = None;
+                        data.last_completion_probe_recorder_len = 0;
+                        data.prompt_match_streak = 0;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                if !reconnected {
+                    return Err("Session removed during reconnection".to_string());
                 }
+
+                info!("[SSH] Reconnection successful for {}", session_id);
+                Self::spawn_session_monitor(session_id.to_string(), next_generation);
+                Ok(())
             }
             Err(e) => {
                 let _ = tx.send((
@@ -1140,6 +1238,13 @@ impl SSHClient {
     /// Send interrupt signal (Ctrl+C) to the terminal
     pub async fn send_interrupt(session_id: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
+        if session.is_closed() {
+            error!(
+                "[SSH] Rejecting interrupt for {} because session handle is closed",
+                session_id
+            );
+            return Err("Connection lost".to_string());
+        }
         session
             .data(channel_id, Bytes::copy_from_slice(&[3u8][..]))
             .await
@@ -1147,7 +1252,7 @@ impl SSHClient {
                 // Do not auto-reconnect here: replacing the foreground PTY during TUI interaction
                 // can leave the UI on a stale alternate-screen frame that looks "frozen".
                 error!("[SSH] Failed to send interrupt to {}: {:?}", session_id, e);
-                format!("Failed to send interrupt: {:?}", e)
+                "Connection lost".to_string()
             })?; // 3 = ETX (Ctrl+C)
 
         Ok(())
@@ -1156,6 +1261,13 @@ impl SSHClient {
     /// Send arbitrary input (characters, escape sequences) to the terminal
     pub async fn send_terminal_input(session_id: &str, input: &str) -> Result<(), String> {
         let (session, channel_id) = Self::get_session_route(session_id).await?;
+        if session.is_closed() {
+            error!(
+                "[SSH] Rejecting terminal input for {} because session handle is closed (input={:?})",
+                session_id, input
+            );
+            return Err("Connection lost".to_string());
+        }
         session
             .data(channel_id, Bytes::copy_from_slice(input.as_bytes()))
             .await
@@ -1166,7 +1278,7 @@ impl SSHClient {
                     "[SSH] Failed to send terminal input to {}: {:?} (input={:?})",
                     session_id, e, input
                 );
-                format!("Failed to send terminal input: {:?}", e)
+                "Connection lost".to_string()
             })?;
 
         Ok(())

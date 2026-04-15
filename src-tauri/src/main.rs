@@ -9,6 +9,7 @@ use resh::db::DatabaseManager;
 use resh::logger;
 use resh::master_password::MasterPasswordManager;
 use resh::sftp_manager::edit::SftpEditManager;
+use resh::ssh_manager::ssh::SSHClient;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::image::Image;
@@ -124,6 +125,7 @@ async fn main() {
             // Initialize logging
             logger::init_logging(app_data_dir.clone(), debug_enabled);
             tracing::info!("Logging initialized. Debug mode: {}", debug_enabled);
+            SSHClient::set_app_handle(app.handle().clone());
 
             let state = Arc::new(commands::AppState {
                 config_manager: config_manager.clone(),
