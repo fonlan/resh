@@ -5,7 +5,9 @@ use crate::ai::validator::{
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
-use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent, Tool};
+use genai::chat::{
+    ChatMessage as GenaiMessage, ChatStreamEvent, ContentPart, MessageContent, Tool,
+};
 use reqwest::Client;
 use rusqlite::params;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, StatusCode};
@@ -987,6 +989,17 @@ pub fn create_tools(is_agent_mode: bool) -> Vec<ToolDefinition> {
     tools
 }
 
+fn attach_reasoning_content(
+    message: GenaiMessage,
+    reasoning_content: Option<String>,
+) -> GenaiMessage {
+    if let Some(reasoning_content) = reasoning_content.filter(|content| !content.is_empty()) {
+        message.with_reasoning_content(Some(reasoning_content))
+    } else {
+        message
+    }
+}
+
 fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
     let mut messages = Vec::with_capacity(history.len());
     let mut pending_tool_call_ids: HashSet<String> = HashSet::new();
@@ -1002,6 +1015,7 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
                 messages.push(GenaiMessage::user(msg.content.unwrap_or_default()));
             }
             "assistant" => {
+                let reasoning_content = msg.reasoning_content;
                 let content = msg.content.unwrap_or_default();
                 if let Some(tool_calls) = msg.tool_calls {
                     let genai_tool_calls: Vec<genai::chat::ToolCall> = tool_calls
@@ -1042,21 +1056,37 @@ fn to_genai_messages(history: Vec<ChatMessage>) -> Vec<GenaiMessage> {
                             .iter()
                             .map(|call| call.call_id.clone())
                             .collect();
-                        messages.push(GenaiMessage::assistant(genai_tool_calls));
+
+                        let mut parts = Vec::new();
+                        if !content.is_empty() {
+                            parts.push(ContentPart::Text(content));
+                        }
+                        parts.extend(genai_tool_calls.into_iter().map(ContentPart::ToolCall));
+                        messages.push(attach_reasoning_content(
+                            GenaiMessage::assistant(MessageContent::from_parts(parts)),
+                            reasoning_content,
+                        ));
                         continue;
                     }
                 }
 
                 pending_tool_call_ids.clear();
 
-                if content.is_empty() {
+                let has_reasoning_content = reasoning_content
+                    .as_ref()
+                    .map(|content| !content.is_empty())
+                    .unwrap_or(false);
+                if content.is_empty() && !has_reasoning_content {
                     tracing::warn!(
                         "[AI] Dropping empty assistant message after tool-call sanitization to avoid invalid payload."
                     );
                     continue;
                 }
 
-                messages.push(GenaiMessage::assistant(content));
+                messages.push(attach_reasoning_content(
+                    GenaiMessage::assistant(content),
+                    reasoning_content,
+                ));
             }
             "tool" => {
                 let call_id = msg.tool_call_id.unwrap_or_default();
@@ -1337,6 +1367,28 @@ mod streamed_tool_call_tests {
         assert_eq!(tool_calls[0].call_id, "tooluse_1");
         assert_eq!(tool_calls[0].fn_name, "get_terminal_output");
         assert_eq!(tool_calls[0].fn_arguments, serde_json::json!({}));
+    }
+
+    #[test]
+    fn to_genai_messages_preserves_assistant_reasoning_content() {
+        let history = vec![ChatMessage {
+            role: "assistant".to_string(),
+            content: Some("final answer".to_string()),
+            reasoning_content: Some("thinking trace".to_string()),
+            tool_calls: Some(vec![new_call("tooluse_1", "get_terminal_output", "{}")]),
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }];
+
+        let messages = to_genai_messages(history);
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0].content.first_reasoning_content(),
+            Some("thinking trace")
+        );
+        assert_eq!(messages[0].content.first_text(), Some("final answer"));
     }
 
     #[test]
