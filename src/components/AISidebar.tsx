@@ -111,11 +111,6 @@ const DEFAULT_RUN_IN_TERMINAL_TIMEOUT_SECONDS = 30
 const COMMAND_OUTPUT_PREVIEW_MAX_LINES = 5
 const MAX_EDITOR_CONTEXT_CHARS = 20000
 
-const MESSAGE_BUBBLE_PERF_STYLE: React.CSSProperties = {
-  contentVisibility: "auto",
-  containIntrinsicSize: "180px",
-}
-
 const buildMessageWithEditorContext = (
   userContent: string,
   editorContext: EditorAIContext,
@@ -809,7 +804,6 @@ const MessageBubble = React.memo(
     return (
       <div
         className={`flex flex-col gap-1 max-w-full ${msg.role === "user" ? "items-end" : "items-start"}`}
-        style={MESSAGE_BUBBLE_PERF_STYLE}
       >
         <div
           className={`relative max-w-[90%] flex flex-col group ${msg.role === "user" ? "items-end" : "items-start"}`}
@@ -1330,6 +1324,19 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     estimateSize: () => 188,
     overscan: 8,
   })
+
+  messageVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
+    item,
+    _delta,
+    instance,
+  ) => {
+    if (instance.scrollDirection === "backward") {
+      return false
+    }
+
+    return item.start < (instance.scrollOffset ?? 0)
+  }
+
   const virtualMessageItems = messageVirtualizer.getVirtualItems()
   const virtualizedTotalHeight = messageVirtualizer.getTotalSize()
 
@@ -1339,6 +1346,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       if (!container) {
         return
       }
+
+      isAtBottomRef.current = true
 
       if (renderableListItems.length > 0) {
         messageVirtualizer.scrollToIndex(renderableListItems.length - 1, {
@@ -1365,6 +1374,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }, [])
 
+  useEffect(() => {
+    isAtBottomRef.current = true
+  }, [activeSessionId])
+
   const lastMessageRenderSignature = useMemo(() => {
     const lastMsg = currentMessages[currentMessages.length - 1]
     if (lastMsg?.role === "assistant") {
@@ -1378,19 +1391,22 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [currentMessages])
 
   useEffect(() => {
-    const shouldScroll =
-      isAtBottomRef.current || isLoading || !!pendingToolCalls
-    if (shouldScroll) {
-      const rafId = requestAnimationFrame(() => {
-        scrollToBottom(isLoading ? "auto" : "smooth")
-      })
-      return () => cancelAnimationFrame(rafId)
+    if (!isAtBottomRef.current) {
+      return
     }
+
+    const rafId = requestAnimationFrame(() => {
+      if (!isAtBottomRef.current) {
+        return
+      }
+      scrollToBottom(isLoading ? "auto" : "smooth")
+    })
+    return () => cancelAnimationFrame(rafId)
   }, [
+    activeSessionId,
     lastMessageRenderSignature,
     renderableListItems.length,
     isLoading,
-    pendingToolCalls,
     scrollToBottom,
   ])
 
@@ -1744,6 +1760,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (latestAssistantMessageSourceIndex === null) return
 
     clearSessionStopped(activeSessionId)
+    isAtBottomRef.current = true
     removeLatestAssistantMessage(activeSessionId)
     setGenerating(activeSessionId, true)
 
@@ -1834,6 +1851,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     // Clear the stopped flag when sending a new message
     clearSessionStopped(sessionId)
+    isAtBottomRef.current = true
     setInputValue("")
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto"
@@ -1902,6 +1920,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return
 
+    isAtBottomRef.current = true
     setGenerating(activeSessionId, true)
     clearSessionStopped(activeSessionId) // Clear stopped flag when tools are confirmed
     const callsToExecute = pendingToolCalls.map((c) => c.id)
@@ -2212,7 +2231,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       ) : (
         <>
           <div
-            className={`flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4 scroll-smooth ${isLoading ? "!scroll-auto" : ""}`}
+            className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4"
             ref={messagesContainerRef}
             onScroll={handleScroll}
           >
@@ -2224,7 +2243,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             )}
 
             <div
-              className="relative w-full"
+              className="relative w-full shrink-0"
               style={{ height: `${virtualizedTotalHeight}px` }}
             >
               {virtualMessageItems.map((virtualItem) => {
