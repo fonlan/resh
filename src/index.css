@@ -814,6 +814,36 @@ input[type="radio"]:disabled {
   background: var(--bg-tertiary);
 }
 
+/* Form Select */
+.form-select {
+  width: 100%;
+  padding: 8px 32px 8px 12px;
+  font-size: 13px;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  border: 1.5px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  appearance: none;
+  transition: all var(--transition-fast);
+}
+
+.form-select:focus {
+  border-color: var(--accent-primary);
+  box-shadow: var(--glow-primary);
+}
+
+.form-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--bg-tertiary);
+}
+
 /* Section Header */
 .section-header {
   display: flex;
