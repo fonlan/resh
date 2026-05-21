@@ -16,6 +16,8 @@ src-tauri/Cargo.lock
 .knowledge/
 .agents/
 .codex/
+.cursor/
+.codegraph/
 .mem/
 .codex-research/
 *.swp
