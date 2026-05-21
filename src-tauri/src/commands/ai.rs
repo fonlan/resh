@@ -1486,15 +1486,20 @@ async fn load_history(
     is_agent_mode: bool,
     ssh_session_id: Option<&str>,
 ) -> Result<Vec<ChatMessage>, String> {
-    let server_id = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        conn.query_row(
-            "SELECT server_id FROM ai_sessions WHERE id = ?1",
-            params![session_id],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
+    let server_id: Option<String> = {
+        let session_id_owned = session_id.to_string();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                Ok(conn
+                    .query_row(
+                        "SELECT server_id FROM ai_sessions WHERE id = ?1",
+                        params![session_id_owned],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .ok())
+            })
+            .await?
     };
 
     let (max_history, global_prompt, server_prompt) = {
@@ -1514,64 +1519,70 @@ async fn load_history(
     };
 
     let dialog_messages: Vec<ChatMessage> = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
+        let session_id_owned = session_id.to_string();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
+                        FROM ai_messages 
+                        WHERE session_id = ?1 
+                        ORDER BY created_at ASC, rowid ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
 
-        let mut stmt = conn
-            .prepare(
-                "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
-                FROM ai_messages 
-                WHERE session_id = ?1 
-                ORDER BY created_at ASC, rowid ASC",
-            )
-            .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(params![session_id_owned], |row| {
+                        let role: String = row.get(0)?;
+                        let content_raw: String = row.get(1)?;
+                        let reasoning_raw: Option<String> = row.get(2)?;
+                        let tool_calls_json: Option<String> = row.get(3).ok();
+                        let tool_call_id: Option<String> = row.get(4).ok();
+                        let created_at: String = row.get(5)?;
+                        let model_id: Option<String> = row.get(6).ok();
 
-        let rows = stmt
-            .query_map(params![session_id], |row| {
-                let role: String = row.get(0)?;
-                let content_raw: String = row.get(1)?;
-                let reasoning_raw: Option<String> = row.get(2)?;
-                let tool_calls_json: Option<String> = row.get(3).ok();
-                let tool_call_id: Option<String> = row.get(4).ok();
-                let created_at: String = row.get(5)?;
-                let model_id: Option<String> = row.get(6).ok();
+                        let content = if content_raw.is_empty() {
+                            None
+                        } else {
+                            Some(content_raw)
+                        };
 
-                let content = if content_raw.is_empty() {
-                    None
-                } else {
-                    Some(content_raw)
-                };
+                        let tool_calls = if let Some(json) = tool_calls_json {
+                            serde_json::from_str(&json).unwrap_or(None)
+                        } else {
+                            None
+                        };
 
-                let tool_calls = if let Some(json) = tool_calls_json {
-                    serde_json::from_str(&json).unwrap_or(None)
-                } else {
-                    None
-                };
+                        Ok(ChatMessage {
+                            role,
+                            content,
+                            reasoning_content: reasoning_raw,
+                            tool_calls,
+                            tool_call_id,
+                            created_at: Some(created_at),
+                            model_id,
+                        })
+                    })
+                    .map_err(|e| e.to_string())?;
 
-                Ok(ChatMessage {
-                    role,
-                    content,
-                    reasoning_content: reasoning_raw,
-                    tool_calls,
-                    tool_call_id,
-                    created_at: Some(created_at),
-                    model_id,
-                })
+                let mut all_messages: Vec<ChatMessage> = Vec::new();
+                for row in rows {
+                    let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+                    all_messages.push(msg);
+                }
+
+                let dialog_messages: Vec<ChatMessage> = all_messages
+                    .into_iter()
+                    .filter(|m| m.role != "system")
+                    .collect();
+
+                Ok(truncate_dialog_messages_for_history(
+                    dialog_messages,
+                    max_history,
+                ))
             })
-            .map_err(|e| e.to_string())?;
-
-        let mut all_messages: Vec<ChatMessage> = Vec::new();
-        for row in rows {
-            let msg: ChatMessage = row.map_err(|e| e.to_string())?;
-            all_messages.push(msg);
-        }
-
-        let dialog_messages: Vec<ChatMessage> = all_messages
-            .into_iter()
-            .filter(|m| m.role != "system")
-            .collect();
-
-        truncate_dialog_messages_for_history(dialog_messages, max_history)
+            .await?
     };
 
     let mut messages: Vec<ChatMessage> = Vec::new();
@@ -2204,12 +2215,21 @@ async fn execute_tools_and_save(
         let tool_call_id = call.id.clone();
         let tool_content = result.clone();
         {
-            let conn = state.db_manager.get_connection();
-            let conn = conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![tool_msg_id, session_id, "tool", result, tool_call_id],
-            ).map_err(|e| e.to_string())?;
+            let session_id_owned = session_id.to_string();
+            let tool_msg_id_owned = tool_msg_id.clone();
+            let tool_call_id_owned = tool_call_id.clone();
+            let result_owned = result.clone();
+            state
+                .db_manager
+                .run_blocking(move |conn| {
+                    conn.execute(
+                        "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![tool_msg_id_owned, session_id_owned, "tool", result_owned, tool_call_id_owned],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok(())
+                })
+                .await?;
         }
 
         let _ = app_handle.emit(
@@ -2662,8 +2682,6 @@ pub fn run_ai_turn(
 
         let ai_msg_id = Uuid::new_v4().to_string();
         {
-            let conn = state.db_manager.get_connection();
-            let conn = conn.lock().unwrap();
             let tool_calls_json = if let Some(calls) = &final_tool_calls {
                 Some(serde_json::to_string(calls).map_err(|e| format!("序列化失败: {}", e))?)
             } else {
@@ -2672,10 +2690,22 @@ pub fn run_ai_turn(
 
             if !full_content.is_empty() || final_tool_calls.is_some() || !full_reasoning.is_empty()
             {
-                conn.execute(
-                    "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls, model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![ai_msg_id, session_id, "assistant", full_content, full_reasoning, tool_calls_json, model.id],
-                ).map_err(|e| e.to_string())?;
+                let ai_msg_id_owned = ai_msg_id.clone();
+                let session_id_owned = session_id.clone();
+                let full_content_owned = full_content.clone();
+                let full_reasoning_owned = full_reasoning.clone();
+                let model_id_owned = model.id.clone();
+                state
+                    .db_manager
+                    .run_blocking(move |conn| {
+                        conn.execute(
+                            "INSERT INTO ai_messages (id, session_id, role, content, reasoning_content, tool_calls, model_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![ai_msg_id_owned, session_id_owned, "assistant", full_content_owned, full_reasoning_owned, tool_calls_json, model_id_owned],
+                        )
+                        .map_err(|e| e.to_string())?;
+                        Ok(())
+                    })
+                    .await?;
             }
         }
 
@@ -2922,14 +2952,18 @@ pub async fn create_ai_session(
     ssh_session_id: Option<String>,
 ) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
-
-    conn.execute(
-        "INSERT INTO ai_sessions (id, server_id, title, model_id, ssh_session_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![id, server_id, "New Chat", model_id, ssh_session_id],
-    )
-    .map_err(|e| e.to_string())?;
+    let id_clone = id.clone();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "INSERT INTO ai_sessions (id, server_id, title, model_id, ssh_session_id) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id_clone, server_id, "New Chat", model_id, ssh_session_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await?;
 
     Ok(id)
 }
@@ -2939,36 +2973,38 @@ pub async fn get_ai_sessions(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<Vec<serde_json::Value>, String> {
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, title, created_at, model_id, ssh_session_id FROM ai_sessions 
+                 WHERE server_id = ?1 
+                 AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)
+                 ORDER BY created_at DESC",
+                )
+                .map_err(|e| e.to_string())?;
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, title, created_at, model_id, ssh_session_id FROM ai_sessions 
-         WHERE server_id = ?1 
-         AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)
-         ORDER BY created_at DESC",
-        )
-        .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(params![server_id], |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, String>(0)?,
+                        "title": row.get::<_, String>(1)?,
+                        "createdAt": row.get::<_, String>(2)?,
+                        "modelId": row.get::<_, Option<String>>(3)?,
+                        "sshSessionId": row.get::<_, Option<String>>(4)?,
+                    }))
+                })
+                .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map(params![server_id], |row| {
-            Ok(serde_json::json!({
-                "id": row.get::<_, String>(0)?,
-                "title": row.get::<_, String>(1)?,
-                "createdAt": row.get::<_, String>(2)?,
-                "modelId": row.get::<_, Option<String>>(3)?,
-                "sshSessionId": row.get::<_, Option<String>>(4)?,
-            }))
+            let mut sessions = Vec::new();
+            for row in rows {
+                sessions.push(row.map_err(|e| e.to_string())?);
+            }
+
+            Ok(sessions)
         })
-        .map_err(|e| e.to_string())?;
-
-    let mut sessions = Vec::new();
-    for row in rows {
-        sessions.push(row.map_err(|e| e.to_string())?);
-    }
-
-    Ok(sessions)
+        .await
 }
 
 #[tauri::command]
@@ -2976,60 +3012,63 @@ pub async fn get_ai_messages(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<Vec<ChatMessage>, String> {
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
-    let mut stmt = conn
-        .prepare(
-            "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
-             FROM ai_messages
-             WHERE session_id = ?1
-             ORDER BY created_at ASC, rowid ASC",
-        )
-        .map_err(|e| e.to_string())?;
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
+                     FROM ai_messages
+                     WHERE session_id = ?1
+                     ORDER BY created_at ASC, rowid ASC",
+                )
+                .map_err(|e| e.to_string())?;
 
-    let rows = stmt
-        .query_map(params![session_id], |row| {
-            let role: String = row.get(0)?;
-            let content_raw: String = row.get(1)?;
-            let reasoning_raw: Option<String> = row.get(2)?;
-            let tool_calls_json: Option<String> = row.get(3).ok();
-            let tool_call_id: Option<String> = row.get(4).ok();
-            let created_at: String = row.get(5)?;
-            let model_id: Option<String> = row.get(6).ok();
+            let rows = stmt
+                .query_map(params![session_id], |row| {
+                    let role: String = row.get(0)?;
+                    let content_raw: String = row.get(1)?;
+                    let reasoning_raw: Option<String> = row.get(2)?;
+                    let tool_calls_json: Option<String> = row.get(3).ok();
+                    let tool_call_id: Option<String> = row.get(4).ok();
+                    let created_at: String = row.get(5)?;
+                    let model_id: Option<String> = row.get(6).ok();
 
-            let content = if content_raw.is_empty() {
-                None
-            } else {
-                Some(content_raw)
-            };
+                    let content = if content_raw.is_empty() {
+                        None
+                    } else {
+                        Some(content_raw)
+                    };
 
-            let tool_calls = if let Some(json) = tool_calls_json {
-                serde_json::from_str(&json).unwrap_or(None)
-            } else {
-                None
-            };
+                    let tool_calls = if let Some(json) = tool_calls_json {
+                        serde_json::from_str(&json).unwrap_or(None)
+                    } else {
+                        None
+                    };
 
-            Ok(ChatMessage {
-                role,
-                content,
-                reasoning_content: reasoning_raw,
-                tool_calls,
-                tool_call_id,
-                created_at: Some(created_at),
-                model_id,
-            })
+                    Ok(ChatMessage {
+                        role,
+                        content,
+                        reasoning_content: reasoning_raw,
+                        tool_calls,
+                        tool_call_id,
+                        created_at: Some(created_at),
+                        model_id,
+                    })
+                })
+                .map_err(|e| e.to_string())?;
+
+            let mut messages: Vec<ChatMessage> = Vec::new();
+            for row in rows {
+                let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+                if msg.role != "system" {
+                    messages.push(msg);
+                }
+            }
+
+            Ok(messages)
         })
-        .map_err(|e| e.to_string())?;
-
-    let mut messages: Vec<ChatMessage> = Vec::new();
-    for row in rows {
-        let msg: ChatMessage = row.map_err(|e| e.to_string())?;
-        if msg.role != "system" {
-            messages.push(msg);
-        }
-    }
-
-    Ok(messages)
+        .await
 }
 
 #[tauri::command]
@@ -3045,41 +3084,46 @@ pub async fn send_chat_message(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
-    let bound_ssh_session_id = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-
-        let existing_ssh_id: Option<String> = conn
-            .query_row(
-                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if existing_ssh_id.is_none()
-            || existing_ssh_id
-                .as_ref()
-                .map(|s| s.is_empty())
-                .unwrap_or(true)
-        {
-            if let Some(ref new_id) = ssh_session_id {
-                if !new_id.is_empty() {
-                    conn.execute(
-                        "UPDATE ai_sessions SET ssh_session_id = ?1 WHERE id = ?2",
-                        params![new_id, session_id],
+    let bound_ssh_session_id: Option<String> = {
+        let session_id_owned = session_id.clone();
+        let ssh_session_id_clone = ssh_session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let existing_ssh_id: Option<String> = conn
+                    .query_row(
+                        "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                        params![session_id_owned],
+                        |row| row.get(0),
                     )
                     .ok();
-                    ssh_session_id.clone()
+
+                let result = if existing_ssh_id.is_none()
+                    || existing_ssh_id
+                        .as_ref()
+                        .map(|s| s.is_empty())
+                        .unwrap_or(true)
+                {
+                    if let Some(ref new_id) = ssh_session_id_clone {
+                        if !new_id.is_empty() {
+                            conn.execute(
+                                "UPDATE ai_sessions SET ssh_session_id = ?1 WHERE id = ?2",
+                                params![new_id, session_id_owned],
+                            )
+                            .ok();
+                            ssh_session_id_clone.clone()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            existing_ssh_id
-        }
+                    existing_ssh_id
+                };
+                Ok(result)
+            })
+            .await?
     };
 
     let content =
@@ -3087,13 +3131,20 @@ pub async fn send_chat_message(
 
     let user_msg_id = Uuid::new_v4().to_string();
     {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-            params![user_msg_id, session_id, "user", content],
-        )
-        .map_err(|e| e.to_string())?;
+        let user_msg_id_owned = user_msg_id.clone();
+        let session_id_owned = session_id.clone();
+        let content_owned = content.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                conn.execute(
+                    "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+                    params![user_msg_id_owned, session_id_owned, "user", content_owned],
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(())
+            })
+            .await?;
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
@@ -3160,50 +3211,59 @@ pub async fn regenerate_ai_response(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
-    let bound_ssh_session_id = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
+    let bound_ssh_session_id: Option<String> = {
+        let session_id_owned = session_id.clone();
+        let ssh_session_id_clone = ssh_session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let existing_ssh_id: Option<String> = conn
+                    .query_row(
+                        "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                        params![session_id_owned],
+                        |row| row.get(0),
+                    )
+                    .ok();
 
-        let existing_ssh_id: Option<String> = conn
-            .query_row(
-                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if existing_ssh_id
-            .as_ref()
-            .map(|id| id.is_empty())
-            .unwrap_or(true)
-        {
-            ssh_session_id.clone()
-        } else {
-            existing_ssh_id
-        }
+                let result = if existing_ssh_id
+                    .as_ref()
+                    .map(|id| id.is_empty())
+                    .unwrap_or(true)
+                {
+                    ssh_session_id_clone.clone()
+                } else {
+                    existing_ssh_id
+                };
+                Ok(result)
+            })
+            .await?
     };
 
     {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
+        let session_id_owned = session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let (latest_msg_id, latest_role): (String, String) = conn
+                    .query_row(
+                        "SELECT id, role FROM ai_messages WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                        params![session_id_owned],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .map_err(|_| "No history found".to_string())?;
 
-        let (latest_msg_id, latest_role): (String, String) = conn
-            .query_row(
-                "SELECT id, role FROM ai_messages WHERE session_id = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                params![session_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .map_err(|_| "No history found".to_string())?;
+                if latest_role != "assistant" {
+                    return Err("Latest message is not an assistant response".to_string());
+                }
 
-        if latest_role != "assistant" {
-            return Err("Latest message is not an assistant response".to_string());
-        }
-
-        conn.execute(
-            "DELETE FROM ai_messages WHERE id = ?1",
-            params![latest_msg_id],
-        )
-        .map_err(|e| e.to_string())?;
+                conn.execute(
+                    "DELETE FROM ai_messages WHERE id = ?1",
+                    params![latest_msg_id],
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(())
+            })
+            .await?;
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
@@ -3271,28 +3331,33 @@ pub async fn execute_agent_tools(
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
-    let bound_ssh_session_id = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
+    let bound_ssh_session_id: Option<String> = {
+        let session_id_owned = session_id.clone();
+        let ssh_session_id_clone = ssh_session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let existing_ssh_id: Option<String> = conn
+                    .query_row(
+                        "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
+                        params![session_id_owned],
+                        |row| row.get(0),
+                    )
+                    .ok();
 
-        let existing_ssh_id: Option<String> = conn
-            .query_row(
-                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-                params![session_id],
-                |row| row.get(0),
-            )
-            .ok();
-
-        if existing_ssh_id.is_none()
-            || existing_ssh_id
-                .as_ref()
-                .map(|s| s.is_empty())
-                .unwrap_or(true)
-        {
-            ssh_session_id.clone()
-        } else {
-            existing_ssh_id
-        }
+                let result = if existing_ssh_id.is_none()
+                    || existing_ssh_id
+                        .as_ref()
+                        .map(|s| s.is_empty())
+                        .unwrap_or(true)
+                {
+                    ssh_session_id_clone.clone()
+                } else {
+                    existing_ssh_id
+                };
+                Ok(result)
+            })
+            .await?
     };
 
     let is_agent_mode = mode.as_deref() == Some("agent");
@@ -3577,34 +3642,44 @@ pub async fn generate_session_title(
     model_id: String,
     channel_id: String,
 ) -> Result<String, String> {
-    let current_title = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT title FROM ai_sessions WHERE id = ?1")
-            .map_err(|e| e.to_string())?;
-        stmt.query_row(params![session_id], |row| row.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
+    let current_title: String = {
+        let session_id_owned = session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let mut stmt = conn
+                    .prepare("SELECT title FROM ai_sessions WHERE id = ?1")
+                    .map_err(|e| e.to_string())?;
+                stmt.query_row(params![session_id_owned], |row| row.get::<_, String>(0))
+                    .map_err(|e| e.to_string())
+            })
+            .await?
     };
 
     if current_title != "New Chat" {
         return Ok(current_title);
     }
 
-    let messages = {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT role, content FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC LIMIT 2").map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![session_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    let messages: Vec<(String, String)> = {
+        let session_id_owned = session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let mut stmt = conn
+                    .prepare("SELECT role, content FROM ai_messages WHERE session_id = ?1 ORDER BY created_at ASC LIMIT 2")
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(params![session_id_owned], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })
+                    .map_err(|e| e.to_string())?;
+                let mut msgs = Vec::new();
+                for row in rows {
+                    msgs.push(row.map_err(|e| e.to_string())?);
+                }
+                Ok(msgs)
             })
-            .map_err(|e| e.to_string())?;
-        let mut msgs = Vec::new();
-        for row in rows {
-            msgs.push(row.map_err(|e| e.to_string())?);
-        }
-        msgs
+            .await?
     };
 
     if messages.len() < 2 {
@@ -3687,13 +3762,19 @@ pub async fn generate_session_title(
     }
 
     {
-        let conn = state.db_manager.get_connection();
-        let conn = conn.lock().unwrap();
-        conn.execute(
-            "UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
-            params![title, session_id],
-        )
-        .map_err(|e| e.to_string())?;
+        let title_owned = title.clone();
+        let session_id_owned = session_id.clone();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                conn.execute(
+                    "UPDATE ai_sessions SET title = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+                    params![title_owned, session_id_owned],
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(())
+            })
+            .await?;
     }
 
     Ok(title)
@@ -3704,16 +3785,19 @@ pub async fn delete_ai_session(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<(), String> {
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
-    conn.execute(
-        "DELETE FROM ai_messages WHERE session_id = ?1",
-        params![session_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "DELETE FROM ai_messages WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute("DELETE FROM ai_sessions WHERE id = ?1", params![session_id])
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
 }
 
 #[tauri::command]
@@ -3721,13 +3805,20 @@ pub async fn delete_all_ai_sessions(
     state: State<'_, Arc<AppState>>,
     server_id: String,
 ) -> Result<(), String> {
-    let conn = state.db_manager.get_connection();
-    let conn = conn.lock().unwrap();
-    conn.execute("DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)", params![server_id]).map_err(|e| e.to_string())?;
-    conn.execute(
-        "DELETE FROM ai_sessions WHERE server_id = ?1",
-        params![server_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "DELETE FROM ai_messages WHERE session_id IN (SELECT id FROM ai_sessions WHERE server_id = ?1)",
+                params![server_id],
+            )
+            .map_err(|e| e.to_string())?;
+            conn.execute(
+                "DELETE FROM ai_sessions WHERE server_id = ?1",
+                params![server_id],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
 }

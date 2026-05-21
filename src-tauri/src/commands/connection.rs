@@ -1,7 +1,7 @@
 use crate::ssh_manager::ssh::{ConnectParams, SSHClient};
+use dashmap::DashMap;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::{Emitter, State, Window};
 use tokio::fs::File;
@@ -11,9 +11,15 @@ use tokio::time::{Duration, MissedTickBehavior};
 
 use super::AppState;
 
+#[derive(Clone)]
+struct RecordingHandle {
+    writer: Arc<Mutex<BufWriter<File>>>,
+    mode: String,
+}
+
 lazy_static! {
-    static ref RECORDING_SESSIONS: Mutex<HashMap<String, (Arc<Mutex<BufWriter<File>>>, String)>> =
-        Mutex::new(HashMap::new());
+    // 用 DashMap 替代 Mutex<HashMap>，避免 forward task 每帧锁全局表导致多终端互相阻塞。
+    static ref RECORDING_SESSIONS: DashMap<String, RecordingHandle> = DashMap::new();
 }
 
 async fn flush_terminal_output(window: &Window, session_id: &str, pending_output: &mut String) {
@@ -101,16 +107,13 @@ pub async fn connect_to_server(
                         current_session_id = Some(session_id.clone());
                     }
 
-                    // Handle recording if active
-                    let recording_target = {
-                        let sessions = RECORDING_SESSIONS.lock().await;
-                        sessions
-                            .get(&session_id)
-                            .map(|(writer_mutex, mode)| (Arc::clone(writer_mutex), mode.clone()))
-                    };
+                    // 录制热路径：DashMap 分片读，命中后立刻释放分片锁再异步写文件
+                    let recording_target = RECORDING_SESSIONS
+                        .get(&session_id)
+                        .map(|entry| entry.clone());
 
-                    if let Some((writer_mutex, mode)) = recording_target {
-                        let mut writer = writer_mutex.lock().await;
+                    if let Some(RecordingHandle { writer, mode }) = recording_target {
+                        let mut writer = writer.lock().await;
 
                         let data_to_write = if mode == "text" {
                             strip_ansi_escapes::strip(&data)
@@ -150,10 +153,7 @@ pub async fn connect_to_server(
             state_clone.sftp_edit_manager.cleanup_session(&session_id);
 
             // Ensure recording is stopped
-            {
-                let mut sessions = RECORDING_SESSIONS.lock().await;
-                sessions.remove(&session_id);
-            }
+            RECORDING_SESSIONS.remove(&session_id);
 
             if let Err(e) = window_clone.emit(&format!("connection-closed:{}", session_id), ()) {
                 tracing::debug!("Failed to emit connection-closed event: {}", e);
@@ -200,17 +200,23 @@ pub async fn start_recording(
         .map_err(|e| format!("Failed to create file: {}", e))?;
     let writer = BufWriter::new(file);
 
-    let mut sessions = RECORDING_SESSIONS.lock().await;
-    sessions.insert(session_id, (Arc::new(Mutex::new(writer)), mode));
+    RECORDING_SESSIONS.insert(
+        session_id,
+        RecordingHandle {
+            writer: Arc::new(Mutex::new(writer)),
+            mode,
+        },
+    );
 
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_recording(session_id: String) -> Result<(), String> {
-    let mut sessions = RECORDING_SESSIONS.lock().await;
-    if let Some((writer_mutex, _)) = sessions.remove(&session_id) {
-        let mut writer = writer_mutex.lock().await;
+    // 先把 entry 从 dashmap 中取出，避免持有分片锁的同时跨 .await 等待文件 flush
+    let removed = RECORDING_SESSIONS.remove(&session_id).map(|(_, v)| v);
+    if let Some(handle) = removed {
+        let mut writer = handle.writer.lock().await;
         writer
             .flush()
             .await

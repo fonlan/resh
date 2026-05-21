@@ -132,7 +132,7 @@ const DEFAULT_FIXED_TAB_WIDTH = 200
 const MIN_TITLEBAR_DRAG_SPACER_WIDTH = 40
 
 export const MainWindow: React.FC = () => {
-  const { config, saveConfig } = useConfig()
+  const { config, saveConfig, getLatestConfig } = useConfig()
   const { t } = useTranslation()
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -595,9 +595,10 @@ export const MainWindow: React.FC = () => {
 
   const handleAddTab = useCallback(
     async (serverId: string) => {
-      // Reload config to ensure we have the latest (especially if coming from SettingsModal)
-      // and to avoid using a stale 'config' object from the hook's state.
-      const currentConfig = await invoke<Config>("get_config")
+      // 通过 ref 拿最新的 config，避免 useCallback 闭包里 `config` 是 stale 快照；
+      // 兜底回退到一次跨进程 invoke，仅在 Provider 尚未加载完成时触发。
+      const currentConfig =
+        getLatestConfig() ?? (await invoke<Config>("get_config"))
       const server = currentConfig.servers.find((s) => s.id === serverId)
 
       if (!server) {
@@ -614,11 +615,10 @@ export const MainWindow: React.FC = () => {
       setTabs((prev) => [...prev, newTab])
       setActiveTabId(newTab.id)
 
-      // Update recent servers using the latest config
       const updatedGeneral = addRecentServer(currentConfig.general, serverId)
       await saveConfig({ ...currentConfig, general: updatedGeneral })
     },
-    [saveConfig],
+    [saveConfig, getLatestConfig],
   )
 
   const handleAddQuickConnectTab = useCallback((target: QuickConnectTarget) => {

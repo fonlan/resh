@@ -456,7 +456,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   zIndex,
 }) => {
   const { t } = useTranslation()
-  const { config, saveConfig } = useConfig()
+  const { config, saveConfig, getLatestConfig } = useConfig()
   const notify = useCallback(
     (
       message: string,
@@ -1775,7 +1775,9 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       updater: (paths: string[]) => string[],
     ): Promise<boolean> => {
       try {
-        const latestConfig = await invoke<Config>("get_config")
+        // 优先走 useConfig 的 ref，避免每次都跨进程 invoke；初次加载未完成时兜底回 IPC
+        const latestConfig =
+          getLatestConfig() ?? (await invoke<Config>("get_config"))
         const targetServer = latestConfig.servers.find(
           (server) => server.id === targetServerId,
         )
@@ -1817,7 +1819,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
         return false
       }
     },
-    [normalizeFavoritePaths, saveConfig],
+    [normalizeFavoritePaths, saveConfig, getLatestConfig],
   )
 
   const favoriteTargets = useMemo<FavoriteTarget[]>(() => {

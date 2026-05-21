@@ -82,4 +82,33 @@ impl DatabaseManager {
     pub fn get_connection(&self) -> Arc<Mutex<Connection>> {
         self.conn.clone()
     }
+
+    /// 在 spawn_blocking 中执行同步 SQLite 操作，避免在 tokio worker 上阻塞 runtime。
+    ///
+    /// 使用方法：
+    /// ```ignore
+    /// let row: Option<String> = state
+    ///     .db_manager
+    ///     .run_blocking(move |conn| {
+    ///         conn.query_row("SELECT v FROM t WHERE id = ?1", params![id], |r| r.get(0))
+    ///             .optional()
+    ///             .map_err(|e| e.to_string())
+    ///     })
+    ///     .await?;
+    /// ```
+    pub async fn run_blocking<F, R>(&self, f: F) -> Result<R, String>
+    where
+        F: FnOnce(&Connection) -> Result<R, String> + Send + 'static,
+        R: Send + 'static,
+    {
+        let conn = self.conn.clone();
+        tokio::task::spawn_blocking(move || {
+            let conn = conn
+                .lock()
+                .map_err(|e| format!("DB mutex poisoned: {}", e))?;
+            f(&conn)
+        })
+        .await
+        .map_err(|e| format!("DB blocking task join error: {}", e))?
+    }
 }

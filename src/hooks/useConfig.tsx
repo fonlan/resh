@@ -3,6 +3,7 @@ import React, {
   use,
   useCallback,
   useEffect,
+  useRef,
   useState,
   ReactNode,
 } from "react"
@@ -18,6 +19,13 @@ interface ConfigContextType {
   loadConfig: () => Promise<void>
   saveConfig: (config: Config) => Promise<void>
   triggerSync: () => Promise<Config>
+  /**
+   * 同步取出当前 Provider 内最新的 Config 引用。
+   * 用于 useCallback 闭包：避免依赖里漏写 `config` 时拿到 stale 快照，
+   * 且不需要每次都 invoke("get_config") 走一次跨进程 IPC。
+   * 在初次加载尚未完成时返回 null，调用方需自行兜底。
+   */
+  getLatestConfig: () => Config | null
 }
 
 const ConfigContext = createContext<ConfigContextType | undefined>(undefined)
@@ -29,6 +37,14 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // configRef 始终指向最新的 config，不受 React 渲染节奏影响
+  const configRef = useRef<Config | null>(null)
+  const setConfigSafe = useCallback((next: Config | null) => {
+    configRef.current = next
+    setConfig(next)
+  }, [])
+  const getLatestConfig = useCallback(() => configRef.current, [])
+
   const loadConfig = useCallback(async () => {
     let loadedConfig: Config | null = null
     try {
@@ -38,7 +54,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
       logger.info("[ConfigProvider] Loaded config", {
         version: loadedConfig.version,
       })
-      setConfig(loadedConfig)
+      setConfigSafe(loadedConfig)
       setError(null)
     } catch (err) {
       logger.error("[ConfigProvider] Failed to load config", err)
@@ -56,41 +72,44 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
       invoke<Config>("trigger_sync")
         .then((syncedConfig) => {
           logger.info("[ConfigProvider] Startup sync completed")
-          setConfig(syncedConfig)
+          setConfigSafe(syncedConfig)
         })
         .catch((err) => {
           logger.warn("[ConfigProvider] Startup sync failed", err)
         })
     }
-  }, [])
+  }, [setConfigSafe])
 
-  const saveConfig = useCallback(async (newConfig: Config) => {
-    try {
-      logger.info("[ConfigProvider] Saving config...")
-      await invoke("save_config", { config: newConfig })
-      logger.info("[ConfigProvider] Config saved successfully")
+  const saveConfig = useCallback(
+    async (newConfig: Config) => {
+      try {
+        logger.info("[ConfigProvider] Saving config...")
+        await invoke("save_config", { config: newConfig })
+        logger.info("[ConfigProvider] Config saved successfully")
 
-      setConfig(newConfig)
-      setError(null)
-    } catch (err) {
-      logger.error("[ConfigProvider] Failed to save config", err)
-      setError(err instanceof Error ? err.message : String(err))
-      throw err
-    }
-  }, [])
+        setConfigSafe(newConfig)
+        setError(null)
+      } catch (err) {
+        logger.error("[ConfigProvider] Failed to save config", err)
+        setError(err instanceof Error ? err.message : String(err))
+        throw err
+      }
+    },
+    [setConfigSafe],
+  )
 
   const triggerSync = useCallback(async () => {
     try {
       logger.info("[ConfigProvider] Triggering sync...")
       const cfg = await invoke<Config>("trigger_sync")
       logger.info("[ConfigProvider] Sync successful")
-      setConfig(cfg)
+      setConfigSafe(cfg)
       return cfg
     } catch (err) {
       logger.error("[ConfigProvider] Sync failed", err)
       throw err
     }
-  }, [])
+  }, [setConfigSafe])
 
   useEffect(() => {
     loadConfig()
@@ -101,7 +120,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
 
     listen<Config>("config-updated", (event) => {
       logger.info("[ConfigProvider] Config updated from background sync")
-      setConfig(event.payload)
+      setConfigSafe(event.payload)
     }).then((fn) => {
       unlisten = fn
     })
@@ -109,11 +128,19 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
     return () => {
       if (unlisten) unlisten()
     }
-  }, [])
+  }, [setConfigSafe])
 
   return (
     <ConfigContext.Provider
-      value={{ config, loading, error, loadConfig, saveConfig, triggerSync }}
+      value={{
+        config,
+        loading,
+        error,
+        loadConfig,
+        saveConfig,
+        triggerSync,
+        getLatestConfig,
+      }}
     >
       {children}
     </ConfigContext.Provider>
