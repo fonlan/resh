@@ -7,28 +7,23 @@ use resh::commands;
 use resh::config::ConfigManager;
 use resh::db::DatabaseManager;
 use resh::logger;
-use resh::master_password::MasterPasswordManager;
 use resh::sftp_manager::edit::SftpEditManager;
 use resh::ssh_manager::ssh::SSHClient;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tauri::image::Image;
 use tauri::Listener;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
-static APP_DATA_DIR_SET: AtomicBool = AtomicBool::new(false);
-static mut APP_DATA_DIR: Option<std::path::PathBuf> = None;
+static APP_DATA_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
 
 fn get_panic_log_path() -> std::path::PathBuf {
-    // 优先使用已设置的 app_data_dir
-    unsafe {
-        if let Some(ref dir) = APP_DATA_DIR {
-            return dir.join("logs").join("panic.log");
-        }
-    }
-    // 回退到临时目录
-    std::env::temp_dir().join("resh_panic.log")
+    // 优先使用已设置的 app_data_dir，否则回退到临时目录
+    APP_DATA_DIR
+        .get()
+        .map(|dir| dir.join("logs").join("panic.log"))
+        .unwrap_or_else(|| std::env::temp_dir().join("resh_panic.log"))
 }
 
 #[tokio::main]
@@ -106,13 +101,9 @@ async fn main() {
                 .unwrap_or_else(|| default_app_data_dir.join("Resh"));
 
             // 设置全局 app_data_dir 供 panic hook 使用
-            unsafe {
-                APP_DATA_DIR = Some(app_data_dir.clone());
-                APP_DATA_DIR_SET.store(true, Ordering::SeqCst);
-            }
+            let _ = APP_DATA_DIR.set(app_data_dir.clone());
 
             let config_manager = ConfigManager::new(app_data_dir.clone());
-            let master_password_manager = MasterPasswordManager::new(app_data_dir.clone());
             let db_manager = DatabaseManager::new(app_data_dir.clone())
                 .map_err(|e| format!("数据库初始化失败: {}", e))?;
 
@@ -129,7 +120,6 @@ async fn main() {
 
             let state = Arc::new(commands::AppState {
                 config_manager: config_manager.clone(),
-                password_manager: master_password_manager,
                 db_manager,
                 config: Mutex::new(local_config.clone()),
                 ai_cancellation_tokens: dashmap::DashMap::new(),
@@ -240,9 +230,6 @@ async fn main() {
             commands::connection::export_terminal_log,
             commands::connection::select_save_path,
             commands::connection::update_terminal_selection,
-            commands::master_password::get_master_password_status,
-            commands::master_password::set_master_password,
-            commands::master_password::verify_master_password,
             commands::ai::create_ai_session,
             commands::ai::get_ai_sessions,
             commands::ai::get_ai_messages,

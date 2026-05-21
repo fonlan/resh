@@ -44,34 +44,3 @@ export function validateUniqueName(
   return null
 }
 
-export function validateUrl(
-  url: string,
-  fieldName: string = "URL",
-): string | null {
-  if (!url || url.trim() === "") {
-    return `${fieldName} is required`
-  }
-
-  try {
-    new URL(url)
-    return null
-  } catch {
-    return `${fieldName} must be a valid URL`
-  }
-}
-
-export function validateHostname(hostname: string): string | null {
-  if (!hostname || hostname.trim() === "") {
-    return "Hostname is required"
-  }
-
-  // Basic hostname validation (alphanumeric, dots, hyphens)
-  const hostnameRegex =
-    /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
-
-  if (!hostnameRegex.test(hostname)) {
-    return "Invalid hostname format"
-  }
-
-  return null
-}

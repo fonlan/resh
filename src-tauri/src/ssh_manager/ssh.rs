@@ -1310,6 +1310,7 @@ impl SSHClient {
             }
             session_data.terminal_buffer.push_str(&display_data);
 
+            // 仅在超出阈值时原地 drain 头部，避免分配 + 全量拷贝（最多 100KB）
             if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
                 let mut cut_off = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
                 while cut_off < session_data.terminal_buffer.len()
@@ -1317,7 +1318,7 @@ impl SSHClient {
                 {
                     cut_off += 1;
                 }
-                session_data.terminal_buffer = session_data.terminal_buffer[cut_off..].to_string();
+                session_data.terminal_buffer.drain(..cut_off);
             }
 
             Ok(display_data)

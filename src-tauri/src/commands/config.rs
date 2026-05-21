@@ -3,7 +3,6 @@
 use crate::ai::manager::AiManager;
 use crate::config::{Config, ConfigManager, SyncManager};
 use crate::db::DatabaseManager;
-use crate::master_password::MasterPasswordManager;
 use crate::sftp_manager::edit::SftpEditManager;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
@@ -14,7 +13,6 @@ use tokio_util::sync::CancellationToken;
 
 pub struct AppState {
     pub config_manager: ConfigManager,
-    pub password_manager: MasterPasswordManager,
     pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
     pub ai_cancellation_tokens: DashMap<String, CancellationToken>,

@@ -1,4 +1,3 @@
-pub mod encryption;
 pub mod loader;
 pub mod sync_manager;
 pub mod types;

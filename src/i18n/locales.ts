@@ -1062,4 +1062,3 @@ export const locales = {
 }
 
 export type LocaleType = keyof typeof locales
-export type TranslationKeys = typeof locales.en

@@ -103,25 +103,6 @@ impl WebDAVClient {
         Ok(Some(content.to_vec()))
     }
 
-    pub async fn exists(&self, filename: &str) -> Result<bool, Box<dyn Error>> {
-        let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
-
-        let response = self
-            .client
-            .head(&url)
-            .basic_auth(&self.username, Some(&self.password))
-            .header("Cache-Control", "no-cache")
-            .header("Pragma", "no-cache")
-            .send()
-            .await?;
-
-        Ok(response.status().is_success())
-    }
-
-    pub async fn test_connection(&self) -> Result<(), Box<dyn Error>> {
-        self.exists("test").await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

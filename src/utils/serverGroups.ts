@@ -10,14 +10,6 @@ export interface ServerGroup {
 const normalizeGroupName = (group?: string | null): string =>
   group?.trim() || ""
 
-export const getServerGroupName = (
-  server: Server,
-  defaultGroupName: string,
-): string => {
-  const groupName = normalizeGroupName(server.group)
-  return groupName || defaultGroupName
-}
-
 export const groupServersByName = (
   servers: Server[],
   defaultGroupName: string,
