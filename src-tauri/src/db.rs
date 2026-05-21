@@ -79,10 +79,6 @@ impl DatabaseManager {
         Ok(())
     }
 
-    pub fn get_connection(&self) -> Arc<Mutex<Connection>> {
-        self.conn.clone()
-    }
-
     /// 在 spawn_blocking 中执行同步 SQLite 操作，避免在 tokio worker 上阻塞 runtime。
     ///
     /// 使用方法：

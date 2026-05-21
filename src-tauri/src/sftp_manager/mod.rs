@@ -2562,12 +2562,20 @@ impl SftpManager {
                 Err(e) => format!("SFTP Download failed: {}. Path: {}", e, remote_path_inner),
             };
 
-            let conn = db_manager.get_connection();
-            let conn = conn.lock().unwrap();
-            let _ = conn.execute(
-                "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![msg_id, ai_sid, "system", content],
-            );
+            let _ = db_manager
+                .run_blocking({
+                    let msg_id = msg_id.clone();
+                    let ai_sid = ai_sid.clone();
+                    let content = content.clone();
+                    move |conn| {
+                        conn.execute(
+                            "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![msg_id, ai_sid, "system", content],
+                        )
+                        .map_err(|e| e.to_string())
+                    }
+                })
+                .await;
 
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
@@ -3382,12 +3390,20 @@ impl SftpManager {
                 Err(e) => format!("SFTP Upload failed: {}. Path: {}", e, local_path_inner),
             };
 
-            let conn = db_manager.get_connection();
-            let conn = conn.lock().unwrap();
-            let _ = conn.execute(
-                "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![msg_id, ai_sid, "system", content],
-            );
+            let _ = db_manager
+                .run_blocking({
+                    let msg_id = msg_id.clone();
+                    let ai_sid = ai_sid.clone();
+                    let content = content.clone();
+                    move |conn| {
+                        conn.execute(
+                            "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
+                            rusqlite::params![msg_id, ai_sid, "system", content],
+                        )
+                        .map_err(|e| e.to_string())
+                    }
+                })
+                .await;
 
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
