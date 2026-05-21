@@ -3,11 +3,12 @@ use crate::sftp_manager::SftpManager;
 use crate::ssh_manager::handler::ClientHandler;
 use base64::prelude::*;
 use bytes::Bytes;
+use dashmap::DashMap;
 use lazy_static::lazy_static;
 use russh::client::{self, AuthResult};
 use russh::keys::{self, PrivateKeyWithHashAlg};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -118,11 +119,21 @@ impl CompletionCheckState {
 // but SessionData itself is private.
 
 lazy_static! {
-    static ref SESSIONS: Mutex<HashMap<String, SessionData>> = Mutex::new(HashMap::new());
+    /// 每个 SSH session 用独立的 `Arc<Mutex<SessionData>>` 持有，
+    /// 顶层用 `DashMap`（shard 锁）只在 lookup/insert/remove 时短暂加锁，
+    /// 不再让一个 session 的 IO 阻塞所有其它 session 的查询。
+    static ref SESSIONS: DashMap<String, Arc<Mutex<SessionData>>> = DashMap::new();
 }
 
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 pub struct SSHClient;
+
+/// 从 DashMap 中拷贝出 `Arc<Mutex<SessionData>>`，
+/// 调用方应当**立刻** drop `SESSIONS.get` 返回的 shard guard
+/// 再去 `arc.lock().await`，避免持 shard guard 跨 await 引发死锁。
+fn get_session_arc(session_id: &str) -> Option<Arc<Mutex<SessionData>>> {
+    SESSIONS.get(session_id).map(|entry| Arc::clone(entry.value()))
+}
 
 impl SSHClient {
     pub fn set_app_handle(app_handle: AppHandle) {
@@ -174,14 +185,15 @@ impl SSHClient {
                 interval.tick().await;
 
                 let session_closed = {
-                    let sessions = SESSIONS.lock().await;
-                    match sessions.get(&session_id) {
-                        Some(session_data) if session_data.connection_generation == generation => {
-                            session_data.session.is_closed()
-                        }
-                        Some(_) => return,
+                    let arc = match get_session_arc(&session_id) {
+                        Some(arc) => arc,
                         None => return,
+                    };
+                    let data = arc.lock().await;
+                    if data.connection_generation != generation {
+                        return;
                     }
+                    data.session.is_closed()
                 };
 
                 if !session_closed {
@@ -235,11 +247,9 @@ impl SSHClient {
     async fn get_session_route(
         session_id: &str,
     ) -> Result<(Arc<russh::client::Handle<ClientHandler>>, russh::ChannelId), String> {
-        let sessions = SESSIONS.lock().await;
-        sessions
-            .get(session_id)
-            .map(|session_data| (session_data.session.clone(), session_data.channel.id()))
-            .ok_or_else(|| "Session not found".to_string())
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let data = arc.lock().await;
+        Ok((data.session.clone(), data.channel.id()))
     }
 
     pub async fn connect(
@@ -260,37 +270,34 @@ impl SSHClient {
         )
         .await?;
 
-        {
-            let mut sessions = SESSIONS.lock().await;
-            sessions.insert(
-                session_id.clone(),
-                SessionData {
-                    channel,
-                    session: Arc::new(session),
-                    jumphost_session: jh_session,
-                    connection_generation,
-                    config: params,
-                    transport_diagnostics: Self::default_transport_diagnostics(),
-                    tx,
-                    cols: initial_cols,
-                    rows: initial_rows,
-                    terminal_buffer: String::new(),
-                    terminal_selection: String::new(),
-                    command_recorder: None,
-                    last_output_len: 0,
-                    recording_prompt: None,
-                    recording_start_marker: None,
-                    recording_completion_marker: None,
-                    recent_completion_markers: VecDeque::new(),
-                    command_finished: false,
-                    last_exit_code: None,
-                    last_completion_check_state: None,
-                    last_completion_probe_recorder_len: 0,
-                    prompt_match_streak: 0,
-                    system_info: None,
-                },
-            );
-        }
+        SESSIONS.insert(
+            session_id.clone(),
+            Arc::new(Mutex::new(SessionData {
+                channel,
+                session: Arc::new(session),
+                jumphost_session: jh_session,
+                connection_generation,
+                config: params,
+                transport_diagnostics: Self::default_transport_diagnostics(),
+                tx,
+                cols: initial_cols,
+                rows: initial_rows,
+                terminal_buffer: String::new(),
+                terminal_selection: String::new(),
+                command_recorder: None,
+                last_output_len: 0,
+                recording_prompt: None,
+                recording_start_marker: None,
+                recording_completion_marker: None,
+                recent_completion_markers: VecDeque::new(),
+                command_finished: false,
+                last_exit_code: None,
+                last_completion_check_state: None,
+                last_completion_probe_recorder_len: 0,
+                prompt_match_streak: 0,
+                system_info: None,
+            })),
+        );
 
         Self::spawn_session_monitor(session_id.clone(), connection_generation);
         Ok(session_id)
@@ -795,18 +802,16 @@ impl SSHClient {
 
     pub async fn reconnect(session_id: &str) -> Result<(), String> {
         let (config, tx, cols, rows, previous_generation) = {
-            let sessions = SESSIONS.lock().await;
-            if let Some(data) = sessions.get(session_id) {
-                (
-                    data.config.clone(),
-                    data.tx.clone(),
-                    data.cols,
-                    data.rows,
-                    data.connection_generation,
-                )
-            } else {
-                return Err("Session not found".to_string());
-            }
+            let arc = get_session_arc(session_id)
+                .ok_or_else(|| "Session not found".to_string())?;
+            let data = arc.lock().await;
+            (
+                data.config.clone(),
+                data.tx.clone(),
+                data.cols,
+                data.rows,
+                data.connection_generation,
+            )
         };
 
         // Clear stale SFTP session
@@ -825,9 +830,9 @@ impl SSHClient {
         {
             Ok((channel, session, jh_session)) => {
                 let next_generation = previous_generation.saturating_add(1);
-                let reconnected = {
-                    let mut sessions = SESSIONS.lock().await;
-                    if let Some(data) = sessions.get_mut(session_id) {
+                let reconnected = match get_session_arc(session_id) {
+                    Some(arc) => {
+                        let mut data = arc.lock().await;
                         data.channel = channel;
                         data.session = Arc::new(session);
                         data.jumphost_session = jh_session;
@@ -846,9 +851,8 @@ impl SSHClient {
                         data.last_completion_probe_recorder_len = 0;
                         data.prompt_match_streak = 0;
                         true
-                    } else {
-                        false
                     }
+                    None => false,
                 };
 
                 if !reconnected {
@@ -872,25 +876,21 @@ impl SSHClient {
     }
 
     pub async fn resize(session_id: &str, cols: u32, rows: u32) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            session_data.cols = cols;
-            session_data.rows = rows;
-            session_data
-                .channel
-                .window_change(cols, rows, 0, 0)
-                .await
-                .map_err(|e| format!("Failed to resize: {}", e))?;
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        session_data.cols = cols;
+        session_data.rows = rows;
+        session_data
+            .channel
+            .window_change(cols, rows, 0, 0)
+            .await
+            .map_err(|e| format!("Failed to resize: {}", e))?;
+        Ok(())
     }
 
     pub async fn disconnect(session_id: &str) -> Result<(), String> {
         SftpManager::remove_session(session_id).await;
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(_) = sessions.remove(session_id) {
+        if SESSIONS.remove(session_id).is_some() {
             info!("[SSH] Session {} disconnected and removed.", session_id);
             Ok(())
         } else {
@@ -901,36 +901,30 @@ impl SSHClient {
     pub async fn get_session_handle(
         session_id: &str,
     ) -> Option<Arc<russh::client::Handle<ClientHandler>>> {
-        let sessions = SESSIONS.lock().await;
-        sessions.get(session_id).map(|s| s.session.clone())
+        let arc = get_session_arc(session_id)?;
+        let data = arc.lock().await;
+        Some(data.session.clone())
     }
     pub async fn get_session_transport_diagnostics(
         session_id: &str,
     ) -> Option<SshTransportDiagnostics> {
-        let sessions = SESSIONS.lock().await;
-        sessions
-            .get(session_id)
-            .map(|session| session.transport_diagnostics.clone())
+        let arc = get_session_arc(session_id)?;
+        let data = arc.lock().await;
+        Some(data.transport_diagnostics.clone())
     }
 
     /// Get the current terminal buffer content (last 100KB)
     pub async fn get_terminal_output(session_id: &str) -> Result<String, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            Ok(session_data.terminal_buffer.clone())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let data = arc.lock().await;
+        Ok(data.terminal_buffer.clone())
     }
 
     /// Get the current terminal selected text
     pub async fn get_selected_terminal_output(session_id: &str) -> Result<String, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            Ok(session_data.terminal_selection.clone())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let data = arc.lock().await;
+        Ok(data.terminal_selection.clone())
     }
 
     /// Update the terminal selection (called from frontend via Tauri command)
@@ -938,79 +932,67 @@ impl SSHClient {
         session_id: &str,
         selection: String,
     ) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            session_data.terminal_selection = selection;
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut data = arc.lock().await;
+        data.terminal_selection = selection;
+        Ok(())
     }
 
     /// Start recording output for a single command
     pub async fn start_command_recording(session_id: &str) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            session_data.command_recorder = Some(String::new());
-            session_data.last_output_len = session_data.terminal_buffer.len();
-            session_data.recording_prompt =
-                Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
-            let start_marker = format!("{}{}", START_MARKER_PREFIX, uuid::Uuid::new_v4().simple());
-            let completion_marker = format!(
-                "{}{}",
-                COMPLETION_MARKER_PREFIX,
-                uuid::Uuid::new_v4().simple()
-            );
-            session_data.recording_start_marker = Some(start_marker.clone());
-            session_data.recording_completion_marker = Some(completion_marker.clone());
-            session_data
-                .recent_completion_markers
-                .push_back(start_marker);
-            session_data
-                .recent_completion_markers
-                .push_back(completion_marker);
-            while session_data.recent_completion_markers.len() > COMPLETION_MARKER_HISTORY_LIMIT {
-                session_data.recent_completion_markers.pop_front();
-            }
-            session_data.command_finished = false;
-            session_data.last_exit_code = None;
-            session_data.last_completion_check_state = None;
-            session_data.last_completion_probe_recorder_len = 0;
-            session_data.prompt_match_streak = 0;
-
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        session_data.command_recorder = Some(String::new());
+        session_data.last_output_len = session_data.terminal_buffer.len();
+        session_data.recording_prompt =
+            Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
+        let start_marker = format!("{}{}", START_MARKER_PREFIX, uuid::Uuid::new_v4().simple());
+        let completion_marker = format!(
+            "{}{}",
+            COMPLETION_MARKER_PREFIX,
+            uuid::Uuid::new_v4().simple()
+        );
+        session_data.recording_start_marker = Some(start_marker.clone());
+        session_data.recording_completion_marker = Some(completion_marker.clone());
+        session_data
+            .recent_completion_markers
+            .push_back(start_marker);
+        session_data
+            .recent_completion_markers
+            .push_back(completion_marker);
+        while session_data.recent_completion_markers.len() > COMPLETION_MARKER_HISTORY_LIMIT {
+            session_data.recent_completion_markers.pop_front();
         }
+        session_data.command_finished = false;
+        session_data.last_exit_code = None;
+        session_data.last_completion_check_state = None;
+        session_data.last_completion_probe_recorder_len = 0;
+        session_data.prompt_match_streak = 0;
+
+        Ok(())
     }
 
     /// Build a queued marker command for completion detection.
     /// The marker is removed from terminal display output before emitting to frontend.
     pub async fn get_recording_start_marker_command(session_id: &str) -> Result<String, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            if let Some(marker) = session_data.recording_start_marker.as_ref() {
-                Ok(format!("printf '\\033]633;{}\\007'\n", marker))
-            } else {
-                Err("No active command recording start marker".to_string())
-            }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let session_data = arc.lock().await;
+        if let Some(marker) = session_data.recording_start_marker.as_ref() {
+            Ok(format!("printf '\\033]633;{}\\007'\n", marker))
         } else {
-            Err("Session not found".to_string())
+            Err("No active command recording start marker".to_string())
         }
     }
 
     /// Build a queued done-marker command for completion detection.
     /// The marker is removed from terminal display output before emitting to frontend.
     pub async fn get_recording_marker_command(session_id: &str) -> Result<String, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            if let Some(marker) = session_data.recording_completion_marker.as_ref() {
-                Ok(format!("printf '\\033]633;{}\\007'\n", marker))
-            } else {
-                Err("No active command recording marker".to_string())
-            }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let session_data = arc.lock().await;
+        if let Some(marker) = session_data.recording_completion_marker.as_ref() {
+            Ok(format!("printf '\\033]633;{}\\007'\n", marker))
         } else {
-            Err("Session not found".to_string())
+            Err("No active command recording marker".to_string())
         }
     }
 
@@ -1072,51 +1054,42 @@ impl SSHClient {
 
     /// Stop recording and get the recorded output since start_command_recording was called
     pub async fn stop_command_recording(session_id: &str) -> Result<String, String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            let mut recorded = session_data.command_recorder.take().unwrap_or_default();
-            for marker in session_data.recent_completion_markers.iter() {
-                recorded = Self::strip_completion_marker_artifacts(&recorded, marker);
-            }
-            session_data.recording_start_marker = None;
-            session_data.recording_completion_marker = None;
-            session_data.last_completion_check_state = None;
-            session_data.last_completion_probe_recorder_len = 0;
-            session_data.prompt_match_streak = 0;
-            Ok(recorded)
-        } else {
-            Err("Session not found".to_string())
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        let mut recorded = session_data.command_recorder.take().unwrap_or_default();
+        for marker in session_data.recent_completion_markers.iter() {
+            recorded = Self::strip_completion_marker_artifacts(&recorded, marker);
         }
+        session_data.recording_start_marker = None;
+        session_data.recording_completion_marker = None;
+        session_data.last_completion_check_state = None;
+        session_data.last_completion_probe_recorder_len = 0;
+        session_data.prompt_match_streak = 0;
+        Ok(recorded)
     }
 
     /// Check if currently recording a command
     pub async fn is_recording(session_id: &str) -> Result<bool, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            Ok(session_data.command_recorder.is_some())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let session_data = arc.lock().await;
+        Ok(session_data.command_recorder.is_some())
     }
 
     pub async fn is_recording_start_marker_seen(session_id: &str) -> Result<bool, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            let recorder = session_data.command_recorder.as_deref().unwrap_or("");
-            Ok(session_data
-                .recording_start_marker
-                .as_ref()
-                .is_some_and(|marker| recorder.contains(marker)))
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let session_data = arc.lock().await;
+        let recorder = session_data.command_recorder.as_deref().unwrap_or("");
+        Ok(session_data
+            .recording_start_marker
+            .as_ref()
+            .is_some_and(|marker| recorder.contains(marker)))
     }
 
     /// Check if command execution appears completed (completion marker or prompt detected).
     pub async fn check_command_completed(session_id: &str) -> Result<bool, String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            let current_buffer_len = session_data.terminal_buffer.len();
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        let current_buffer_len = session_data.terminal_buffer.len();
             let recording_start = session_data.last_output_len;
             let mut recorder_len = 0usize;
             let mut preview = String::new();
@@ -1189,50 +1162,44 @@ impl SSHClient {
             }
 
             Ok(state.is_completed())
-        } else {
-            Err("Session not found".to_string())
-        }
     }
 
     pub async fn get_command_recording_diagnostics(
         session_id: &str,
         tail_chars: usize,
     ) -> Result<String, String> {
-        let sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get(session_id) {
-            let recorder = session_data.command_recorder.as_deref().unwrap_or("");
-            let start_marker = session_data.recording_start_marker.clone();
-            let marker = session_data.recording_completion_marker.clone();
-            let start_marker_seen = start_marker.as_ref().is_some_and(|m| recorder.contains(m));
-            let marker_seen = marker.as_ref().is_some_and(|m| recorder.contains(m));
-            let recorder_tail: String = recorder
-                .chars()
-                .rev()
-                .take(tail_chars)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect();
-            let clean_tail =
-                String::from_utf8_lossy(&strip_ansi_escapes::strip(recorder_tail.as_bytes()))
-                    .to_string();
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let session_data = arc.lock().await;
+        let recorder = session_data.command_recorder.as_deref().unwrap_or("");
+        let start_marker = session_data.recording_start_marker.clone();
+        let marker = session_data.recording_completion_marker.clone();
+        let start_marker_seen = start_marker.as_ref().is_some_and(|m| recorder.contains(m));
+        let marker_seen = marker.as_ref().is_some_and(|m| recorder.contains(m));
+        let recorder_tail: String = recorder
+            .chars()
+            .rev()
+            .take(tail_chars)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        let clean_tail =
+            String::from_utf8_lossy(&strip_ansi_escapes::strip(recorder_tail.as_bytes()))
+                .to_string();
 
-            Ok(format!(
-                "recorder_len={}, start_marker_set={}, start_marker_seen={}, marker_set={}, marker_seen={}, prompt_expected={:?}, prompt_recorder={:?}, prompt_terminal={:?}, prompt_streak={}, recorder_tail={:?}",
-                recorder.len(),
-                start_marker.is_some(),
-                start_marker_seen,
-                marker.is_some(),
-                marker_seen,
-                session_data.recording_prompt.clone(),
-                Self::extract_prompt_suffix(recorder, 3),
-                Self::extract_prompt_suffix(&session_data.terminal_buffer, 3),
-                session_data.prompt_match_streak,
-                clean_tail
-            ))
-        } else {
-            Err("Session not found".to_string())
-        }
+        Ok(format!(
+            "recorder_len={}, start_marker_set={}, start_marker_seen={}, marker_set={}, marker_seen={}, prompt_expected={:?}, prompt_recorder={:?}, prompt_terminal={:?}, prompt_streak={}, recorder_tail={:?}",
+            recorder.len(),
+            start_marker.is_some(),
+            start_marker_seen,
+            marker.is_some(),
+            marker_seen,
+            session_data.recording_prompt.clone(),
+            Self::extract_prompt_suffix(recorder, 3),
+            Self::extract_prompt_suffix(&session_data.terminal_buffer, 3),
+            session_data.prompt_match_streak,
+            clean_tail
+        ))
     }
 
     /// Send interrupt signal (Ctrl+C) to the terminal
@@ -1287,59 +1254,51 @@ impl SSHClient {
     /// Append raw terminal bytes to command recorder as early as possible at SSH ingress.
     /// This keeps completion detection independent from frontend emission backpressure.
     pub async fn append_command_recorder_chunk(session_id: &str, data: &str) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            if let Some(recorder) = session_data.command_recorder.as_mut() {
-                recorder.push_str(data);
-            }
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        if let Some(recorder) = session_data.command_recorder.as_mut() {
+            recorder.push_str(data);
         }
+        Ok(())
     }
 
     /// Update the terminal buffer with new data
     pub async fn update_terminal_buffer(session_id: &str, data: &str) -> Result<String, String> {
         const MAX_BUFFER_SIZE: usize = 100_000;
 
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            let mut display_data = data.to_string();
-            for marker in session_data.recent_completion_markers.iter() {
-                display_data = Self::strip_completion_marker_artifacts(&display_data, marker);
-            }
-            session_data.terminal_buffer.push_str(&display_data);
-
-            // 仅在超出阈值时原地 drain 头部，避免分配 + 全量拷贝（最多 100KB）
-            if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
-                let mut cut_off = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
-                while cut_off < session_data.terminal_buffer.len()
-                    && !session_data.terminal_buffer.is_char_boundary(cut_off)
-                {
-                    cut_off += 1;
-                }
-                session_data.terminal_buffer.drain(..cut_off);
-            }
-
-            Ok(display_data)
-        } else {
-            Err("Session not found".to_string())
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        let mut display_data = data.to_string();
+        for marker in session_data.recent_completion_markers.iter() {
+            display_data = Self::strip_completion_marker_artifacts(&display_data, marker);
         }
+        session_data.terminal_buffer.push_str(&display_data);
+
+        // 仅在超出阈值时原地 drain 头部，避免分配 + 全量拷贝（最多 100KB）
+        if session_data.terminal_buffer.len() > MAX_BUFFER_SIZE {
+            let mut cut_off = session_data.terminal_buffer.len() - MAX_BUFFER_SIZE;
+            while cut_off < session_data.terminal_buffer.len()
+                && !session_data.terminal_buffer.is_char_boundary(cut_off)
+            {
+                cut_off += 1;
+            }
+            session_data.terminal_buffer.drain(..cut_off);
+        }
+
+        Ok(display_data)
     }
 
     pub async fn update_system_info(session_id: &str, info: SystemInfo) -> Result<(), String> {
-        let mut sessions = SESSIONS.lock().await;
-        if let Some(session_data) = sessions.get_mut(session_id) {
-            session_data.system_info = Some(info);
-            Ok(())
-        } else {
-            Err("Session not found".to_string())
-        }
+        let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
+        let mut session_data = arc.lock().await;
+        session_data.system_info = Some(info);
+        Ok(())
     }
 
     pub async fn get_system_info(session_id: &str) -> Option<SystemInfo> {
-        let sessions = SESSIONS.lock().await;
-        sessions.get(session_id).and_then(|s| s.system_info.clone())
+        let arc = get_session_arc(session_id)?;
+        let data = arc.lock().await;
+        data.system_info.clone()
     }
 
     pub async fn gather_system_info(params: ConnectParams) -> Result<SystemInfo, String> {

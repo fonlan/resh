@@ -7,23 +7,25 @@ use futures::FutureExt;
 use futures::StreamExt;
 use lazy_static::lazy_static;
 use russh_sftp::client::RawSftpSession;
-use russh_sftp::extensions::{self, LimitsExtension};
+use russh_sftp::extensions;
 use russh_sftp::protocol::{FileAttributes, OpenFlags, Packet, Status, StatusCode};
 use russh_sftp::ser;
-use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::io::SeekFrom;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::oneshot;
 use tokio::sync::{Mutex, Notify};
 use uuid::Uuid;
 
+mod cache;
+mod copy;
 pub mod edit;
+mod tuning;
 mod types;
 
 pub use types::{
@@ -32,248 +34,34 @@ pub use types::{
     TransferType,
 };
 
-const COPY_DATA_EXTENSION_NAME: &str = "copy-data";
-const COPY_DATA_EXTENSION_VERSION: &str = "1";
-const COPY_TRANSFER_TYPE: &str = "copy";
-const COPY_DATA_UNSUPPORTED_ERROR: &str = "SFTP_COPY_DATA_UNSUPPORTED";
-const SFTP_REQUEST_TIMEOUT_SECS: u64 = 60;
-const DOWNLOAD_CHUNK_SIZE_SAFE: u64 = 32 * 1024;
-const DOWNLOAD_CHUNK_SIZE_BALANCED: u64 = 64 * 1024;
-const DOWNLOAD_CHUNK_SIZE_FAST: u64 = 128 * 1024;
-const DOWNLOAD_MAX_INFLIGHT_SAFE: usize = 8;
-const DOWNLOAD_MAX_INFLIGHT_BALANCED: usize = 32;
-const DOWNLOAD_MAX_INFLIGHT_FAST: usize = 48;
-const DOWNLOAD_TARGET_OUTSTANDING_BYTES_SAFE: u64 = 1024 * 1024;
-const DOWNLOAD_TARGET_OUTSTANDING_BYTES_BALANCED: u64 = 4 * 1024 * 1024;
-const DOWNLOAD_TARGET_OUTSTANDING_BYTES_FAST: u64 = 8 * 1024 * 1024;
-const DOWNLOAD_CHUNK_ROUNDING_BYTES: u64 = 32 * 1024;
-const MIN_CHUNK_SIZE_BYTES: u64 = 4 * 1024;
-const MAX_CHUNK_SIZE_BYTES: u64 = 1024 * 1024;
-const UPLOAD_CHUNK_SIZE_SAFE: u64 = 64 * 1024;
-const UPLOAD_CHUNK_SIZE_BALANCED: u64 = 128 * 1024;
-const UPLOAD_CHUNK_SIZE_FAST: u64 = 256 * 1024;
-const UPLOAD_MAX_INFLIGHT_SAFE: usize = 6;
-const UPLOAD_MAX_INFLIGHT_BALANCED: usize = 12;
-const UPLOAD_MAX_INFLIGHT_FAST: usize = 16;
-const UPLOAD_CHUNK_WRITE_TIMEOUT_SECS: u64 = 30;
-const UPLOAD_TIMEOUT_DOWNGRADE_THRESHOLD: u32 = 2;
-const UPLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
-const DOWNLOAD_CHUNK_READ_TIMEOUT_SECS: u64 = 30;
-const DOWNLOAD_TIMEOUT_DOWNGRADE_THRESHOLD: u32 = 2;
-const DOWNLOAD_FALLBACK_LOCK_TIMEOUT_THRESHOLD: u32 = 4;
-const DOWNLOAD_STALL_FORCE_SINGLE_FLIGHT_SECS: u64 = 20;
-const DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS: u32 = 4;
-const DOWNLOAD_CHUNK_GROWTH_SUCCESS_CHUNKS: u32 = 4;
-const DOWNLOAD_BDP_TARGET_MULTIPLIER: f64 = 1.5;
-const DOWNLOAD_MAX_RETRIES_PER_CHUNK: u8 = 2;
-const MAX_INFLIGHT_LIMIT: usize = 64;
-const TRANSFER_DIAG_INTERVAL_SECS: u64 = 2;
-const DEFAULT_MAX_CONCURRENT_TRANSFERS: u32 = 2;
-const DEFAULT_MAX_CONCURRENT_TRANSFERS_PER_SESSION: u32 = 2;
-
-#[derive(Clone, Copy, Debug, Default)]
-struct SftpServerLimits {
-    max_packet_len: Option<u64>,
-    max_read_len: Option<u64>,
-    max_write_len: Option<u64>,
-    max_open_handles: Option<u64>,
-}
-
-impl SftpServerLimits {
-    fn from_extension(limits: LimitsExtension) -> Self {
-        Self {
-            max_packet_len: (limits.max_packet_len > 0).then_some(limits.max_packet_len),
-            max_read_len: (limits.max_read_len > 0).then_some(limits.max_read_len),
-            max_write_len: (limits.max_write_len > 0).then_some(limits.max_write_len),
-            max_open_handles: (limits.max_open_handles > 0).then_some(limits.max_open_handles),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-enum TransferProfile {
-    Safe,
-    Balanced,
-    Fast,
-}
-
-impl TransferProfile {
-    fn from_str(raw: &str) -> Self {
-        match raw {
-            "safe" => Self::Safe,
-            "fast" => Self::Fast,
-            _ => Self::Balanced,
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Safe => "safe",
-            Self::Balanced => "balanced",
-            Self::Fast => "fast",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TransferRuntimeConfig {
-    profile: TransferProfile,
-    download_max_inflight: usize,
-    upload_max_inflight: usize,
-    chunk_size_min: u64,
-    chunk_size_max: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TransferTuning {
-    profile: TransferProfile,
-    download_chunk_size: u64,
-    download_chunk_size_min: u64,
-    download_chunk_size_max: u64,
-    download_target_outstanding_bytes: u64,
-    upload_chunk_size: u64,
-    download_max_inflight: usize,
-    upload_max_inflight: usize,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SpeedSampler {
-    display_speed: f64,
-    last_sample_at: Instant,
-    last_sample_bytes: u64,
-}
-
-impl SpeedSampler {
-    fn new(start_at: Instant) -> Self {
-        Self {
-            display_speed: 0.0,
-            last_sample_at: start_at,
-            last_sample_bytes: 0,
-        }
-    }
-
-    fn sample(&mut self, now: Instant, transferred_bytes: u64) -> f64 {
-        let sample_secs = now.duration_since(self.last_sample_at).as_secs_f64();
-        if sample_secs > 0.0 && transferred_bytes >= self.last_sample_bytes {
-            let instant_speed = (transferred_bytes - self.last_sample_bytes) as f64 / sample_secs;
-            self.display_speed = if self.display_speed > 0.0 {
-                (self.display_speed * 0.6) + (instant_speed * 0.4)
-            } else {
-                instant_speed
-            };
-        }
-        self.last_sample_at = now;
-        self.last_sample_bytes = transferred_bytes;
-        self.display_speed
-    }
-    fn current_speed(&self) -> f64 {
-        self.display_speed
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct TransferDiagnostics {
-    started_at: Instant,
-    last_logged_at: Instant,
-    timeout_count: u32,
-    consecutive_timeout_count: u32,
-    downgrade_count: u32,
-    retry_count: u32,
-    rtt_total_ms: f64,
-    rtt_samples: u64,
-}
-
-impl TransferDiagnostics {
-    fn new(now: Instant) -> Self {
-        Self {
-            started_at: now,
-            last_logged_at: now,
-            timeout_count: 0,
-            consecutive_timeout_count: 0,
-            downgrade_count: 0,
-            retry_count: 0,
-            rtt_total_ms: 0.0,
-            rtt_samples: 0,
-        }
-    }
-
-    fn record_rtt(&mut self, elapsed: Duration) {
-        self.rtt_total_ms += elapsed.as_secs_f64() * 1000.0;
-        self.rtt_samples += 1;
-    }
-
-    fn avg_rtt_ms(&self) -> Option<f64> {
-        if self.rtt_samples == 0 {
-            None
-        } else {
-            Some(self.rtt_total_ms / self.rtt_samples as f64)
-        }
-    }
-
-    fn mark_timeout(&mut self) {
-        self.timeout_count += 1;
-        self.consecutive_timeout_count += 1;
-    }
-
-    fn mark_retry(&mut self) {
-        self.retry_count += 1;
-    }
-
-    fn mark_success(&mut self) {
-        self.consecutive_timeout_count = 0;
-    }
-
-    fn mark_downgrade(&mut self) {
-        self.downgrade_count += 1;
-        self.consecutive_timeout_count = 0;
-    }
-
-    fn should_log_progress(&self, now: Instant) -> bool {
-        now.duration_since(self.last_logged_at) >= Duration::from_secs(TRANSFER_DIAG_INTERVAL_SECS)
-    }
-
-    fn touch_log_time(&mut self, now: Instant) {
-        self.last_logged_at = now;
-    }
-}
-
-#[derive(Serialize)]
-struct CopyDataExtension {
-    read_from_handle: String,
-    read_from_offset: u64,
-    read_data_length: u64,
-    write_to_handle: String,
-    write_to_offset: u64,
-}
-
-enum ServerSideCopyError {
-    Unsupported,
-    Other(String),
-}
-
-#[derive(Clone, Copy)]
-enum CopyMode {
-    ServerSideOnly,
-    StreamingOnly,
-}
-
-struct CopyProgressContext<'a> {
-    app: &'a AppHandle,
-    task_id: &'a str,
-    session_id: &'a str,
-    file_name: &'a str,
-    source: &'a str,
-    destination: &'a str,
-}
+use cache::{
+    CachedDirectoryListing, DIRECTORY_LISTING_CACHE_MAX_ENTRIES,
+    DIRECTORY_LISTING_PAGE_LIMIT_DEFAULT, DIRECTORY_LISTING_PAGE_LIMIT_MAX,
+};
+use copy::{
+    CopyDataExtension, CopyMode, CopyProgressContext, ServerSideCopyError,
+    COPY_DATA_EXTENSION_NAME, COPY_DATA_EXTENSION_VERSION, COPY_DATA_UNSUPPORTED_ERROR,
+    COPY_TRANSFER_TYPE,
+};
+use tuning::{
+    SftpServerLimits, SpeedSampler, TransferDiagnostics, TransferProfile, TransferRuntimeConfig,
+    TransferTuning, DEFAULT_MAX_CONCURRENT_TRANSFERS, DEFAULT_MAX_CONCURRENT_TRANSFERS_PER_SESSION,
+    DOWNLOAD_BDP_TARGET_MULTIPLIER, DOWNLOAD_CHUNK_GROWTH_SUCCESS_CHUNKS,
+    DOWNLOAD_CHUNK_READ_TIMEOUT_SECS, DOWNLOAD_CHUNK_ROUNDING_BYTES, DOWNLOAD_CHUNK_SIZE_BALANCED,
+    DOWNLOAD_CHUNK_SIZE_FAST, DOWNLOAD_CHUNK_SIZE_SAFE, DOWNLOAD_FALLBACK_LOCK_TIMEOUT_THRESHOLD,
+    DOWNLOAD_MAX_INFLIGHT_BALANCED, DOWNLOAD_MAX_INFLIGHT_FAST, DOWNLOAD_MAX_INFLIGHT_SAFE,
+    DOWNLOAD_MAX_RETRIES_PER_CHUNK, DOWNLOAD_RAMP_UP_SUCCESS_CHUNKS,
+    DOWNLOAD_STALL_FORCE_SINGLE_FLIGHT_SECS, DOWNLOAD_TARGET_OUTSTANDING_BYTES_BALANCED,
+    DOWNLOAD_TARGET_OUTSTANDING_BYTES_FAST, DOWNLOAD_TARGET_OUTSTANDING_BYTES_SAFE,
+    DOWNLOAD_TIMEOUT_DOWNGRADE_THRESHOLD, MAX_CHUNK_SIZE_BYTES, MAX_INFLIGHT_LIMIT,
+    MIN_CHUNK_SIZE_BYTES, SFTP_REQUEST_TIMEOUT_SECS, UPLOAD_CHUNK_SIZE_BALANCED,
+    UPLOAD_CHUNK_SIZE_FAST, UPLOAD_CHUNK_SIZE_SAFE, UPLOAD_CHUNK_WRITE_TIMEOUT_SECS,
+    UPLOAD_MAX_INFLIGHT_BALANCED, UPLOAD_MAX_INFLIGHT_FAST, UPLOAD_MAX_INFLIGHT_SAFE,
+    UPLOAD_MAX_RETRIES_PER_CHUNK, UPLOAD_TIMEOUT_DOWNGRADE_THRESHOLD,
+};
 
 #[derive(Clone, Debug)]
 struct SftpTransportDiagnostics;
-#[derive(Clone)]
-struct CachedDirectoryListing {
-    session_id: String,
-    files: Arc<Vec<FileEntry>>,
-    created_at: Instant,
-}
 
 lazy_static! {
     static ref SFTP_SESSIONS: Mutex<HashMap<String, Arc<RawSftpSession>>> =
@@ -297,10 +85,6 @@ lazy_static! {
     static ref DIRECTORY_LISTING_CACHE: Mutex<HashMap<String, CachedDirectoryListing>> =
         Mutex::new(HashMap::new());
 }
-
-const DIRECTORY_LISTING_CACHE_MAX_ENTRIES: usize = 32;
-const DIRECTORY_LISTING_PAGE_LIMIT_DEFAULT: usize = 400;
-const DIRECTORY_LISTING_PAGE_LIMIT_MAX: usize = 2_000;
 
 pub struct SftpManager;
 
