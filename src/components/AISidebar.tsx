@@ -4,6 +4,7 @@
   useRef,
   useMemo,
   useCallback,
+  useLayoutEffect,
   useOptimistic,
 } from "react"
 import { useAIStore } from "../stores/useAIStore"
@@ -187,6 +188,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const reasoningChunkBufferRef = useRef("")
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastErrorToastRef = useRef<{ message: string; at: number } | null>(null)
+  const scrollPositionsRef = useRef<Record<string, number>>({})
+  const pendingScrollRestoreRef = useRef<{
+    key: string
+    scrollTop: number
+  } | null>(null)
+  const isRestoringScrollRef = useRef(false)
 
   const showAiError = useCallback(
     (error: unknown) => {
@@ -405,6 +412,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     !isLoading &&
     !pendingToolCalls &&
     latestAssistantMessageSourceIndex !== null
+  const scrollPositionKey = useMemo(() => {
+    const scope = currentTabId
+      ? `tab:${currentTabId}`
+      : currentServerId
+        ? `server:${currentServerId}`
+        : "global"
+    return `${scope}:session:${activeSessionId || "none"}`
+  }, [activeSessionId, currentServerId, currentTabId])
+
   const renderableListItems = useMemo<RenderableListItem[]>(() => {
     const sessionKey = activeSessionId || "no-session"
     const items: RenderableListItem[] = renderableMessages.map(
@@ -482,14 +498,91 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (messagesContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } =
         messagesContainerRef.current
+      scrollPositionsRef.current[scrollPositionKey] = scrollTop
       const atBottom = scrollHeight - scrollTop - clientHeight < 50
       isAtBottomRef.current = atBottom
     }
-  }, [])
+  }, [scrollPositionKey])
 
-  useEffect(() => {
-    isAtBottomRef.current = true
-  }, [activeSessionId])
+  useLayoutEffect(() => {
+    return () => {
+      const container = messagesContainerRef.current
+      if (!container) {
+        return
+      }
+
+      scrollPositionsRef.current[scrollPositionKey] = container.scrollTop
+    }
+  }, [isOpen, scrollPositionKey, showHistory])
+
+  useLayoutEffect(() => {
+    if (!isOpen || showHistory) {
+      pendingScrollRestoreRef.current = null
+      isRestoringScrollRef.current = false
+      return
+    }
+
+    const savedScrollTop = scrollPositionsRef.current[scrollPositionKey]
+    if (savedScrollTop === undefined) {
+      pendingScrollRestoreRef.current = null
+      isRestoringScrollRef.current = false
+      isAtBottomRef.current = true
+      return
+    }
+
+    pendingScrollRestoreRef.current = {
+      key: scrollPositionKey,
+      scrollTop: savedScrollTop,
+    }
+    isRestoringScrollRef.current = true
+  }, [isOpen, scrollPositionKey, showHistory])
+
+  useLayoutEffect(() => {
+    const pendingRestore = pendingScrollRestoreRef.current
+    const container = messagesContainerRef.current
+
+    if (
+      !isOpen ||
+      showHistory ||
+      !container ||
+      !pendingRestore ||
+      pendingRestore.key !== scrollPositionKey
+    ) {
+      return
+    }
+
+    const restoreScrollTop = () => {
+      const maxScrollTop = Math.max(
+        0,
+        container.scrollHeight - container.clientHeight,
+      )
+      const nextScrollTop = Math.min(pendingRestore.scrollTop, maxScrollTop)
+      container.scrollTop = nextScrollTop
+      isAtBottomRef.current = maxScrollTop - nextScrollTop < 50
+    }
+
+    restoreScrollTop()
+
+    if (renderableListItems.length === 0 && pendingRestore.scrollTop > 0) {
+      return
+    }
+
+    const rafId = requestAnimationFrame(() => {
+      restoreScrollTop()
+      if (pendingScrollRestoreRef.current?.key === scrollPositionKey) {
+        pendingScrollRestoreRef.current = null
+        isRestoringScrollRef.current = false
+      }
+    })
+
+    return () => cancelAnimationFrame(rafId)
+  }, [
+    isOpen,
+    renderableListItems.length,
+    scrollPositionKey,
+    showHistory,
+    virtualizedTotalHeight,
+  ])
 
   const lastMessageRenderSignature = useMemo(() => {
     const lastMsg = currentMessages[currentMessages.length - 1]
@@ -504,6 +597,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [currentMessages])
 
   useEffect(() => {
+    if (isRestoringScrollRef.current) {
+      return
+    }
+
     if (!isAtBottomRef.current) {
       return
     }
