@@ -2,7 +2,6 @@ import React, {
   useState,
   useCallback,
   useEffect,
-  useRef,
   useMemo,
   Suspense,
 } from "react"
@@ -49,87 +48,27 @@ import { useTranslation } from "../i18n"
 import { useTabDragDrop } from "../hooks/useTabDragDrop"
 import { EmojiText } from "./EmojiText"
 import { useTransferStore } from "../stores/transferStore"
-
-type TabKind = "terminal" | "editor"
-
-interface BaseTab {
-  id: string
-  label: string
-  serverId: string
-  kind: TabKind
-}
-
-interface TerminalTabState extends BaseTab {
-  kind: "terminal"
-  temporaryServer?: Config["servers"][number]
-}
-
-interface EditorTabState extends BaseTab {
-  kind: "editor"
-  sessionId: string
-  remotePath: string
-  localPath: string
-  dirty: boolean
-  language: string
-}
-
-type Tab = TerminalTabState | EditorTabState
-
-const isTerminalTab = (tab: Tab): tab is TerminalTabState =>
-  tab.kind === "terminal"
-
-const isEditorTab = (tab: Tab): tab is EditorTabState => tab.kind === "editor"
-
-interface OpenEditorTabPayload {
-  serverId: string
-  sessionId: string
-  remotePath: string
-  localPath: string
-  content: string
-  encoding: string
-  language: string
-  dirty?: boolean
-  label?: string
-}
-interface EditorDocumentState {
-  content: string
-  savedContent: string
-  encoding: string
-  isSaving: boolean
-}
-type PendingDirtyEditorAction =
-  | {
-      type: "switch"
-      sourceTabId: string
-      nextTabId: string
-    }
-  | {
-      type: "close"
-      tabId: string
-    }
-const getFileNameFromPath = (path: string): string => {
-  const normalized = path.replace(/\\/g, "/")
-  const segments = normalized.split("/")
-  const fileName = segments[segments.length - 1]?.trim()
-  return fileName || normalized
-}
-interface SplitViewState {
-  layout: SplitLayout
-  tabIds: string[]
-}
-
-const EMPTY_SERVERS: Config["servers"] = []
-const EMPTY_AUTHENTICATIONS: Config["authentications"] = []
-const EMPTY_PROXIES: Config["proxies"] = []
-const SPLIT_LAYOUT_REQUIRED_TABS: Record<SplitLayout, number> = {
-  horizontal: 2,
-  vertical: 2,
-  grid: 4,
-}
-const MIN_FIXED_TAB_WIDTH = 120
-const MAX_FIXED_TAB_WIDTH = 400
-const DEFAULT_FIXED_TAB_WIDTH = 200
-const MIN_TITLEBAR_DRAG_SPACER_WIDTH = 40
+import {
+  isEditorTab,
+  isTerminalTab,
+  type EditorDocumentState,
+  type EditorTabState,
+  type OpenEditorTabPayload,
+  type PendingDirtyEditorAction,
+  type SplitViewState,
+  type Tab,
+} from "./main/types"
+import {
+  DEFAULT_FIXED_TAB_WIDTH,
+  EMPTY_AUTHENTICATIONS,
+  EMPTY_PROXIES,
+  EMPTY_SERVERS,
+  getFileNameFromPath,
+  MAX_FIXED_TAB_WIDTH,
+  MIN_FIXED_TAB_WIDTH,
+  SPLIT_LAYOUT_REQUIRED_TABS,
+} from "./main/helpers"
+import { useTabLayoutMeasurement } from "./main/useTabLayoutMeasurement"
 
 export const MainWindow: React.FC = () => {
   const { config, saveConfig, getLatestConfig } = useConfig()
@@ -238,22 +177,27 @@ export const MainWindow: React.FC = () => {
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [pendingSplitLayout, setPendingSplitLayout] =
     useState<SplitLayout | null>(null)
-  const titleBarRef = useRef<HTMLDivElement | null>(null)
-  const tabListRef = useRef<HTMLDivElement | null>(null)
-  const rightControlsRef = useRef<HTMLDivElement | null>(null)
-  const newTabButtonRef = useRef<HTMLDivElement | null>(null)
-  const [tabListMaxWidth, setTabListMaxWidth] = useState(0)
-  const [newTabButtonWidth, setNewTabButtonWidth] = useState(0)
+  const {
+    titleBarRef,
+    tabListRef,
+    rightControlsRef,
+    newTabButtonRef,
+    tabListMaxWidth,
+    newTabButtonWidth,
+  } = useTabLayoutMeasurement(tabs.length)
   const [isTabListOverflowing, setIsTabListOverflowing] = useState(false)
 
   const servers = config?.servers || EMPTY_SERVERS
   const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
   const proxies = config?.proxies || EMPTY_PROXIES
 
-  const serverById = new Map<string, Config["servers"][number]>()
-  servers.forEach((server) => {
-    serverById.set(server.id, server)
-  })
+  const serverById = useMemo(() => {
+    const map = new Map<string, Config["servers"][number]>()
+    servers.forEach((server) => {
+      map.set(server.id, server)
+    })
+    return map
+  }, [servers])
   const temporaryServerById = useMemo(() => {
     const map = new Map<string, Config["servers"][number]>()
     tabs.forEach((tab) => {
@@ -1248,50 +1192,6 @@ export const MainWindow: React.FC = () => {
   const resolvedTabWidthMode = shouldFallbackToAdaptive
     ? "adaptive"
     : tabWidthMode
-
-  useEffect(() => {
-    const titleBarElement = titleBarRef.current
-    if (!titleBarElement) {
-      return
-    }
-
-    const updateLayoutSizes = () => {
-      const nextTitleBarWidth = titleBarElement.clientWidth
-      const nextRightControlsWidth = rightControlsRef.current?.offsetWidth ?? 0
-      const nextTabListMaxWidth = Math.max(
-        0,
-        nextTitleBarWidth -
-          nextRightControlsWidth -
-          MIN_TITLEBAR_DRAG_SPACER_WIDTH,
-      )
-      const nextNewTabButtonWidth = newTabButtonRef.current?.offsetWidth ?? 0
-      setTabListMaxWidth((prev) =>
-        prev === nextTabListMaxWidth ? prev : nextTabListMaxWidth,
-      )
-      setNewTabButtonWidth((prev) =>
-        prev === nextNewTabButtonWidth ? prev : nextNewTabButtonWidth,
-      )
-    }
-
-    updateLayoutSizes()
-
-    if (typeof ResizeObserver === "undefined") {
-      return
-    }
-
-    const resizeObserver = new ResizeObserver(updateLayoutSizes)
-    resizeObserver.observe(titleBarElement)
-    if (rightControlsRef.current)
-      resizeObserver.observe(rightControlsRef.current)
-    if (newTabButtonRef.current) resizeObserver.observe(newTabButtonRef.current)
-
-    window.addEventListener("resize", updateLayoutSizes)
-
-    return () => {
-      window.removeEventListener("resize", updateLayoutSizes)
-      resizeObserver.disconnect()
-    }
-  }, [tabs.length])
 
   useEffect(() => {
     const tabListElement = tabListRef.current

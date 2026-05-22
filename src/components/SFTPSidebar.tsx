@@ -1,4 +1,4 @@
-import React, {
+﻿import React, {
   useState,
   useEffect,
   useRef,
@@ -14,13 +14,9 @@ import {
   Folder,
   File,
   ChevronRight,
-  ChevronDown,
   Download,
   Upload,
   RefreshCw,
-  FolderOpen,
-  FolderSymlink,
-  FileSymlink,
   ArrowDownUp,
   ArrowUp,
   ArrowDown,
@@ -56,6 +52,40 @@ import type {
   TransferTask,
   SftpCustomCommand,
 } from "../types"
+import { FileTreeItem } from "./sftp/FileTreeItem"
+import { useIncrementalRenderCount } from "./sftp/useIncrementalRenderCount"
+import {
+  CONTEXT_MENU_VIEWPORT_PADDING,
+  CONTEXT_SUBMENU_GAP,
+  CONTEXT_SUBMENU_WIDTH,
+  COPY_DATA_UNSUPPORTED_ERROR,
+  getParentPath,
+  getPathAncestors,
+  joinRemotePath,
+  normalizeRemotePath,
+  normalizeSftpPath,
+  SFTP_ENTRY_MIME_TYPE,
+  SFTP_LISTING_PAGE_SIZE,
+  SFTP_PATH_MIME_TYPE,
+  updateTreeNodeByPath,
+} from "./sftp/helpers"
+import {
+  DEFAULT_SORT_STATE,
+  type ClipboardState,
+  type ContextMenuPosition,
+  type ContextSubmenuPosition,
+  type CopyFallbackModalState,
+  type DirectoryListResult,
+  type DirectoryListingHandle,
+  type DirectoryListingPage,
+  type FavoriteTarget,
+  type FileEntry,
+  type SessionState,
+  type SftpOpenTextFileResult,
+  type SortOrder,
+  type SortState,
+  type SortType,
+} from "./sftp/types"
 
 interface SFTPSidebarProps {
   isOpen: boolean
@@ -70,379 +100,6 @@ interface SFTPSidebarProps {
     duration?: number,
   ) => void
   zIndex?: number
-}
-
-interface FileEntry {
-  name: string
-  path: string
-  is_dir: boolean
-  is_symlink?: boolean
-  target_is_dir?: boolean
-  link_target?: string
-  size: number
-  modified: number
-  permissions?: number
-  children?: FileEntry[]
-  isExpanded?: boolean
-  isLoading?: boolean
-}
-
-interface DirectoryListResult {
-  path: string
-  files: FileEntry[]
-  error: string | null
-}
-
-interface DirectoryListingHandle {
-  token: string
-  total: number
-}
-
-interface DirectoryListingPage {
-  files: FileEntry[]
-  total: number
-  next_offset: number | null
-}
-
-interface SftpOpenTextFileResult {
-  sessionId: string
-  remotePath: string
-  localPath: string
-  content: string
-  encoding: string
-  languageHint?: string
-}
-const SFTP_PATH_MIME_TYPE = "application/x-resh-sftp-path"
-const SFTP_ENTRY_MIME_TYPE = "application/x-resh-sftp-entry"
-const COPY_DATA_UNSUPPORTED_ERROR = "SFTP_COPY_DATA_UNSUPPORTED"
-const TREE_RENDER_BATCH_SIZE = 250
-const SFTP_LISTING_PAGE_SIZE = 400
-
-interface CopyFallbackModalState {
-  isOpen: boolean
-  sessionId: string
-  sourcePath: string
-  destPath: string
-  targetPath: string
-}
-
-interface ContextSubmenuPosition {
-  top: number
-  left: number
-  maxHeight: number
-}
-
-interface ContextMenuPosition {
-  top: number
-  left: number
-}
-
-const normalizeSftpPath = (path: string): string => path.replace(/\\/g, "/")
-const CONTEXT_SUBMENU_WIDTH = 220
-const CONTEXT_MENU_VIEWPORT_PADDING = 8
-const CONTEXT_SUBMENU_GAP = 4
-
-const updateTreeNodeByPath = (
-  nodes: FileEntry[],
-  targetPath: string,
-  updater: (node: FileEntry) => FileEntry,
-): { nodes: FileEntry[]; found: boolean } => {
-  const normalizedTargetPath = normalizeSftpPath(targetPath)
-
-  const walk = (list: FileEntry[]): { nodes: FileEntry[]; found: boolean } => {
-    for (let index = 0; index < list.length; index += 1) {
-      const node = list[index]
-      if (normalizeSftpPath(node.path) === normalizedTargetPath) {
-        const nextNode = updater(node)
-        if (nextNode === node) {
-          return { nodes: list, found: false }
-        }
-        const nextList = list.slice()
-        nextList[index] = nextNode
-        return { nodes: nextList, found: true }
-      }
-
-      if (node.children && node.children.length > 0) {
-        const childResult = walk(node.children)
-        if (childResult.found) {
-          const nextList = list.slice()
-          nextList[index] = { ...node, children: childResult.nodes }
-          return { nodes: nextList, found: true }
-        }
-      }
-    }
-
-    return { nodes: list, found: false }
-  }
-
-  return walk(nodes)
-}
-
-const useIncrementalRenderCount = (total: number, enabled: boolean): number => {
-  const [count, setCount] = useState(0)
-
-  useEffect(() => {
-    if (!enabled || total <= 0) {
-      setCount(0)
-      return
-    }
-
-    if (total <= TREE_RENDER_BATCH_SIZE) {
-      setCount(total)
-      return
-    }
-
-    let cancelled = false
-    let frameId: number | null = null
-
-    setCount(TREE_RENDER_BATCH_SIZE)
-
-    const pump = () => {
-      frameId = window.requestAnimationFrame(() => {
-        if (cancelled) {
-          return
-        }
-
-        setCount((prev) => {
-          if (prev >= total) {
-            return prev
-          }
-
-          const next = Math.min(prev + TREE_RENDER_BATCH_SIZE, total)
-          if (next < total) {
-            pump()
-          }
-          return next
-        })
-      })
-    }
-
-    pump()
-
-    return () => {
-      cancelled = true
-      if (frameId !== null) {
-        window.cancelAnimationFrame(frameId)
-      }
-    }
-  }, [enabled, total])
-
-  return Math.min(count, total)
-}
-
-const formatPermissions = (entry: FileEntry): string => {
-  const mode = entry.permissions
-  if (mode === undefined) return ""
-
-  let type = "-"
-  if (entry.is_dir) type = "d"
-  else if (entry.is_symlink) type = "l"
-
-  const r = (m: number) => (m & 4 ? "r" : "-")
-  const w = (m: number) => (m & 2 ? "w" : "-")
-  const x = (m: number) => (m & 1 ? "x" : "-")
-  const part = (m: number) => r(m) + w(m) + x(m)
-
-  return type + part((mode >> 6) & 7) + part((mode >> 3) & 7) + part(mode & 7)
-}
-
-const FileTreeItem: React.FC<{
-  entry: FileEntry
-  depth: number
-  onToggle: (entry: FileEntry) => void
-  onOpen: (entry: FileEntry) => void
-  onContextMenu: (e: React.MouseEvent, entry: FileEntry) => void
-  onDragStart: (e: React.DragEvent<HTMLButtonElement>, entry: FileEntry) => void
-  clipboardSourcePath?: string
-  clipboardIsCut?: boolean
-}> = ({
-  entry,
-  depth,
-  onToggle,
-  onOpen,
-  onContextMenu,
-  onDragStart,
-  clipboardSourcePath,
-  clipboardIsCut,
-}) => {
-  const isInClipboard = clipboardSourcePath === entry.path
-  const clipboardTextClass = isInClipboard
-    ? clipboardIsCut
-      ? "line-through opacity-60"
-      : "italic opacity-60"
-    : ""
-  const rowRef = useRef<HTMLButtonElement>(null)
-  const nameRef = useRef<HTMLSpanElement>(null)
-  const [showFullNameTooltip, setShowFullNameTooltip] = useState(false)
-  const totalChildren = entry.children?.length || 0
-  const visibleChildrenCount = useIncrementalRenderCount(
-    totalChildren,
-    Boolean(entry.isExpanded) && totalChildren > 0,
-  )
-  const visibleChildren = useMemo(() => {
-    if (!entry.children) {
-      return []
-    }
-    if (visibleChildrenCount >= entry.children.length) {
-      return entry.children
-    }
-    return entry.children.slice(0, visibleChildrenCount)
-  }, [entry.children, visibleChildrenCount])
-
-  const updateTooltipVisibility = useCallback(() => {
-    const rowElement = rowRef.current
-    const nameElement = nameRef.current
-    if (!rowElement || !nameElement) {
-      setShowFullNameTooltip(false)
-      return
-    }
-
-    const treeContainer = rowElement.closest("[data-sftp-tree-scroll]")
-    if (!(treeContainer instanceof HTMLElement)) {
-      setShowFullNameTooltip(nameElement.scrollWidth > nameElement.clientWidth)
-      return
-    }
-
-    const containerRect = treeContainer.getBoundingClientRect()
-    const nameRect = nameElement.getBoundingClientRect()
-    const isPartiallyHidden =
-      nameRect.left < containerRect.left || nameRect.right > containerRect.right
-    const isTextOverflowed = nameElement.scrollWidth > nameElement.clientWidth
-    setShowFullNameTooltip(isPartiallyHidden || isTextOverflowed)
-  }, [])
-
-  return (
-    <div>
-      <button
-        ref={rowRef}
-        type="button"
-        draggable
-        data-sftp-path={entry.path}
-        className={`flex items-center gap-2 py-0.5 px-0.75 !important cursor-pointer text-[14px] leading-normal text-[var(--text-primary)] whitespace-nowrap select-none border-0 !important bg-transparent min-w-full w-max text-left hover:bg-[var(--bg-tertiary)] ${isInClipboard ? "opacity-50" : ""}`}
-        onClick={() => onToggle(entry)}
-        onDoubleClick={() => onOpen(entry)}
-        onContextMenu={(e) => onContextMenu(e, entry)}
-        onDragStart={(e) => onDragStart(e, entry)}
-        onMouseEnter={updateTooltipVisibility}
-        onFocus={updateTooltipVisibility}
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
-      >
-        <div className="w-4 flex-shrink-0 flex items-center justify-center">
-          {(entry.is_dir || (entry.is_symlink && entry.target_is_dir)) &&
-            (entry.isLoading ? (
-              <RefreshCw size={10} className="animate-spin text-gray-500" />
-            ) : entry.isExpanded ? (
-              <ChevronDown size={14} className="text-gray-500" />
-            ) : (
-              <ChevronRight size={14} className="text-gray-500" />
-            ))}
-        </div>
-
-        {entry.is_symlink ? (
-          entry.target_is_dir ? (
-            <FolderSymlink
-              size={16}
-              className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400"
-            />
-          ) : (
-            <FileSymlink
-              size={16}
-              className="text-[var(--text-muted)] flex-shrink-0"
-            />
-          )
-        ) : entry.is_dir ? (
-          entry.isExpanded ? (
-            <FolderOpen
-              size={16}
-              className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400"
-            />
-          ) : (
-            <Folder
-              size={16}
-              className="text-[var(--text-muted)] flex-shrink-0 !text-amber-400 !stroke-amber-400"
-            />
-          )
-        ) : (
-          <File size={16} className="text-[var(--text-muted)] flex-shrink-0" />
-        )}
-
-        <span
-          ref={nameRef}
-          className={`ml-0.25 flex-1 whitespace-nowrap ${clipboardTextClass}`}
-          title={showFullNameTooltip ? entry.name : undefined}
-        >
-          {entry.name}
-          {entry.link_target && (
-            <span className="text-[var(--text-muted)] opacity-60 ml-2 text-[12px]">
-              → {entry.link_target}
-            </span>
-          )}
-        </span>
-
-        {entry.permissions !== undefined && (
-          <span className="ml-auto text-[10px] text-[var(--text-muted)] opacity-65 font-mono pr-1 flex-shrink-0">
-            {formatPermissions(entry)}
-          </span>
-        )}
-      </button>
-
-      {entry.isExpanded && entry.children && (
-        <div className="sftp-tree-children">
-          {visibleChildren.map((child) => (
-            <FileTreeItem
-              key={child.path}
-              entry={child}
-              depth={depth + 1}
-              onToggle={onToggle}
-              onOpen={onOpen}
-              onContextMenu={onContextMenu}
-              onDragStart={onDragStart}
-              clipboardSourcePath={clipboardSourcePath}
-              clipboardIsCut={clipboardIsCut}
-            />
-          ))}
-          {visibleChildrenCount < totalChildren && (
-            <div
-              className="flex items-center py-0.5 text-[var(--text-muted)]"
-              style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}
-            >
-              <RefreshCw size={10} className="animate-spin opacity-65" />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-type SortType = "name" | "modified"
-type SortOrder = "asc" | "desc"
-
-interface SortState {
-  type: SortType
-  order: SortOrder
-}
-
-const DEFAULT_SORT_STATE: SortState = { type: "name", order: "asc" }
-
-interface ClipboardState {
-  sourcePath: string
-  sourceName: string
-  isDir: boolean
-  isCut: boolean
-  sessionId: string
-}
-
-interface SessionState {
-  rootFiles: FileEntry[]
-  currentPath: string
-  sortState: SortState
-  isLoading: boolean
-}
-
-interface FavoriteTarget {
-  serverId: string
-  path: string
 }
 
 export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
@@ -1669,48 +1326,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     handleCloseContextMenu()
   }
 
-  const normalizeRemotePath = (path: string): string => {
-    const normalized = path.replace(/\\/g, "/").replace(/\/+/g, "/")
-    if (normalized === "") return "/"
-    if (normalized.length > 1 && normalized.endsWith("/")) {
-      return normalized.slice(0, -1)
-    }
-    return normalized
-  }
-
-  const getParentPath = (path: string): string => {
-    const normalized = normalizeRemotePath(path)
-    if (normalized === "/" || normalized === ".") return "/"
-    const lastSlash = normalized.lastIndexOf("/")
-    return lastSlash <= 0 ? "/" : normalized.substring(0, lastSlash)
-  }
-
-  const joinRemotePath = (parentPath: string, itemName: string): string => {
-    const normalizedParentPath = normalizeRemotePath(parentPath)
-    const normalizedItemName = itemName.replace(/^\/+/, "").replace(/\/+$/, "")
-    if (normalizedParentPath === "/") {
-      return `/${normalizedItemName}`
-    }
-    return `${normalizedParentPath}/${normalizedItemName}`
-  }
-
-  const getPathAncestors = (path: string): string[] => {
-    const normalizedPath = normalizeRemotePath(path)
-    if (normalizedPath === "/" || normalizedPath === ".") {
-      return []
-    }
-
-    const parts = normalizedPath.split("/").filter(Boolean)
-    const ancestors: string[] = []
-    let current = ""
-    parts.forEach((part) => {
-      current = `${current}/${part}`
-      ancestors.push(current)
-    })
-
-    return ancestors
-  }
-
   const scrollTreePathIntoView = (targetPath: string) => {
     const normalizedTargetPath = normalizeRemotePath(targetPath)
     let attempts = 0
@@ -1775,7 +1390,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       updater: (paths: string[]) => string[],
     ): Promise<boolean> => {
       try {
-        // 优先走 useConfig 的 ref，避免每次都跨进程 invoke；初次加载未完成时兜底回 IPC
+        // 浼樺厛璧?useConfig 鐨?ref锛岄伩鍏嶆瘡娆￠兘璺ㄨ繘绋?invoke锛涘垵娆″姞杞芥湭瀹屾垚鏃跺厹搴曞洖 IPC
         const latestConfig =
           getLatestConfig() ?? (await invoke<Config>("get_config"))
         const targetServer = latestConfig.servers.find(
@@ -2909,7 +2524,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
         title={t.sftp.modals.deleteConfirmTitle}
         message={t.sftp.modals.deleteConfirmMessage
           .replace("this item", `"${deleteModal.entry?.name}"`)
-          .replace("此项", `"${deleteModal.entry?.name}"`)}
+          .replace("姝ら」", `"${deleteModal.entry?.name}"`)}
         confirmText={t.common.delete}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteModal({ isOpen: false, entry: null })}
