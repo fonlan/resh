@@ -15,6 +15,7 @@ export interface Server {
   sftpFavoritePaths?: string[]
   additionalPrompt?: string | null
   synced: boolean
+  createdAt?: string
   updatedAt: string
 }
 

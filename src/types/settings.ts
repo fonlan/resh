@@ -48,6 +48,12 @@ export type AIMode = "ask" | "agent"
 export type RecordingMode = "raw" | "text"
 export type TabWidthMode = "adaptive" | "fixed"
 export type TerminalRightClickMode = "contextMenu" | "selectionCopyPaste"
+export type NewTabServerSort =
+  | "default"
+  | "recent"
+  | "connectionCount"
+  | "createdAt"
+  | "updatedAt"
 
 export interface GeneralSettings {
   theme: Theme
@@ -70,5 +76,7 @@ export interface GeneralSettings {
   tabWidthMode: TabWidthMode
   tabFixedWidth: number
   terminalRightClickMode: TerminalRightClickMode
+  tabNewServerSort: NewTabServerSort
+  serverConnectionCounts: Record<string, number>
   aiModelId?: string
 }

@@ -1,5 +1,7 @@
 // src-tauri/src/config/types.rs
 
+use std::collections::HashMap;
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
@@ -49,6 +51,10 @@ pub struct Server {
     pub additional_prompt: Option<String>,
     #[serde(default = "default_true")]
     pub synced: bool,
+    #[serde(default)]
+    #[serde(alias = "created_at")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
     #[serde(default = "default_updated_at")]
     #[serde(alias = "updated_at")]
     pub updated_at: String,
@@ -353,6 +359,12 @@ pub struct GeneralSettings {
     #[serde(default = "default_terminal_right_click_mode")]
     #[serde(alias = "terminalRightClickMode", alias = "terminal_right_click_mode")]
     pub terminal_right_click_mode: String,
+    #[serde(default = "default_tab_new_server_sort")]
+    #[serde(alias = "tabNewServerSort", alias = "tab_new_server_sort")]
+    pub tab_new_server_sort: String,
+    #[serde(default)]
+    #[serde(alias = "serverConnectionCounts", alias = "server_connection_counts")]
+    pub server_connection_counts: HashMap<String, u32>,
     #[serde(default)]
     #[serde(alias = "aiModelId", alias = "ai_model_id")]
     pub ai_model_id: Option<String>,
@@ -372,6 +384,10 @@ fn default_tab_fixed_width() -> u32 {
 
 fn default_terminal_right_click_mode() -> String {
     "contextMenu".to_string()
+}
+
+fn default_tab_new_server_sort() -> String {
+    "default".to_string()
 }
 
 fn default_ai_mode() -> String {
@@ -533,6 +549,8 @@ impl Config {
                 tab_width_mode: default_tab_width_mode(),
                 tab_fixed_width: default_tab_fixed_width(),
                 terminal_right_click_mode: default_terminal_right_click_mode(),
+                tab_new_server_sort: default_tab_new_server_sort(),
+                server_connection_counts: HashMap::new(),
                 ai_model_id: None,
             },
         }

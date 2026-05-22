@@ -1,5 +1,5 @@
 import React from "react"
-import { GeneralSettings } from "../../types"
+import { GeneralSettings, NewTabServerSort } from "../../types"
 import { useTranslation } from "../../i18n"
 import { CustomSelect } from "../CustomSelect"
 
@@ -47,6 +47,12 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
     terminalRightClickMode: "contextMenu" | "selectionCopyPaste",
   ) => {
     onGeneralUpdate({ ...general, terminalRightClickMode })
+  }
+
+  const handleTabNewServerSortChange = (
+    tabNewServerSort: NewTabServerSort,
+  ) => {
+    onGeneralUpdate({ ...general, tabNewServerSort })
   }
 
   const handleTerminalUpdate = (
@@ -246,6 +252,32 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
                   value: "selectionCopyPaste",
                   label: t.terminalRightClickModes.selectionCopyPaste,
                 },
+              ]}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5 mb-4">
+            <label
+              htmlFor="tab-new-server-sort-select"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.tabNewServerSort}
+            </label>
+            <CustomSelect
+              id="tab-new-server-sort-select"
+              value={general.tabNewServerSort || "default"}
+              onChange={(val) =>
+                handleTabNewServerSortChange(val as NewTabServerSort)
+              }
+              options={[
+                { value: "default", label: t.tabNewServerSorts.default },
+                { value: "recent", label: t.tabNewServerSorts.recent },
+                {
+                  value: "connectionCount",
+                  label: t.tabNewServerSorts.connectionCount,
+                },
+                { value: "createdAt", label: t.tabNewServerSorts.createdAt },
+                { value: "updatedAt", label: t.tabNewServerSorts.updatedAt },
               ]}
             />
           </div>

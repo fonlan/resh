@@ -662,6 +662,7 @@ export const MainWindow: React.FC = () => {
       sftpFavoritePaths: [],
       additionalPrompt: null,
       synced: false,
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     }
 
@@ -1460,6 +1461,9 @@ export const MainWindow: React.FC = () => {
           <div ref={newTabButtonRef} className="shrink-0" role="presentation">
             <NewTabButton
               servers={config?.servers || []}
+              serverSort={config?.general.tabNewServerSort}
+              recentServerIds={config?.general.recentServerIds}
+              serverConnectionCounts={config?.general.serverConnectionCounts}
               onServerSelect={handleAddTab}
               onQuickConnect={handleAddQuickConnectTab}
               onOpenSettings={() => handleOpenSettings("servers")}

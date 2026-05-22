@@ -76,6 +76,7 @@ export const ServerForm = ({
         snippets: server.snippets || [],
         sftpFavoritePaths: server.sftpFavoritePaths || [],
         synced: server.synced !== undefined ? server.synced : true,
+        createdAt: server.createdAt,
         updatedAt: server.updatedAt || new Date().toISOString(),
         additionalPrompt: server.additionalPrompt || "",
       }
@@ -195,6 +196,11 @@ export const ServerForm = ({
         sftpFavoritePaths: normalizeFavoritePaths(
           formData.sftpFavoritePaths || [],
         ),
+        createdAt:
+          formData.createdAt ||
+          server?.createdAt ||
+          server?.updatedAt ||
+          new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }
       onSave(serverToSave)

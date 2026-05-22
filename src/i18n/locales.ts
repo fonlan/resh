@@ -59,6 +59,14 @@ export const locales = {
       contextMenu: "Context Menu (Copy/Paste)",
       selectionCopyPaste: "Select to Copy + Right-Click to Paste",
     },
+    tabNewServerSort: "New tab server list sort",
+    tabNewServerSorts: {
+      default: "Default sort (grouped)",
+      recent: "Recently connected",
+      connectionCount: "Most connected",
+      createdAt: "Created time",
+      updatedAt: "Updated time",
+    },
     saveStatus: {
       saving: "Saving...",
       saved: "Saved",
@@ -596,6 +604,14 @@ export const locales = {
     terminalRightClickModes: {
       contextMenu: "右键菜单 (复制/粘贴)",
       selectionCopyPaste: "选中复制 + 右键粘贴",
+    },
+    tabNewServerSort: "标签栏加号服务器列表排序",
+    tabNewServerSorts: {
+      default: "默认排序 (按分组显示)",
+      recent: "最近连接",
+      connectionCount: "最多连接",
+      createdAt: "创建时间",
+      updatedAt: "更新时间",
     },
     saveStatus: {
       saving: "正在保存...",

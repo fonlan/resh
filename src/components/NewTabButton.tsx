@@ -8,7 +8,7 @@ import {
   ChevronRight,
   ArrowRight,
 } from "lucide-react"
-import { Server } from "../types"
+import { NewTabServerSort, Server } from "../types"
 import { useTranslation } from "../i18n"
 import { EmojiText } from "./EmojiText"
 import { groupServersByName } from "../utils/serverGroups"
@@ -20,6 +20,9 @@ export interface QuickConnectTarget {
 
 interface NewTabButtonProps {
   servers: Server[]
+  serverSort?: NewTabServerSort
+  recentServerIds?: string[]
+  serverConnectionCounts?: Record<string, number>
   onServerSelect: (serverId: string) => void
   onQuickConnect: (target: QuickConnectTarget) => void
   onOpenSettings: () => void
@@ -27,6 +30,9 @@ interface NewTabButtonProps {
 
 export const NewTabButton: React.FC<NewTabButtonProps> = ({
   servers,
+  serverSort,
+  recentServerIds,
+  serverConnectionCounts,
   onServerSelect,
   onQuickConnect,
   onOpenSettings,
@@ -160,12 +166,62 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
     setIsOpen(false)
   }
 
+  const resolvedServerSort = serverSort || "default"
+  const sortedServers = useMemo(() => {
+    if (resolvedServerSort === "default") {
+      return servers
+    }
+
+    const recentOrderById = new Map(
+      (recentServerIds || []).map((id, index) => [id, index]),
+    )
+    const counts = serverConnectionCounts || {}
+    const toTimestamp = (value?: string | null) => {
+      if (!value) {
+        return 0
+      }
+      const timestamp = Date.parse(value)
+      return Number.isFinite(timestamp) ? timestamp : 0
+    }
+
+    return servers
+      .map((server, index) => ({ server, index }))
+      .sort((a, b) => {
+        let result = 0
+
+        if (resolvedServerSort === "recent") {
+          const aOrder = recentOrderById.get(a.server.id) ?? Number.MAX_SAFE_INTEGER
+          const bOrder = recentOrderById.get(b.server.id) ?? Number.MAX_SAFE_INTEGER
+          result = aOrder - bOrder
+        } else if (resolvedServerSort === "connectionCount") {
+          result = (counts[b.server.id] || 0) - (counts[a.server.id] || 0)
+        } else if (resolvedServerSort === "createdAt") {
+          result =
+            toTimestamp(b.server.createdAt || b.server.updatedAt) -
+            toTimestamp(a.server.createdAt || a.server.updatedAt)
+        } else if (resolvedServerSort === "updatedAt") {
+          result =
+            toTimestamp(b.server.updatedAt) - toTimestamp(a.server.updatedAt)
+        }
+
+        return result || a.index - b.index
+      })
+      .map(({ server }) => server)
+  }, [recentServerIds, resolvedServerSort, serverConnectionCounts, servers])
+
   const groupedServers = useMemo(
-    () => groupServersByName(servers, t.serverTab.defaultGroup),
-    [servers, t.serverTab.defaultGroup],
+    () =>
+      resolvedServerSort === "default"
+        ? groupServersByName(servers, t.serverTab.defaultGroup)
+        : [],
+    [resolvedServerSort, servers, t.serverTab.defaultGroup],
   )
 
   useEffect(() => {
+    if (resolvedServerSort !== "default") {
+      return
+    }
+
     setCollapsedGroups((prev) => {
       const next: Record<string, boolean> = {}
       groupedServers.forEach((group) => {
@@ -173,7 +229,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
       })
       return next
     })
-  }, [groupedServers])
+  }, [groupedServers, resolvedServerSort])
 
   const toggleGroup = (groupId: string) => {
     setCollapsedGroups((prev) => ({
@@ -181,6 +237,29 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
       [groupId]: !prev[groupId],
     }))
   }
+
+  const renderServerButton = (server: Server) => (
+    <button
+      type="button"
+      key={server.id}
+      className="w-full flex items-center gap-[14px] p-[12px_16px] bg-transparent border-none rounded-[var(--radius-md)] cursor-pointer transition-all duration-200 text-left text-[var(--text-secondary)] my-0.5 hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-primary)] hover:translate-x-1 group"
+      onClick={() => handleServerClick(server.id)}
+    >
+      <ServerIcon
+        size={18}
+        className="text-[var(--accent-primary)] opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110"
+      />
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-[14px] font-bold text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis">
+          <EmojiText text={server.name} />
+        </span>
+        <span className="text-[11px] text-[var(--text-muted)] font-mono opacity-70 whitespace-nowrap overflow-hidden text-ellipsis">
+          {server.username ? `${server.username}@` : ""}
+          {server.host}
+        </span>
+      </div>
+    </button>
+  )
 
   const menu =
     isOpen && menuPosition
@@ -240,7 +319,7 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               )}
             </div>
 
-            {groupedServers.length === 0 ? (
+            {servers.length === 0 ? (
               <div className="p-[32px_24px] flex flex-col items-center gap-3 text-center text-[var(--text-secondary)]">
                 <ServerIcon size={32} />
                 <span>{t.welcome.noServers}</span>
@@ -255,57 +334,37 @@ export const NewTabButton: React.FC<NewTabButtonProps> = ({
               </div>
             ) : (
               <div className="p-1.5 overflow-y-auto max-h-[400px]">
-                {groupedServers.map((group) => {
-                  const isCollapsed = !!collapsedGroups[group.id]
+                {resolvedServerSort === "default"
+                  ? groupedServers.map((group) => {
+                      const isCollapsed = !!collapsedGroups[group.id]
 
-                  return (
-                    <div key={group.id} className="mb-1">
-                      <button
-                        type="button"
-                        onClick={() => toggleGroup(group.id)}
-                        className="w-full flex items-center gap-1.5 px-2 py-1.5 bg-transparent border-none rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-secondary)] cursor-pointer transition-all"
-                        title={
-                          isCollapsed
-                            ? t.newTabButton.expandGroup
-                            : t.newTabButton.collapseGroup
-                        }
-                      >
-                        {isCollapsed ? (
-                          <ChevronRight size={14} />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
-                        <span className="text-[11px] uppercase tracking-[0.08em] font-semibold">
-                          {group.name}
-                        </span>
-                      </button>
-
-                      {!isCollapsed &&
-                        group.servers.map((server) => (
+                      return (
+                        <div key={group.id} className="mb-1">
                           <button
                             type="button"
-                            key={server.id}
-                            className="w-full flex items-center gap-[14px] p-[12px_16px] bg-transparent border-none rounded-[var(--radius-md)] cursor-pointer transition-all duration-200 text-left text-[var(--text-secondary)] my-0.5 hover:bg-[rgba(255,255,255,0.05)] hover:text-[var(--text-primary)] hover:translate-x-1 group"
-                            onClick={() => handleServerClick(server.id)}
+                            onClick={() => toggleGroup(group.id)}
+                            className="w-full flex items-center gap-1.5 px-2 py-1.5 bg-transparent border-none rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:bg-[rgba(255,255,255,0.04)] hover:text-[var(--text-secondary)] cursor-pointer transition-all"
+                            title={
+                              isCollapsed
+                                ? t.newTabButton.expandGroup
+                                : t.newTabButton.collapseGroup
+                            }
                           >
-                            <ServerIcon
-                              size={18}
-                              className="text-[var(--accent-primary)] opacity-60 transition-all duration-200 group-hover:opacity-100 group-hover:scale-110"
-                            />
-                            <div className="flex flex-col min-w-0 flex-1">
-                              <span className="text-[14px] font-bold text-[var(--text-primary)] whitespace-nowrap overflow-hidden text-ellipsis">
-                                <EmojiText text={server.name} />
-                              </span>
-                              <span className="text-[11px] text-[var(--text-muted)] font-mono opacity-70 whitespace-nowrap overflow-hidden text-ellipsis">
-                                {server.username ? `${server.username}@` : ""}
-                                {server.host}
-                              </span>
-                            </div>
+                            {isCollapsed ? (
+                              <ChevronRight size={14} />
+                            ) : (
+                              <ChevronDown size={14} />
+                            )}
+                            <span className="text-[11px] uppercase tracking-[0.08em] font-semibold">
+                              {group.name}
+                            </span>
                           </button>
-                        ))}
-                    </div>
-                  )
-                })}
+
+                          {!isCollapsed && group.servers.map(renderServerButton)}
+                        </div>
+                      )
+                    })
+                  : sortedServers.map(renderServerButton)}
               </div>
             )}
 
