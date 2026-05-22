@@ -70,6 +70,40 @@ import {
 } from "./main/helpers"
 import { useTabLayoutMeasurement } from "./main/useTabLayoutMeasurement"
 
+type RememberedSplitViews = Record<string, SplitViewState>
+
+const isRememberedSplitViewValid = (
+  splitView: SplitViewState,
+  validTabIds: Set<string>,
+): boolean => {
+  const requiredTabs = SPLIT_LAYOUT_REQUIRED_TABS[splitView.layout]
+  return (
+    splitView.tabIds.length >= requiredTabs &&
+    splitView.tabIds.every((splitTabId) => validTabIds.has(splitTabId))
+  )
+}
+
+const pruneRememberedSplitViews = (
+  splitViews: RememberedSplitViews,
+  validTabIds: Set<string>,
+): RememberedSplitViews => {
+  let changed = false
+  const next: RememberedSplitViews = {}
+
+  Object.entries(splitViews).forEach(([tabId, splitView]) => {
+    const hasValidOwner = validTabIds.has(tabId)
+
+    if (!hasValidOwner || !isRememberedSplitViewValid(splitView, validTabIds)) {
+      changed = true
+      return
+    }
+
+    next[tabId] = splitView
+  })
+
+  return changed ? next : splitViews
+}
+
 export const MainWindow: React.FC = () => {
   const { config, saveConfig, getLatestConfig } = useConfig()
   const { t } = useTranslation()
@@ -175,6 +209,8 @@ export const MainWindow: React.FC = () => {
   const [pendingDirtyAction, setPendingDirtyAction] =
     useState<PendingDirtyEditorAction | null>(null)
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
+  const [rememberedSplitViews, setRememberedSplitViews] =
+    useState<RememberedSplitViews>({})
   const [pendingSplitLayout, setPendingSplitLayout] =
     useState<SplitLayout | null>(null)
   const {
@@ -289,10 +325,24 @@ export const MainWindow: React.FC = () => {
   }, [])
 
   const handleExitSplitView = useCallback(() => {
+    const splitTabIds = splitView?.tabIds || []
     setSplitView(null)
     setPendingSplitLayout(null)
+    if (splitTabIds.length > 0) {
+      setRememberedSplitViews((prev) => {
+        let changed = false
+        const next = { ...prev }
+        splitTabIds.forEach((tabId) => {
+          if (tabId in next) {
+            delete next[tabId]
+            changed = true
+          }
+        })
+        return changed ? next : prev
+      })
+    }
     triggerTerminalResize()
-  }, [triggerTerminalResize])
+  }, [splitView, triggerTerminalResize])
 
   const handleStartSplitSelection = useCallback((layout: SplitLayout) => {
     setPendingSplitLayout(layout)
@@ -314,10 +364,18 @@ export const MainWindow: React.FC = () => {
           ? activeTabId
           : selectedTabIds[0]
 
-      setSplitView({
+      const nextSplitView: SplitViewState = {
         layout: pendingSplitLayout,
         tabIds: selectedTabIds,
-      })
+      }
+
+      setSplitView(nextSplitView)
+      setRememberedSplitViews((prev) => ({
+        ...prev,
+        ...Object.fromEntries(
+          selectedTabIds.map((tabId) => [tabId, nextSplitView]),
+        ),
+      }))
       setActiveTabId(nextActiveTabId)
       setPendingSplitLayout(null)
       triggerTerminalResize()
@@ -327,35 +385,12 @@ export const MainWindow: React.FC = () => {
 
   const selectTabImmediate = useCallback(
     (tabId: string) => {
-      if (!splitView) {
-        setActiveTabId(tabId)
-        return
-      }
-
-      if (splitView.tabIds.includes(tabId)) {
-        setActiveTabId(tabId)
-        return
-      }
-
-      const nextSplitTabIds = [...splitView.tabIds]
-      const replaceIndex = activeTabId
-        ? nextSplitTabIds.indexOf(activeTabId)
-        : -1
-
-      if (replaceIndex >= 0) {
-        nextSplitTabIds[replaceIndex] = tabId
-      } else {
-        nextSplitTabIds[0] = tabId
-      }
-
-      setSplitView({
-        ...splitView,
-        tabIds: nextSplitTabIds,
-      })
+      setSplitView(rememberedSplitViews[tabId] || null)
+      setPendingSplitLayout(null)
       setActiveTabId(tabId)
       triggerTerminalResize()
     },
-    [splitView, activeTabId, triggerTerminalResize],
+    [rememberedSplitViews, triggerTerminalResize],
   )
 
   const handleTabSelect = useCallback(
@@ -384,6 +419,9 @@ export const MainWindow: React.FC = () => {
       if (splitView) {
         setSplitView(null)
       }
+      if (Object.keys(rememberedSplitViews).length > 0) {
+        setRememberedSplitViews({})
+      }
       if (activeTabId !== null) {
         setActiveTabId(null)
       }
@@ -392,8 +430,21 @@ export const MainWindow: React.FC = () => {
 
     const validTabIds = new Set(tabs.map((tab) => tab.id))
 
+    setRememberedSplitViews((prev) =>
+      pruneRememberedSplitViews(prev, validTabIds),
+    )
+
     if (activeTabId && !validTabIds.has(activeTabId)) {
-      setActiveTabId(tabs[0].id)
+      const nextActiveTabId = tabs[0].id
+      const nextSplitView = rememberedSplitViews[nextActiveTabId] || null
+      setActiveTabId(nextActiveTabId)
+      setSplitView(
+        nextSplitView && isRememberedSplitViewValid(nextSplitView, validTabIds)
+          ? nextSplitView
+          : null,
+      )
+      triggerTerminalResize()
+      return
     }
 
     if (!splitView) {
@@ -426,7 +477,7 @@ export const MainWindow: React.FC = () => {
     if (activeTabId && !filteredTabIds.includes(activeTabId)) {
       setActiveTabId(filteredTabIds[0])
     }
-  }, [tabs, activeTabId, splitView, triggerTerminalResize])
+  }, [tabs, activeTabId, splitView, rememberedSplitViews, triggerTerminalResize])
 
   useEffect(() => {
     if (servers.length === 0) return
@@ -486,10 +537,26 @@ export const MainWindow: React.FC = () => {
         return
       }
       const newTabs = tabs.filter((t) => t.id !== tabId)
+      const validTabIds = new Set(newTabs.map((tab) => tab.id))
       setTabs(newTabs)
       if (activeTabId === tabId) {
-        setActiveTabId(newTabs.length > 0 ? newTabs[0].id : null)
+        const nextActiveTabId = newTabs.length > 0 ? newTabs[0].id : null
+        const nextSplitView = nextActiveTabId
+          ? rememberedSplitViews[nextActiveTabId] || null
+          : null
+        setActiveTabId(nextActiveTabId)
+        setSplitView(
+          nextSplitView && isRememberedSplitViewValid(nextSplitView, validTabIds)
+            ? nextSplitView
+            : null,
+        )
+      } else if (splitView?.tabIds.includes(tabId)) {
+        setSplitView(null)
       }
+      setRememberedSplitViews((prev) =>
+        pruneRememberedSplitViews(prev, validTabIds),
+      )
+      triggerTerminalResize()
       setTabSessions((prev) => {
         const next = { ...prev }
         delete next[tabId]
@@ -516,7 +583,7 @@ export const MainWindow: React.FC = () => {
         })
       }
     },
-    [tabs, activeTabId],
+    [tabs, activeTabId, rememberedSplitViews, splitView, triggerTerminalResize],
   )
 
   const handleCloseTab = useCallback(
@@ -557,12 +624,15 @@ export const MainWindow: React.FC = () => {
       }
 
       setTabs((prev) => [...prev, newTab])
+      setSplitView(null)
+      setPendingSplitLayout(null)
       setActiveTabId(newTab.id)
+      triggerTerminalResize()
 
       const updatedGeneral = addRecentServer(currentConfig.general, serverId)
       await saveConfig({ ...currentConfig, general: updatedGeneral })
     },
-    [saveConfig, getLatestConfig],
+    [saveConfig, getLatestConfig, triggerTerminalResize],
   )
 
   const handleAddQuickConnectTab = useCallback((target: QuickConnectTarget) => {
@@ -604,8 +674,11 @@ export const MainWindow: React.FC = () => {
     }
 
     setTabs((prev) => [...prev, newTab])
+    setSplitView(null)
+    setPendingSplitLayout(null)
     setActiveTabId(newTab.id)
-  }, [])
+    triggerTerminalResize()
+  }, [triggerTerminalResize])
 
   const handleAddEditorTab = useCallback(
     (payload: OpenEditorTabPayload) => {
@@ -651,9 +724,12 @@ export const MainWindow: React.FC = () => {
           isSaving: false,
         },
       }))
+      setSplitView(null)
+      setPendingSplitLayout(null)
       setActiveTabId(newTab.id)
+      triggerTerminalResize()
     },
-    [showToast, t.mainWindow.editor.invalidPayload],
+    [showToast, t.mainWindow.editor.invalidPayload, triggerTerminalResize],
   )
 
   const handleEditorContentChange = useCallback(
@@ -870,9 +946,18 @@ export const MainWindow: React.FC = () => {
           },
         }))
       }
+      setSplitView(null)
+      setPendingSplitLayout(null)
       setActiveTabId(newTab.id)
+      triggerTerminalResize()
     },
-    [tabs, editorDocuments, showToast, t.mainWindow.editor.documentMissing],
+    [
+      tabs,
+      editorDocuments,
+      showToast,
+      t.mainWindow.editor.documentMissing,
+      triggerTerminalResize,
+    ],
   )
 
   const handleCloseOthers = useCallback(
@@ -882,7 +967,11 @@ export const MainWindow: React.FC = () => {
         return
       }
       setTabs([targetTab])
+      setSplitView(null)
+      setPendingSplitLayout(null)
+      setRememberedSplitViews({})
       setActiveTabId(tabId)
+      triggerTerminalResize()
       setEditorDocuments((prev) => {
         if (!isEditorTab(targetTab)) {
           return {}
@@ -912,7 +1001,7 @@ export const MainWindow: React.FC = () => {
         return new Set([targetTab.id])
       })
     },
-    [tabs],
+    [tabs, triggerTerminalResize],
   )
 
   const pendingDirtyTab = pendingDirtyAction
