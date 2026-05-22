@@ -4,7 +4,6 @@
   useRef,
   useCallback,
   useMemo,
-  useLayoutEffect,
 } from "react"
 import { createPortal } from "react-dom"
 import {
@@ -12,25 +11,11 @@ import {
   Lock,
   LockOpen,
   Folder,
-  File,
-  ChevronRight,
-  Download,
-  Upload,
   RefreshCw,
   ArrowDownUp,
   ArrowUp,
   ArrowDown,
   Trash,
-  Settings,
-  Plus,
-  FolderPlus,
-  Pencil,
-  Copy,
-  Terminal,
-  Link,
-  Edit,
-  FileCode,
-  Clipboard,
   Heart,
 } from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
@@ -53,14 +38,13 @@ import type {
   SftpCustomCommand,
 } from "../types"
 import { FileTreeItem } from "./sftp/FileTreeItem"
+import { SftpContextMenu } from "./sftp/SftpContextMenu"
 import { useIncrementalRenderCount } from "./sftp/useIncrementalRenderCount"
 import {
-  CONTEXT_MENU_VIEWPORT_PADDING,
-  CONTEXT_SUBMENU_GAP,
-  CONTEXT_SUBMENU_WIDTH,
   COPY_DATA_UNSUPPORTED_ERROR,
   getParentPath,
   getPathAncestors,
+  isDirectory,
   joinRemotePath,
   normalizeRemotePath,
   normalizeSftpPath,
@@ -72,8 +56,6 @@ import {
 import {
   DEFAULT_SORT_STATE,
   type ClipboardState,
-  type ContextMenuPosition,
-  type ContextSubmenuPosition,
   type CopyFallbackModalState,
   type DirectoryListResult,
   type DirectoryListingHandle,
@@ -189,9 +171,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
     y: number
     entry: FileEntry | null
   } | null>(null)
-  const contextMenuRef = useRef<HTMLDivElement>(null)
-  const [contextMenuPosition, setContextMenuPosition] =
-    useState<ContextMenuPosition | null>(null)
 
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean
@@ -226,21 +205,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
   const [newItemName, setNewItemName] = useState("")
   const [permissionInput, setPermissionInput] = useState("")
 
-  const [showPathSubmenu, setShowPathSubmenu] = useState(false)
-  const [showEditSubmenu, setShowEditSubmenu] = useState(false)
-  const [showCustomCommandsSubmenu, setShowCustomCommandsSubmenu] =
-    useState(false)
-  const [editSubmenuTimeout, setEditSubmenuTimeout] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null)
-  const [pathSubmenuTimeout, setPathSubmenuTimeout] = useState<ReturnType<
-    typeof setTimeout
-  > | null>(null)
-  const [customCommandsSubmenuTimeout, setCustomCommandsSubmenuTimeout] =
-    useState<ReturnType<typeof setTimeout> | null>(null)
-  const customCommandsTriggerRef = useRef<HTMLDivElement>(null)
-  const [customCommandsSubmenuPosition, setCustomCommandsSubmenuPosition] =
-    useState<ContextSubmenuPosition | null>(null)
   const activeDirectoryLoadRequestsRef = useRef<Record<string, string>>({})
 
   // Trigger terminal resize when locked state changes
@@ -861,67 +825,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
 
   const handleCloseContextMenu = useCallback(() => {
     setContextMenu(null)
-    setContextMenuPosition(null)
-    setShowPathSubmenu(false)
-    setShowEditSubmenu(false)
-    setShowCustomCommandsSubmenu(false)
-    setCustomCommandsSubmenuPosition(null)
   }, [])
-
-  const updateContextMenuPosition = useCallback(() => {
-    if (!contextMenu || !contextMenuRef.current) {
-      return
-    }
-
-    const menuRect = contextMenuRef.current.getBoundingClientRect()
-    const viewportTop = CONTEXT_MENU_VIEWPORT_PADDING
-    const viewportLeft = CONTEXT_MENU_VIEWPORT_PADDING
-    const viewportBottom = window.innerHeight - CONTEXT_MENU_VIEWPORT_PADDING
-    const viewportRight = window.innerWidth - CONTEXT_MENU_VIEWPORT_PADDING
-    const menuHeight = menuRect.height
-    const menuWidth = menuRect.width
-    const canOpenDown = contextMenu.y + menuHeight <= viewportBottom
-    const canOpenUp = contextMenu.y - menuHeight >= viewportTop
-
-    let top = contextMenu.y
-    if (!canOpenDown && canOpenUp) {
-      top = contextMenu.y - menuHeight
-    } else if (!canOpenDown) {
-      top = viewportBottom - menuHeight
-    }
-    top = Math.min(
-      Math.max(top, viewportTop),
-      Math.max(viewportTop, viewportBottom - menuHeight),
-    )
-
-    const left = Math.min(
-      Math.max(contextMenu.x, viewportLeft),
-      Math.max(viewportLeft, viewportRight - menuWidth),
-    )
-
-    setContextMenuPosition({ top, left })
-  }, [contextMenu])
-
-  useLayoutEffect(() => {
-    if (!contextMenu) {
-      setContextMenuPosition(null)
-      return
-    }
-
-    updateContextMenuPosition()
-  }, [contextMenu, updateContextMenuPosition])
-
-  useEffect(() => {
-    if (!contextMenu) {
-      return
-    }
-
-    window.addEventListener("resize", updateContextMenuPosition)
-
-    return () => {
-      window.removeEventListener("resize", updateContextMenuPosition)
-    }
-  }, [contextMenu, updateContextMenuPosition])
 
   const handleEditVim = () => {
     if (!contextMenu || !sessionId || !contextMenu.entry) return
@@ -1015,86 +919,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       .filter((cmd) => matchCustomCommand(contextMenu.entry!, cmd))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [config?.sftpCustomCommands, contextMenu?.entry])
-
-  const clearCustomCommandsSubmenuCloseTimeout = useCallback(() => {
-    if (customCommandsSubmenuTimeout) {
-      clearTimeout(customCommandsSubmenuTimeout)
-      setCustomCommandsSubmenuTimeout(null)
-    }
-  }, [customCommandsSubmenuTimeout])
-
-  const updateCustomCommandsSubmenuPosition = useCallback(() => {
-    const trigger = customCommandsTriggerRef.current
-    if (!trigger) {
-      return
-    }
-
-    const triggerRect = trigger.getBoundingClientRect()
-    const preferredHeight = Math.min(
-      320,
-      Math.max(120, matchedCustomCommands.length * 36 + 12),
-    )
-    const top = Math.min(
-      Math.max(triggerRect.top - 4, CONTEXT_MENU_VIEWPORT_PADDING),
-      Math.max(
-        CONTEXT_MENU_VIEWPORT_PADDING,
-        window.innerHeight - preferredHeight - CONTEXT_MENU_VIEWPORT_PADDING,
-      ),
-    )
-
-    const rightSideLeft = triggerRect.right + CONTEXT_SUBMENU_GAP
-    const left =
-      rightSideLeft + CONTEXT_SUBMENU_WIDTH <=
-      window.innerWidth - CONTEXT_MENU_VIEWPORT_PADDING
-        ? rightSideLeft
-        : Math.max(
-            CONTEXT_MENU_VIEWPORT_PADDING,
-            triggerRect.left - CONTEXT_SUBMENU_WIDTH - CONTEXT_SUBMENU_GAP,
-          )
-    const maxHeight = Math.max(
-      120,
-      window.innerHeight - top - CONTEXT_MENU_VIEWPORT_PADDING,
-    )
-
-    setCustomCommandsSubmenuPosition({ top, left, maxHeight })
-  }, [matchedCustomCommands.length])
-
-  const openCustomCommandsSubmenu = useCallback(() => {
-    clearCustomCommandsSubmenuCloseTimeout()
-    setShowCustomCommandsSubmenu(true)
-    updateCustomCommandsSubmenuPosition()
-  }, [
-    clearCustomCommandsSubmenuCloseTimeout,
-    updateCustomCommandsSubmenuPosition,
-  ])
-
-  const scheduleCloseCustomCommandsSubmenu = useCallback(() => {
-    clearCustomCommandsSubmenuCloseTimeout()
-    const timeout = setTimeout(() => {
-      setShowCustomCommandsSubmenu(false)
-    }, 200)
-    setCustomCommandsSubmenuTimeout(timeout)
-  }, [clearCustomCommandsSubmenuCloseTimeout])
-
-  useEffect(() => {
-    if (!showCustomCommandsSubmenu) {
-      setCustomCommandsSubmenuPosition(null)
-      return
-    }
-
-    updateCustomCommandsSubmenuPosition()
-    window.addEventListener("resize", updateCustomCommandsSubmenuPosition)
-    window.addEventListener("scroll", updateCustomCommandsSubmenuPosition, true)
-
-    return () => {
-      window.removeEventListener("resize", updateCustomCommandsSubmenuPosition)
-      window.removeEventListener(
-        "scroll",
-        updateCustomCommandsSubmenuPosition,
-        true,
-      )
-    }
-  }, [showCustomCommandsSubmenu, updateCustomCommandsSubmenuPosition])
 
   const handleExecuteCustomCommand = (cmd: SftpCustomCommand) => {
     if (!contextMenu || !contextMenu.entry) return
@@ -1505,12 +1329,6 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       }
     })
     return subtreeExpandedPaths
-  }
-
-  const isDirectory = (entry: FileEntry): boolean => {
-    return (
-      entry.is_dir || Boolean(entry.is_symlink && entry.target_is_dir === true)
-    )
   }
 
   const refreshPasteTarget = async (sid: string, targetPath: string) => {
@@ -2211,301 +2029,32 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
       </div>
 
       {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          className="sftp-context-menu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.1),0_4px_6px_-2px_rgba(0,0,0,0.05)] min-w-[180px] p-1 z-50 overflow-visible animate-sftp-slide-in backdrop-blur-xl"
-          style={{
-            top: contextMenuPosition?.top ?? contextMenu.y,
-            left: contextMenuPosition?.left ?? contextMenu.x,
-            visibility: contextMenuPosition ? "visible" : "hidden",
-          }}
-        >
-          {contextMenu.entry && !isDirectory(contextMenu.entry) && (
-            <button
-              type="button"
-              onClick={handleOpenInEditor}
-              className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-            >
-              <File size={14} /> {t.sftp.contextMenu.open}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-          >
-            <Download size={14} /> {t.sftp.contextMenu.download}
-          </button>
-          <button
-            type="button"
-            onClick={handleUpload}
-            className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-          >
-            <Upload size={14} /> {t.sftp.contextMenu.upload}
-          </button>
-          {contextMenu.entry && isDirectory(contextMenu.entry) && (
-            <>
-              <button
-                type="button"
-                onClick={handleNewFile}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Plus size={14} /> {t.sftp.contextMenu.newFile}
-              </button>
-              <button
-                type="button"
-                onClick={handleNewFolder}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <FolderPlus size={14} /> {t.sftp.contextMenu.newFolder}
-              </button>
-              <button
-                type="button"
-                onClick={handleAddDirectoryFavorite}
-                disabled={!serverId}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Heart size={14} /> {t.sftp.contextMenu.addFavorite}
-              </button>
-            </>
-          )}
-          {contextMenu.entry && !isDirectory(contextMenu.entry) && (
-            <div className="relative">
-              <div
-                onMouseEnter={() => {
-                  if (editSubmenuTimeout) {
-                    clearTimeout(editSubmenuTimeout)
-                    setEditSubmenuTimeout(null)
-                  }
-                  setShowEditSubmenu(true)
-                }}
-                onMouseLeave={() => {
-                  const timeout = setTimeout(() => {
-                    setShowEditSubmenu(false)
-                  }, 200)
-                  setEditSubmenuTimeout(timeout)
-                }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setShowEditSubmenu(!showEditSubmenu)}
-                  className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                >
-                  <Edit size={14} /> {t.sftp.contextMenu.edit}
-                  <ChevronRight
-                    size={14}
-                    style={{ marginLeft: "auto", opacity: 0.5 }}
-                  />
-                </button>
-                {showEditSubmenu && (
-                  <div className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
-                    <button
-                      type="button"
-                      onClick={handleEditVim}
-                      className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                    >
-                      <Terminal size={14} /> {t.sftp.contextMenu.editServerVim}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleEditLocal}
-                      className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                    >
-                      <FileCode size={14} /> {t.sftp.contextMenu.editLocal}
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="relative">
-            <div
-              onMouseEnter={() => {
-                if (pathSubmenuTimeout) {
-                  clearTimeout(pathSubmenuTimeout)
-                  setPathSubmenuTimeout(null)
-                }
-                setShowPathSubmenu(true)
-              }}
-              onMouseLeave={() => {
-                const timeout = setTimeout(() => {
-                  setShowPathSubmenu(false)
-                }, 200)
-                setPathSubmenuTimeout(timeout)
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setShowPathSubmenu(!showPathSubmenu)}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Link size={14} /> {t.sftp.contextMenu.path}
-                <ChevronRight
-                  size={14}
-                  style={{ marginLeft: "auto", opacity: 0.5 }}
-                />
-              </button>
-              {showPathSubmenu && contextMenu.entry && (
-                <div className="absolute top-[-4px] left-full ml-1 bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] min-w-[200px] p-1 z-[1001] overflow-visible backdrop-blur-xl animate-sftp-fade-in">
-                  <button
-                    type="button"
-                    onClick={handleCopyName}
-                    className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                  >
-                    <Copy size={14} />{" "}
-                    {isDirectory(contextMenu.entry)
-                      ? t.sftp.contextMenu.copyFolderName
-                      : t.sftp.contextMenu.copyFileName}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCopyFullPath}
-                    className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                  >
-                    <Copy size={14} /> {t.sftp.contextMenu.copyFullPath}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSendPath}
-                    className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                  >
-                    <Terminal size={14} />{" "}
-                    {t.sftp.contextMenu.sendPathToTerminal}
-                  </button>
-                  {isDirectory(contextMenu.entry) && (
-                    <button
-                      type="button"
-                      onClick={handleTerminalJump}
-                      className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                    >
-                      <Terminal size={14} /> {t.sftp.contextMenu.terminalJump}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-          {contextMenu.entry && (
-            <>
-              <button
-                type="button"
-                onClick={handleCopyForPaste}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Copy size={14} /> {t.sftp.contextMenu.copy}
-              </button>
-              <button
-                type="button"
-                onClick={handleCut}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Pencil size={14} /> {t.sftp.contextMenu.cut}
-              </button>
-            </>
-          )}
-          {clipboard && (
-            <>
-              <button
-                type="button"
-                onClick={handlePaste}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Clipboard size={14} />{" "}
-                {clipboard.isCut
-                  ? t.sftp.contextMenu.pasteMove
-                  : t.sftp.contextMenu.pasteCopy}
-              </button>
-              <button
-                type="button"
-                onClick={handleClearClipboard}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-muted)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
-              >
-                <X size={14} /> {t.sftp.contextMenu.cancel}
-              </button>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={handleDelete}
-            className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-          >
-            <Trash size={14} /> {t.sftp.contextMenu.delete}
-          </button>
-          {contextMenu.entry && (
-            <>
-              <button
-                type="button"
-                onClick={handleRename}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Pencil size={14} /> {t.sftp.contextMenu.rename}
-              </button>
-              <button
-                type="button"
-                onClick={handleProperties}
-                className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-              >
-                <Settings size={14} /> {t.sftp.contextMenu.properties}
-              </button>
-            </>
-          )}
-
-          {contextMenu.entry && matchedCustomCommands.length > 0 && (
-            <div className="relative border-t border-[var(--glass-border)] mt-1 pt-1">
-              <div
-                ref={customCommandsTriggerRef}
-                role="menuitem"
-                onMouseEnter={openCustomCommandsSubmenu}
-                onMouseLeave={scheduleCloseCustomCommandsSubmenu}
-              >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (showCustomCommandsSubmenu) {
-                      setShowCustomCommandsSubmenu(false)
-                      return
-                    }
-                    openCustomCommandsSubmenu()
-                  }}
-                  className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                >
-                  <Terminal size={14} /> {t.sftp.contextMenu.commands}
-                  <ChevronRight
-                    size={14}
-                    style={{ marginLeft: "auto", opacity: 0.5 }}
-                  />
-                </button>
-                {showCustomCommandsSubmenu &&
-                  customCommandsSubmenuPosition &&
-                  createPortal(
-                    <div
-                      className="sftp-context-submenu fixed bg-[var(--bg-secondary)] border border-[var(--glass-border)] rounded shadow-[0_10px_15px_-3px_rgba(0,0,0,0.2),0_4px_6px_-2px_rgba(0,0,0,0.1)] p-1 z-[1001] overflow-y-auto backdrop-blur-xl animate-sftp-fade-in"
-                      style={{
-                        top: customCommandsSubmenuPosition.top,
-                        left: customCommandsSubmenuPosition.left,
-                        width: CONTEXT_SUBMENU_WIDTH,
-                        maxHeight: customCommandsSubmenuPosition.maxHeight,
-                      }}
-                      onMouseEnter={openCustomCommandsSubmenu}
-                      onMouseLeave={scheduleCloseCustomCommandsSubmenu}
-                    >
-                      {matchedCustomCommands.map((cmd) => (
-                        <button
-                          key={cmd.id}
-                          type="button"
-                          onClick={() => handleExecuteCustomCommand(cmd)}
-                          className="flex items-center gap-2.5 w-full px-3 py-2 border-0 bg-transparent text-[var(--text-primary)] text-[14px] cursor-pointer rounded text-left transition-all duration-150 font-inherit relative hover:bg-[var(--bg-tertiary)] hover:text-[var(--accent-primary)] hover:translate-x-0.5"
-                        >
-                          <Terminal size={14} /> {cmd.name}
-                        </button>
-                      ))}
-                    </div>,
-                    document.body,
-                  )}
-              </div>
-            </div>
-          )}
-        </div>
+        <SftpContextMenu
+          contextMenu={contextMenu}
+          serverId={serverId}
+          clipboard={clipboard}
+          matchedCustomCommands={matchedCustomCommands}
+          onOpenInEditor={handleOpenInEditor}
+          onDownload={handleDownload}
+          onUpload={handleUpload}
+          onNewFile={handleNewFile}
+          onNewFolder={handleNewFolder}
+          onAddDirectoryFavorite={handleAddDirectoryFavorite}
+          onEditVim={handleEditVim}
+          onEditLocal={handleEditLocal}
+          onCopyName={handleCopyName}
+          onCopyFullPath={handleCopyFullPath}
+          onSendPath={handleSendPath}
+          onTerminalJump={handleTerminalJump}
+          onCopyForPaste={handleCopyForPaste}
+          onCut={handleCut}
+          onPaste={handlePaste}
+          onClearClipboard={handleClearClipboard}
+          onDelete={handleDelete}
+          onRename={handleRename}
+          onProperties={handleProperties}
+          onExecuteCustomCommand={handleExecuteCustomCommand}
+        />
       )}
 
       <ConfirmationModal

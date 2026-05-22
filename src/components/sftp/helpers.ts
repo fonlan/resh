@@ -54,6 +54,12 @@ export const getPathAncestors = (path: string): string[] => {
   return ancestors
 }
 
+export const isDirectory = (entry: FileEntry): boolean => {
+  return (
+    entry.is_dir || Boolean(entry.is_symlink && entry.target_is_dir === true)
+  )
+}
+
 export const formatPermissions = (entry: FileEntry): string => {
   const mode = entry.permissions
   if (mode === undefined) return ""
