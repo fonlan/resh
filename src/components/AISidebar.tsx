@@ -63,10 +63,7 @@ interface AISidebarProps {
   zIndex?: number
 }
 
-interface OptimisticMessageInput {
-  sessionId: string
-  message: ChatMessage
-}
+const EMPTY_MESSAGES: ChatMessage[] = []
 
 interface RenderableMessage {
   msg: ChatMessage
@@ -117,9 +114,18 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const activeSessionIdBySshSession = useAIStore(
     (state) => state.activeSessionIdBySshSession,
   )
-  const messages = useAIStore((state) => state.messages)
-  const isGenerating = useAIStore((state) => state.isGenerating)
-  const pendingToolCallsMap = useAIStore((state) => state.pendingToolCalls)
+  const activeSessionMessages = useAIStore((state) => {
+    const id = state.activeSessionId
+    return id ? state.messages[id] || EMPTY_MESSAGES : EMPTY_MESSAGES
+  })
+  const isLoading = useAIStore((state) => {
+    const id = state.activeSessionId
+    return id ? state.isGenerating[id] || false : false
+  })
+  const pendingToolCalls = useAIStore((state) => {
+    const id = state.activeSessionId
+    return id ? state.pendingToolCalls[id] || null : null
+  })
   const loadSessions = useAIStore((state) => state.loadSessions)
   const createSession = useAIStore((state) => state.createSession)
   const selectSession = useAIStore((state) => state.selectSession)
@@ -154,24 +160,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const [isClearingHistory, setIsClearingHistory] = useState(false)
   const [includeEditorContext, setIncludeEditorContext] = useState(false)
 
-  const [optimisticMessagesBySession, addOptimisticMessage] = useOptimistic(
-    messages,
-    (currentMessagesBySession, payload: OptimisticMessageInput) => {
-      const currentSessionMessages =
-        currentMessagesBySession[payload.sessionId] || []
-      return {
-        ...currentMessagesBySession,
-        [payload.sessionId]: [...currentSessionMessages, payload.message],
-      }
-    },
+  const [optimisticMessages, addOptimisticMessage] = useOptimistic(
+    activeSessionMessages,
+    (current, message: ChatMessage) => [...current, message],
   )
-
-  const isLoading = activeSessionId
-    ? isGenerating[activeSessionId] || false
-    : false
-  const pendingToolCalls = activeSessionId
-    ? pendingToolCallsMap[activeSessionId] || null
-    : null
   const activeEditorContext = useMemo(() => {
     if (!currentTabId || !editorContextByTabId) {
       return null
@@ -307,9 +299,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     selectSession,
   ])
 
-  const currentMessages = activeSessionId
-    ? optimisticMessagesBySession[activeSessionId] || []
-    : []
+  const currentMessages = optimisticMessages
   const modelNameById = useMemo(() => {
     if (!config?.aiModels?.length) {
       return {} as Record<string, string>
@@ -987,10 +977,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       created_at: new Date().toISOString(),
     }
 
-    addOptimisticMessage({
-      sessionId,
-      message: optimisticUserMessage,
-    })
+    addOptimisticMessage(optimisticUserMessage)
 
     addMessage(sessionId, optimisticUserMessage)
     setGenerating(sessionId, true)
