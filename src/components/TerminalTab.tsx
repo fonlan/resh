@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager"
 import { useTerminal } from "../hooks/useTerminal"
+import { useCommandBlockBar } from "../hooks/useCommandBlockBar"
 import { useConfig } from "../hooks/useConfig" // Import useConfig
 import {
   Server,
@@ -208,6 +209,8 @@ export const TerminalTab = React.memo<TerminalTabProps>(
       config?.general.terminalRightClickMode === "selectionCopyPaste"
         ? "selectionCopyPaste"
         : "contextMenu"
+    const terminalCommandBlockBarEnabled =
+      config?.general.terminalCommandBlockBar ?? true
 
     const { terminal, isReady, write, focus, getBufferText } = useTerminal(
       containerId,
@@ -217,6 +220,13 @@ export const TerminalTab = React.memo<TerminalTabProps>(
       terminalRightClickMode,
       handleData,
       handleResize,
+    )
+    const { blockRects, isAlternateBuffer } = useCommandBlockBar(
+      containerId,
+      sessionId,
+      terminal,
+      isReady,
+      terminalCommandBlockBarEnabled,
     )
 
     // Determine container background based on theme
@@ -934,6 +944,9 @@ export const TerminalTab = React.memo<TerminalTabProps>(
         >
           <div
             id={containerId}
+            className={
+              terminalCommandBlockBarEnabled ? "resh-terminal-host" : undefined
+            }
             onDragOver={handleTerminalDragOver}
             onDragLeave={handleTerminalDragLeave}
             onDrop={handleTerminalDrop}
@@ -944,7 +957,36 @@ export const TerminalTab = React.memo<TerminalTabProps>(
               height: "100%",
               overflow: "hidden",
             }}
-          />
+          >
+            {terminalCommandBlockBarEnabled &&
+              (isAlternateBuffer || blockRects.length > 0) && (
+                <svg className="resh-command-block-bar" aria-hidden="true">
+                  {isAlternateBuffer ? (
+                    <rect
+                      x="5"
+                      y="0"
+                      width="3"
+                      height="100%"
+                      rx="1.5"
+                      fill="var(--text-muted)"
+                      opacity="0.55"
+                    />
+                  ) : (
+                    blockRects.map((rect) => (
+                      <rect
+                        key={rect.id}
+                        x="5"
+                        y={rect.y}
+                        width="3"
+                        height={Math.max(rect.height, 2)}
+                        rx="1.5"
+                        fill={rect.color}
+                      />
+                    ))
+                  )}
+                </svg>
+              )}
+          </div>
 
           {terminalRightClickMode === "contextMenu" &&
             terminalContextMenu &&

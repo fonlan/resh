@@ -49,9 +49,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
     onGeneralUpdate({ ...general, terminalRightClickMode })
   }
 
-  const handleTabNewServerSortChange = (
-    tabNewServerSort: NewTabServerSort,
-  ) => {
+  const handleTabNewServerSortChange = (tabNewServerSort: NewTabServerSort) => {
     onGeneralUpdate({ ...general, tabNewServerSort })
   }
 
@@ -70,6 +68,7 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
       | "confirmCloseTab"
       | "confirmExitApp"
       | "debugEnabled"
+      | "terminalCommandBlockBar"
       | "maxRecentServers",
     value: boolean | number,
   ) => {
@@ -288,6 +287,23 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
       <div>
         <h3 className="text-base font-semibold  mb-4">{t.terminal}</h3>
         <div className="space-y-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={general.terminalCommandBlockBar ?? true}
+              onChange={(e) =>
+                handleConfirmationChange(
+                  "terminalCommandBlockBar",
+                  e.target.checked,
+                )
+              }
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <span className="block text-sm font-medium text-zinc-400 mb-0 ">
+              {t.terminalCommandBlockBar}
+            </span>
+          </label>
+
           <div className="flex flex-col gap-1.5 mb-4">
             <label
               htmlFor="font-family"

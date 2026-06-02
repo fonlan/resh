@@ -1,4 +1,4 @@
-﻿pub mod copilot;
+pub mod copilot;
 mod history;
 mod stream_parsing;
 mod tool_registry;
@@ -97,7 +97,9 @@ mod history_window_tests {
 #[cfg(test)]
 mod streamed_tool_call_tests {
     use super::history::to_genai_messages;
-    use super::stream_parsing::{accumulate_streamed_tool_call_chunk, normalize_streamed_tool_calls};
+    use super::stream_parsing::{
+        accumulate_streamed_tool_call_chunk, normalize_streamed_tool_calls,
+    };
     use super::types::{ChatMessage, FunctionCall, ToolCall};
     use std::collections::HashMap;
 
@@ -912,17 +914,21 @@ pub async fn get_terminal_output(session_id: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn run_in_terminal(
+    window: Window,
     session_id: String,
     command: String,
     timeout_seconds: Option<u64>,
     wait_finish: Option<bool>,
 ) -> Result<String, String> {
     let should_wait_finish = wait_finish.unwrap_or(true);
+    let command_block_event = format!("terminal-command-block:{}", session_id);
     if !should_wait_finish {
         let cmd_nl = format!("{}\n", command);
-        SSHClient::send_input(&session_id, cmd_nl.as_bytes())
-            .await
-            .map_err(|e| format!("Failed to send command: {}", e))?;
+        let _ = window.emit(&command_block_event, "start");
+        if let Err(e) = SSHClient::send_input(&session_id, cmd_nl.as_bytes()).await {
+            let _ = window.emit(&command_block_event, "end");
+            return Err(format!("Failed to send command: {}", e));
+        }
         return Ok(
             "Command sent to terminal without waiting for completion (wait_finish=false)."
                 .to_string(),
@@ -937,7 +943,10 @@ pub async fn run_in_terminal(
     let input_payload =
         build_recording_input_payload(&session_id, &command, "run_in_terminal").await;
 
+    let _ = window.emit(&command_block_event, "start");
+
     if let Err(e) = SSHClient::send_input(&session_id, input_payload.as_bytes()).await {
+        let _ = window.emit(&command_block_event, "end");
         let _ = SSHClient::stop_command_recording(&session_id).await;
         return Err(format!("Failed to send command: {}", e));
     }
@@ -996,6 +1005,8 @@ pub async fn run_in_terminal(
                 .await;
         }
     }
+
+    let _ = window.emit(&command_block_event, "end");
 
     let output = SSHClient::stop_command_recording(&session_id).await?;
     let clean_output =

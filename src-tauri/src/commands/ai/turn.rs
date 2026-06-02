@@ -9,7 +9,9 @@ use tauri::{Emitter, Manager, Window};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::history::{load_history, read_remote_file_via_sftp, to_genai_messages, READ_FILE_MAX_BYTES};
+use super::history::{
+    load_history, read_remote_file_via_sftp, to_genai_messages, READ_FILE_MAX_BYTES,
+};
 use super::stream_parsing::{
     accumulate_streamed_tool_call_chunk, append_reasoning_stream_text, append_response_stream_text,
     extract_command, extract_required_timeout_seconds, extract_think_segments, extract_timeout,
@@ -131,11 +133,17 @@ pub(super) async fn execute_tools_and_save(
                                             cmd
                                         );
                                         let cmd_nl = format!("{}\n", cmd);
+                                        let command_block_event =
+                                            format!("terminal-command-block:{}", ssh_id);
+                                        let _ = app_handle.emit(&command_block_event, "start");
                                         match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
                                             Ok(_) => {
                                                 "Command sent to terminal without waiting for completion (wait_finish=false).".to_string()
                                             }
-                                            Err(e) => format!("Failed to send command: {}", e),
+                                            Err(e) => {
+                                                let _ = app_handle.emit(&command_block_event, "end");
+                                                format!("Failed to send command: {}", e)
+                                            }
                                         }
                                     } else {
                                         SSHClient::start_command_recording(ssh_id).await?;
@@ -152,10 +160,15 @@ pub(super) async fn execute_tools_and_save(
                                         )
                                         .await;
 
+                                        let command_block_event =
+                                            format!("terminal-command-block:{}", ssh_id);
+                                        let _ = app_handle.emit(&command_block_event, "start");
+
                                         if let Err(e) =
                                             SSHClient::send_input(ssh_id, input_payload.as_bytes())
                                                 .await
                                         {
+                                            let _ = app_handle.emit(&command_block_event, "end");
                                             let _ = SSHClient::stop_command_recording(ssh_id).await;
                                             return Err(format!("Failed to send command: {}", e));
                                         }
@@ -171,6 +184,8 @@ pub(super) async fn execute_tools_and_save(
 
                                         loop {
                                             if cancellation_token.is_cancelled() {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
                                                 SSHClient::stop_command_recording(ssh_id)
                                                     .await
                                                     .ok();
@@ -189,7 +204,16 @@ pub(super) async fn execute_tools_and_save(
                                             }
 
                                             let is_completed =
-                                                SSHClient::check_command_completed(ssh_id).await?;
+                                                match SSHClient::check_command_completed(ssh_id)
+                                                    .await
+                                                {
+                                                    Ok(is_completed) => is_completed,
+                                                    Err(e) => {
+                                                        let _ = app_handle
+                                                            .emit(&command_block_event, "end");
+                                                        return Err(e);
+                                                    }
+                                                };
                                             if is_completed {
                                                 completion_detected = true;
                                                 tracing::debug!(
@@ -244,6 +268,8 @@ pub(super) async fn execute_tools_and_save(
                                                 .await;
                                             }
                                         }
+
+                                        let _ = app_handle.emit(&command_block_event, "end");
 
                                         match SSHClient::stop_command_recording(ssh_id).await {
                                             Ok(output) => {

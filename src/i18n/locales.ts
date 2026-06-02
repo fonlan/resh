@@ -59,6 +59,7 @@ export const locales = {
       contextMenu: "Context Menu (Copy/Paste)",
       selectionCopyPaste: "Select to Copy + Right-Click to Paste",
     },
+    terminalCommandBlockBar: "Show command block color bars",
     tabNewServerSort: "New tab server list sort",
     tabNewServerSorts: {
       default: "Default sort (grouped)",
@@ -605,6 +606,7 @@ export const locales = {
       contextMenu: "右键菜单 (复制/粘贴)",
       selectionCopyPaste: "选中复制 + 右键粘贴",
     },
+    terminalCommandBlockBar: "显示命令块彩色竖条",
     tabNewServerSort: "标签栏加号服务器列表排序",
     tabNewServerSorts: {
       default: "默认排序 (按分组显示)",

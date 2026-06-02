@@ -76,6 +76,7 @@ export interface GeneralSettings {
   tabWidthMode: TabWidthMode
   tabFixedWidth: number
   terminalRightClickMode: TerminalRightClickMode
+  terminalCommandBlockBar: boolean
   tabNewServerSort: NewTabServerSort
   serverConnectionCounts: Record<string, number>
   aiModelId?: string

@@ -288,6 +288,23 @@ body {
   text-shadow: none;
 }
 
+/* Terminal command block bar */
+.resh-terminal-host {
+  position: relative;
+  box-sizing: border-box;
+  padding-left: 12px;
+}
+
+.resh-command-block-bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 12px;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 20;
+}
+
 /* Custom Checkbox & Radiobox Styling */
 input[type="checkbox"],
 .checkbox {

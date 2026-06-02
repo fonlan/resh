@@ -359,6 +359,12 @@ pub struct GeneralSettings {
     #[serde(default = "default_terminal_right_click_mode")]
     #[serde(alias = "terminalRightClickMode", alias = "terminal_right_click_mode")]
     pub terminal_right_click_mode: String,
+    #[serde(default = "default_true")]
+    #[serde(
+        alias = "terminalCommandBlockBar",
+        alias = "terminal_command_block_bar"
+    )]
+    pub terminal_command_block_bar: bool,
     #[serde(default = "default_tab_new_server_sort")]
     #[serde(alias = "tabNewServerSort", alias = "tab_new_server_sort")]
     pub tab_new_server_sort: String,
@@ -549,6 +555,7 @@ impl Config {
                 tab_width_mode: default_tab_width_mode(),
                 tab_fixed_width: default_tab_fixed_width(),
                 terminal_right_click_mode: default_terminal_right_click_mode(),
+                terminal_command_block_bar: true,
                 tab_new_server_sort: default_tab_new_server_sort(),
                 server_connection_counts: HashMap::new(),
                 ai_model_id: None,
