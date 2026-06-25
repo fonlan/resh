@@ -19,6 +19,7 @@ src-tauri/Cargo.lock
 .cursor/
 .codegraph/
 .mem/
+.foco/
 .codex-research/
 *.swp
 *.swo

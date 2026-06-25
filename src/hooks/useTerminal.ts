@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react"
-import { Terminal } from "xterm"
+import { Terminal, type IDisposable } from "xterm"
 import { FitAddon } from "xterm-addon-fit"
 import { WebglAddon } from "xterm-addon-webgl"
 import "xterm/css/xterm.css"
@@ -20,6 +20,7 @@ export const useTerminal = (
   const terminalRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
+  const webglContextLossDisposableRef = useRef<IDisposable | null>(null)
   const [isReady, setIsReady] = useState(false)
 
   const onDataRef = useRef(onData)
@@ -155,6 +156,65 @@ export const useTerminal = (
       }
     })
 
+    const refreshTerminal = () => {
+      if (
+        !term.element ||
+        container.clientWidth <= 0 ||
+        container.clientHeight <= 0
+      ) {
+        return
+      }
+
+      try {
+        fitAddon.fit()
+        if (term.rows > 0) {
+          term.refresh(0, term.rows - 1)
+        }
+        onResizeRef.current?.(term.cols, term.rows)
+      } catch (e) {
+        // Fit/refresh can fail while the terminal is hidden.
+      }
+    }
+
+    const disposeWebglAddon = (refresh = true) => {
+      webglContextLossDisposableRef.current?.dispose()
+      webglContextLossDisposableRef.current = null
+
+      const webglAddon = webglAddonRef.current
+      if (!webglAddon) return
+
+      webglAddonRef.current = null
+      try {
+        webglAddon.dispose()
+      } catch (e) {
+        // WebGL renderer was already gone.
+      }
+
+      if (refresh) {
+        refreshTerminal()
+      }
+    }
+
+    const loadWebglAddon = () => {
+      if (webglAddonRef.current) return
+
+      let webglAddon: WebglAddon | null = null
+      try {
+        webglAddon = new WebglAddon()
+        webglContextLossDisposableRef.current = webglAddon.onContextLoss(() => {
+          // ponytail: fall back to xterm's default renderer after GPU loss; rebuild WebGL later only if perf proves it matters.
+          disposeWebglAddon()
+        })
+        term.loadAddon(webglAddon)
+        webglAddonRef.current = webglAddon
+      } catch (e) {
+        webglContextLossDisposableRef.current?.dispose()
+        webglContextLossDisposableRef.current = null
+        webglAddon?.dispose()
+        // WebGL renderer could not be loaded.
+      }
+    }
+
     const initTerminal = () => {
       if (
         !term.element &&
@@ -162,18 +222,8 @@ export const useTerminal = (
         container.clientHeight > 0
       ) {
         term.open(container)
-        fitAddon.fit()
-
-        // Initialize WebGL Addon after opening
-        if (!webglAddonRef.current) {
-          try {
-            const webglAddon = new WebglAddon()
-            term.loadAddon(webglAddon)
-            webglAddonRef.current = webglAddon
-          } catch (e) {
-            // WebGL renderer could not be loaded
-          }
-        }
+        refreshTerminal()
+        loadWebglAddon()
       }
     }
 
@@ -185,12 +235,7 @@ export const useTerminal = (
         if (!term.element) {
           initTerminal()
         }
-        try {
-          fitAddon.fit()
-          onResizeRef.current?.(term.cols, term.rows)
-        } catch (e) {
-          // Fit failed
-        }
+        refreshTerminal()
       }
     }, 50)
 
@@ -219,6 +264,14 @@ export const useTerminal = (
     }
     window.addEventListener("resh-force-terminal-resize", forceResizeHandler)
 
+    const wakeRefreshHandler = () => {
+      if (document.visibilityState === "hidden") return
+      requestAnimationFrame(refreshTerminal)
+    }
+    document.addEventListener("visibilitychange", wakeRefreshHandler)
+    window.addEventListener("focus", wakeRefreshHandler)
+    window.addEventListener("pageshow", wakeRefreshHandler)
+
     terminalRef.current = term
     fitAddonRef.current = fitAddon
     setIsReady(true)
@@ -232,10 +285,14 @@ export const useTerminal = (
         "resh-force-terminal-resize",
         forceResizeHandler,
       )
-      webglAddonRef.current?.dispose()
+      document.removeEventListener("visibilitychange", wakeRefreshHandler)
+      window.removeEventListener("focus", wakeRefreshHandler)
+      window.removeEventListener("pageshow", wakeRefreshHandler)
+      disposeWebglAddon(false)
       term.dispose()
       terminalRef.current = null
       webglAddonRef.current = null
+      webglContextLossDisposableRef.current = null
       setIsReady(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
