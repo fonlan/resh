@@ -13,6 +13,7 @@ import { Config, EditorRule, SftpCustomCommand } from "../../types"
 import { v4 as uuidv4 } from "uuid"
 import { useTranslation } from "../../i18n"
 import { Cloud, CloudOff } from "lucide-react"
+import { getEditorPathPlaceholder } from "../../utils/platform"
 
 interface SFTPTabProps {
   config: Config
@@ -33,6 +34,9 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
 
   const editors = config.general.sftp.editors
   const customCommands = config.sftpCustomCommands || []
+  const editorPathPlaceholder = getEditorPathPlaceholder(
+    t.sftp.settings.editorPlaceholder,
+  )
 
   const updateSftpSettings = useCallback(
     (updates: Partial<Config["general"]["sftp"]>) => {
@@ -603,7 +607,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                             editor: e.target.value,
                           }))
                         }
-                        placeholder={t.sftp.settings.editorPlaceholder}
+                        placeholder={editorPathPlaceholder}
                         className="form-input px-2.5 py-1.5"
                       />
                       <button
@@ -671,7 +675,7 @@ export const SFTPTab: React.FC<SFTPTabProps> = ({ config, onChange }) => {
                                 editor: e.target.value,
                               }))
                             }
-                            placeholder={t.sftp.settings.editorPlaceholder}
+                            placeholder={editorPathPlaceholder}
                             className="form-input px-2.5 py-1.5"
                           />
                           <button

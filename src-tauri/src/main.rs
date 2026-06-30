@@ -12,9 +12,16 @@ use resh::ssh_manager::ssh::SSHClient;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::image::Image;
+use tauri::Emitter;
 use tauri::Listener;
 use tauri::Manager;
 use tokio::sync::Mutex;
+
+#[cfg(target_os = "macos")]
+use tauri::menu::{Menu, MenuItem, MenuItemKind};
+
+#[cfg(target_os = "macos")]
+const SETTINGS_MENU_ID: &str = "resh-settings";
 
 static APP_DATA_DIR: OnceLock<std::path::PathBuf> = OnceLock::new();
 
@@ -24,6 +31,36 @@ fn get_panic_log_path() -> std::path::PathBuf {
         .get()
         .map(|dir| dir.join("logs").join("panic.log"))
         .unwrap_or_else(|| std::env::temp_dir().join("resh_panic.log"))
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_minimized().unwrap_or(false) {
+            let _ = window.unminimize();
+        }
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn build_macos_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let menu = Menu::default(app)?;
+    let settings = MenuItem::with_id(
+        app,
+        SETTINGS_MENU_ID,
+        "Settings…",
+        true,
+        Some("CmdOrCtrl+,"),
+    )?;
+
+    if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+        // The default application menu starts with About followed by a
+        // separator. Insert Settings between them to match macOS conventions.
+        app_menu.insert(&settings, 1)?;
+    }
+
+    Ok(menu)
 }
 
 #[tokio::main]
@@ -66,17 +103,21 @@ async fn main() {
         }
     }));
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                if window.is_minimized().unwrap_or(false) {
-                    let _ = window.unminimize();
-                }
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_main_window(app);
         }))
-        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
+
+    #[cfg(target_os = "macos")]
+    let builder = builder.menu(build_macos_menu).on_menu_event(|app, event| {
+        if event.id() == SETTINGS_MENU_ID {
+            show_main_window(app);
+            let _ = app.emit("resh-open-settings", ());
+        }
+    });
+
+    let app = builder
         .setup(|app| {
             // Set window icon
             if let Some(window) = app.get_webview_window("main") {
@@ -131,17 +172,7 @@ async fn main() {
             // Apply window state
             if let Some(window) = app.get_webview_window("main") {
                 let ws = &local_config.general.window_state;
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-                    width: ws.width,
-                    height: ws.height,
-                }));
-                let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                    x: ws.x,
-                    y: ws.y,
-                }));
-                if ws.is_maximized {
-                    let _ = window.maximize();
-                }
+                resh::window_state::restore_window(&window, ws);
             }
 
             // Show main window only after frontend reports ready to avoid white-flash period.
@@ -208,6 +239,14 @@ async fn main() {
                             // Save to disk
                             let _ = state.config_manager.save_local_config(&config_guard);
                         });
+
+                        #[cfg(target_os = "macos")]
+                        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                            // Keep the only window alive so Dock reopen and a second
+                            // launch can restore it without rebuilding application state.
+                            api.prevent_close();
+                            let _ = window.hide();
+                        }
                     }
                 });
             }
@@ -276,6 +315,13 @@ async fn main() {
             commands::sftp_edit::pick_folder,
             commands::sftp_edit::pick_file,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            show_main_window(app_handle);
+        }
+    });
 }

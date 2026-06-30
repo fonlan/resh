@@ -1,12 +1,63 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from "react"
-import { Terminal, type IDisposable } from "xterm"
+import { Terminal, type IDisposable, type ITheme } from "xterm"
 import { FitAddon } from "xterm-addon-fit"
 import { WebglAddon } from "xterm-addon-webgl"
 import "xterm/css/xterm.css"
 import { TerminalSettings, TerminalRightClickMode } from "../types"
 import { debounce } from "../utils/common"
 import { invoke } from "@tauri-apps/api/core"
-import { writeText } from "@tauri-apps/plugin-clipboard-manager"
+import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager"
+import { isMacOS } from "../utils/platform"
+
+type ResolvedTerminalTheme = "light" | "dark" | "orange" | "green"
+
+const resolveTerminalTheme = (
+  theme?: "light" | "dark" | "orange" | "green" | "system",
+): ResolvedTerminalTheme => {
+  if (theme === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light"
+  }
+  return theme || "dark"
+}
+
+const getTerminalPalette = (theme: ResolvedTerminalTheme): ITheme => {
+  switch (theme) {
+    case "light":
+      return {
+        background: "#ffffff",
+        foreground: "#1a202c",
+        cursor: "#1a202c",
+        cursorAccent: "#ffffff",
+        selectionBackground: "rgba(0, 245, 255, 0.3)",
+      }
+    case "orange":
+      return {
+        background: "#1c1917",
+        foreground: "#fafaf9",
+        cursor: "#f97316",
+        cursorAccent: "#1c1917",
+        selectionBackground: "rgba(249, 115, 22, 0.3)",
+      }
+    case "green":
+      return {
+        background: "#0a0f0d",
+        foreground: "#f0fdf4",
+        cursor: "#86efac",
+        cursorAccent: "#0a0f0d",
+        selectionBackground: "rgba(134, 239, 172, 0.3)",
+      }
+    default:
+      return {
+        background: "#000000",
+        foreground: "#ffffff",
+        cursor: "#00f5ff",
+        cursorAccent: "#000000",
+        selectionBackground: "rgba(0, 245, 255, 0.3)",
+      }
+  }
+}
 
 export const useTerminal = (
   containerId: string,
@@ -43,19 +94,7 @@ export const useTerminal = (
     const container = document.getElementById(containerId)
     if (!container) return
 
-    // Determine actual theme
-    let actualTheme: "light" | "dark" | "orange" | "green" = "dark"
-    if (theme === "system") {
-      actualTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"
-    } else if (theme === "light") {
-      actualTheme = "light"
-    } else if (theme === "orange") {
-      actualTheme = "orange"
-    } else if (theme === "green") {
-      actualTheme = "green"
-    }
+    const actualTheme = resolveTerminalTheme(theme)
 
     const term = new Terminal({
       cursorBlink: true,
@@ -66,38 +105,32 @@ export const useTerminal = (
       cursorStyle:
         (settings?.cursorStyle as "block" | "underline" | "bar") || "block",
       scrollback: settings?.scrollback || 25000,
-      theme:
-        actualTheme === "light"
-          ? {
-              background: "#ffffff",
-              foreground: "#1a202c",
-              cursor: "#1a202c",
-              cursorAccent: "#ffffff",
-              selectionBackground: "rgba(0, 245, 255, 0.3)",
-            }
-          : actualTheme === "orange"
-            ? {
-                background: "#1c1917",
-                foreground: "#fafaf9",
-                cursor: "#f97316",
-                cursorAccent: "#1c1917",
-                selectionBackground: "rgba(249, 115, 22, 0.3)",
-              }
-            : actualTheme === "green"
-              ? {
-                  background: "#0a0f0d",
-                  foreground: "#f0fdf4",
-                  cursor: "#86efac",
-                  cursorAccent: "#0a0f0d",
-                  selectionBackground: "rgba(134, 239, 172, 0.3)",
-                }
-              : {
-                  background: "#000000",
-                  foreground: "#ffffff",
-                  cursor: "#00f5ff",
-                  cursorAccent: "#000000",
-                  selectionBackground: "rgba(0, 245, 255, 0.3)",
-                },
+      theme: getTerminalPalette(actualTheme),
+    })
+
+    term.attachCustomKeyEventHandler((event) => {
+      if (!isMacOS() || !event.metaKey || event.ctrlKey || event.altKey) {
+        // Control+C must continue through xterm so the shell receives ETX.
+        return true
+      }
+
+      switch (event.key.toLowerCase()) {
+        case "c": {
+          const selection = term.getSelection()
+          if (selection) void writeText(selection)
+          return false
+        }
+        case "v":
+          void readText().then((text) => {
+            if (text) term.paste(text)
+          })
+          return false
+        case "a":
+          term.selectAll()
+          return false
+        default:
+          return true
+      }
     })
 
     const fitAddon = new FitAddon()
@@ -313,52 +346,7 @@ export const useTerminal = (
       term.options.scrollback = settings.scrollback || 25000
     }
 
-    // Determine actual theme
-    let actualTheme: "light" | "dark" | "orange" | "green" = "dark"
-    if (theme === "system") {
-      actualTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"
-    } else if (theme === "light") {
-      actualTheme = "light"
-    } else if (theme === "orange") {
-      actualTheme = "orange"
-    } else if (theme === "green") {
-      actualTheme = "green"
-    }
-
-    term.options.theme =
-      actualTheme === "light"
-        ? {
-            background: "#ffffff",
-            foreground: "#1a202c",
-            cursor: "#1a202c",
-            cursorAccent: "#ffffff",
-            selectionBackground: "rgba(0, 245, 255, 0.3)",
-          }
-        : actualTheme === "orange"
-          ? {
-              background: "#1c1917",
-              foreground: "#fafaf9",
-              cursor: "#f97316",
-              cursorAccent: "#1c1917",
-              selectionBackground: "rgba(249, 115, 22, 0.3)",
-            }
-          : actualTheme === "green"
-            ? {
-                background: "#0a0f0d",
-                foreground: "#f0fdf4",
-                cursor: "#86efac",
-                cursorAccent: "#0a0f0d",
-                selectionBackground: "rgba(134, 239, 172, 0.3)",
-              }
-            : {
-                background: "#000000",
-                foreground: "#ffffff",
-                cursor: "#00f5ff",
-                cursorAccent: "#000000",
-                selectionBackground: "rgba(0, 245, 255, 0.3)",
-              }
+    term.options.theme = getTerminalPalette(resolveTerminalTheme(theme))
 
     // Re-fit after settings change (e.g. font size)
     // Small timeout to ensure DOM update if necessary
@@ -370,6 +358,21 @@ export const useTerminal = (
       }
     }, 10)
   }, [settings, theme])
+
+  useEffect(() => {
+    if (theme !== "system") return
+
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
+    const handleSystemThemeChange = (event: MediaQueryListEvent) => {
+      const term = terminalRef.current
+      if (!term) return
+      term.options.theme = getTerminalPalette(event.matches ? "dark" : "light")
+      if (term.rows > 0) term.refresh(0, term.rows - 1)
+    }
+
+    mediaQuery.addEventListener("change", handleSystemThemeChange)
+    return () => mediaQuery.removeEventListener("change", handleSystemThemeChange)
+  }, [theme])
 
   const write = useCallback((data: string) => {
     terminalRef.current?.write(data)

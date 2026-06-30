@@ -69,6 +69,7 @@ import {
   SPLIT_LAYOUT_REQUIRED_TABS,
 } from "./main/helpers"
 import { useTabLayoutMeasurement } from "./main/useTabLayoutMeasurement"
+import { isMacOS } from "../utils/platform"
 
 type RememberedSplitViews = Record<string, SplitViewState>
 
@@ -1196,6 +1197,16 @@ export const MainWindow: React.FC = () => {
     }
   }
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    void listen("resh-open-settings", () => handleOpenSettings("general")).then(
+      (cleanup) => {
+        unlisten = cleanup
+      },
+    )
+    return () => unlisten?.()
+  }, [])
+
   const handleEditServerFromMenu = (serverId: string) => {
     setEditServerId(serverId)
     handleOpenSettings("servers")
@@ -1562,7 +1573,7 @@ export const MainWindow: React.FC = () => {
           >
             <Settings size={18} />
           </button>
-          <WindowControls />
+          {!isMacOS() && <WindowControls />}
         </div>
       </div>
 

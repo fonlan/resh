@@ -6,3 +6,4 @@ pub mod logger;
 pub mod sftp_manager;
 pub mod ssh_manager;
 pub mod webdav;
+pub mod window_state;

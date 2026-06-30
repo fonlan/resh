@@ -529,6 +529,17 @@ pub async fn open_local_editor(path: String, editor: Option<String>) -> Result<(
         if !editor_cmd.is_empty() {
             tracing::info!("Using custom editor command: {}", editor_cmd);
 
+            #[cfg(target_os = "macos")]
+            if editor_cmd.to_ascii_lowercase().ends_with(".app") {
+                std::process::Command::new("open")
+                    .arg("-a")
+                    .arg(&editor_cmd)
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| format!("Failed to launch editor app: {}", e))?;
+                return Ok(());
+            }
+
             std::process::Command::new(&editor_cmd)
                 .arg(&path)
                 .spawn()
