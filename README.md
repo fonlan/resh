@@ -42,13 +42,13 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 | Platform | Status | Distribution |
 | --- | --- | --- |
 | Windows 10+ x64 | Supported | Portable `.exe` |
-| macOS 10.15+ | In progress | Source builds are not yet release-qualified; `.app`/`.dmg`, signing, notarization, and CI work remain |
+| macOS 10.15+ Intel / macOS 11+ Apple Silicon | In progress | Unsigned Apple Silicon `.app`/`.dmg` builds work; Intel qualification, signing, notarization, and CI remain |
 
 ## Installation
 
 ### Prerequisites
-- Node.js 20.19+ or 22.12+ and npm
-- Rust 1.85+ (for building from source)
+- Node.js 22.12.x and npm 10.9.x
+- Rust 1.88+ (for building from source)
 - Platform build dependencies:
   - Windows 10+ with Microsoft C++ Build Tools and WebView2
   - macOS 10.15+ with Xcode Command Line Tools for experimental source builds
@@ -165,10 +165,31 @@ Output: `src-tauri/target/release/Resh.exe` (portable executable)
 ### macOS Build Status
 
 The codebase has a cross-platform Tauri/Rust foundation, but macOS production
-bundles are not yet supported releases. In particular, the repository still
-needs complete macOS icon assets, architecture-qualified builds, automated
-tests, code signing, and notarization. Do not publish locally produced `.app`
-or `.dmg` files as official releases until release qualification is complete.
+bundles are not yet supported releases. Apple Silicon development, `.app`, and
+`.dmg` builds have been verified, but Intel qualification, automated CI, code
+signing, and notarization remain. Do not publish locally produced `.app` or
+`.dmg` files as official releases until release qualification is complete.
+
+For a reproducible Apple Silicon build, use the versions declared in `.nvmrc`
+and `rust-toolchain.toml`:
+
+```bash
+npm ci
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+npm run tauri-build -- --target aarch64-apple-darwin
+```
+
+Unsigned development bundles are written to:
+
+```text
+src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Resh.app
+src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Resh_<version>_aarch64.dmg
+```
+
+The Intel bundle retains the configured macOS 10.15 deployment target. Rust's
+Apple Silicon target has a minimum deployment target of macOS 11.0, the first
+macOS release available for Apple Silicon hardware.
 
 ## Usage
 

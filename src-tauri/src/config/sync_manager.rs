@@ -630,7 +630,6 @@ fn is_newer(a: &str, b: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::config::types::*;
 
     #[test]
