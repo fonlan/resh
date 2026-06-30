@@ -169,6 +169,9 @@ Mac；最终产物至少包含 `.app` 与 `.dmg`。
 
 阶段出口：外部下载的产物无需绕过系统安全设置即可安装和启动，签名与公证验证全部通过。
 
+阶段 4 自动化实现与待验收项见
+[`docs/macos/phase-4-signing-notarization.md`](docs/macos/phase-4-signing-notarization.md)。
+
 ## 阶段 5：CI、发布与长期维护
 
 目标：将一次性适配变成可持续维护的平台支持。

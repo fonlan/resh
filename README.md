@@ -42,7 +42,7 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 | Platform | Status | Distribution |
 | --- | --- | --- |
 | Windows 10+ x64 | Supported | Portable `.exe` |
-| macOS 10.15+ Intel / macOS 11+ Apple Silicon | In progress | Unsigned Apple Silicon `.app`/`.dmg` builds work; Intel qualification, signing, notarization, and CI remain |
+| macOS 10.15+ Intel / macOS 11+ Apple Silicon | In progress | Apple Silicon `.app`/`.dmg` builds work; macOS CI and signing/notarization automation are present, but real Developer ID qualification remains |
 
 ## Installation
 
@@ -166,8 +166,9 @@ Output: `src-tauri/target/release/Resh.exe` (portable executable)
 
 The codebase has a cross-platform Tauri/Rust foundation, but macOS production
 bundles are not yet supported releases. Apple Silicon development, `.app`, and
-`.dmg` builds have been verified, but Intel qualification, automated CI, code
-signing, and notarization remain. Do not publish locally produced `.app` or
+`.dmg` builds have been verified, and macOS CI plus signing/notarization
+automation is present. Intel qualification and a real Developer ID signed,
+notarized release still remain. Do not publish locally produced `.app` or
 `.dmg` files as official releases until release qualification is complete.
 
 For a reproducible Apple Silicon build, use the versions declared in `.nvmrc`

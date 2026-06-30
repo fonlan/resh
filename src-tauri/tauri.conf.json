@@ -49,6 +49,7 @@
           "y": 170
         }
       },
+      "hardenedRuntime": true,
       "minimumSystemVersion": "10.15"
     },
     "icon": [

@@ -38,6 +38,7 @@ Thumbs.db
 logs/
 *.log
 npm-debug.log*
+artifacts/
 
 # Build
 dist/
@@ -49,4 +50,6 @@ out/
 # Sensitive files
 .env*.local
 *.pem
+*.p12
+*.p8
 *.key
