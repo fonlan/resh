@@ -10,14 +10,17 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri-dev": "tauri dev",
     "tauri-build": "tauri build",
-    "sftp:baseline": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_baseline_matrix.ps1",
-    "sftp:fairness": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_fairness_regression.ps1",
-    "sftp:perf-suite": "powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/sftp_perf_suite.ps1"
+    "smoke:macos": "node scripts/macos_tauri_smoke.mjs",
+    "sftp:baseline": "node scripts/run-pwsh.mjs scripts/sftp_baseline_matrix.ps1",
+    "sftp:fairness": "node scripts/run-pwsh.mjs scripts/sftp_fairness_regression.ps1",
+    "sftp:perf-suite": "node scripts/run-pwsh.mjs scripts/sftp_perf_suite.ps1",
+    "sftp:perf-suite:check": "node scripts/check-pwsh-sftp-entry.mjs"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

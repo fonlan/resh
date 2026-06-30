@@ -1,9 +1,11 @@
 // src-tauri/src/commands/config.rs
 
 use crate::ai::manager::AiManager;
+use crate::app_paths::{resolve_app_data_dir_from_default, APP_DATA_DIR_NAME};
 use crate::config::{Config, ConfigManager, SyncManager};
 use crate::db::DatabaseManager;
 use crate::sftp_manager::edit::SftpEditManager;
+use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tokio::sync::Mutex;
@@ -20,16 +22,28 @@ pub struct AppState {
     pub sftp_edit_manager: SftpEditManager,
 }
 
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackendSmokeCheck {
+    pub status: &'static str,
+    pub app_data_dir_name: &'static str,
+}
+
+#[tauri::command]
+pub async fn backend_smoke_check() -> Result<BackendSmokeCheck, String> {
+    Ok(BackendSmokeCheck {
+        status: "ok",
+        app_data_dir_name: APP_DATA_DIR_NAME,
+    })
+}
+
 fn resolve_app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let default_app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data dir: {}", e))?;
 
-    Ok(default_app_data_dir
-        .parent()
-        .map(|p| p.join("Resh"))
-        .unwrap_or_else(|| default_app_data_dir.join("Resh")))
+    Ok(resolve_app_data_dir_from_default(&default_app_data_dir))
 }
 
 #[tauri::command]
@@ -217,4 +231,22 @@ pub async fn log_event(level: String, message: String) {
 #[tauri::command]
 pub async fn get_app_data_dir(app: AppHandle) -> Result<String, String> {
     Ok(resolve_app_data_dir(&app)?.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn backend_smoke_command_returns_stable_payload() {
+        let payload = backend_smoke_check().await.unwrap();
+
+        assert_eq!(
+            payload,
+            BackendSmokeCheck {
+                status: "ok",
+                app_data_dir_name: "Resh",
+            }
+        );
+    }
 }

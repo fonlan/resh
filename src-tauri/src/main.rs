@@ -136,10 +136,8 @@ async fn main() {
                 .app_data_dir()
                 .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
 
-            let app_data_dir = default_app_data_dir
-                .parent()
-                .map(|p| p.join("Resh"))
-                .unwrap_or_else(|| default_app_data_dir.join("Resh"));
+            let app_data_dir =
+                resh::app_paths::resolve_app_data_dir_from_default(&default_app_data_dir);
 
             // 设置全局 app_data_dir 供 panic hook 使用
             let _ = APP_DATA_DIR.set(app_data_dir.clone());
@@ -255,6 +253,7 @@ async fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::config::get_config,
+            commands::config::backend_smoke_check,
             commands::config::save_config,
             commands::config::trigger_sync,
             commands::config::get_app_data_dir,

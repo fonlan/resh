@@ -574,3 +574,47 @@ pub async fn pick_file() -> Result<Option<String>, String> {
 
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_language_hint_from_posix_remote_path() {
+        assert_eq!(
+            infer_language_hint("/var/www/服务/config.tsx"),
+            Some("typescript".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_binary_content_before_utf8_decoding() {
+        let err = decode_text_bytes(b"hello\0world").unwrap_err();
+
+        assert!(err.contains("binary"));
+    }
+
+    #[test]
+    fn round_trips_utf16le_text() {
+        let encoded = encode_text_content("hello 你好", "utf-16le").unwrap();
+        let (decoded, encoding) = decode_text_bytes(&encoded).unwrap();
+
+        assert_eq!(decoded, "hello 你好");
+        assert_eq!(encoding, "utf-16le");
+    }
+
+    #[tokio::test]
+    async fn temp_local_path_preserves_remote_unicode_filename() {
+        let local_path = create_temp_local_path("session-a", "/tmp/目录/远程 文件😀.rs")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            local_path.file_name().and_then(|name| name.to_str()),
+            Some("远程 文件😀.rs")
+        );
+        assert!(local_path
+            .components()
+            .any(|component| component.as_os_str() == "session-a"));
+    }
+}
