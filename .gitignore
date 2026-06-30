@@ -24,9 +24,11 @@ src-tauri/Cargo.lock
 *.swp
 *.swo
 *~
+docs/
 .DS_Store
 AGENTS.md
 CLAUDE.md
+MACOS_SUPPORT_PLAN.md
 
 # OS
 Thumbs.db

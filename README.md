@@ -37,12 +37,21 @@ A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for d
 **Storage:**
 - WebDAV protocol for sync
 
+## Platform Support
+
+| Platform | Status | Distribution |
+| --- | --- | --- |
+| Windows 10+ x64 | Supported | Portable `.exe` |
+| macOS 10.15+ | In progress | Source builds are not yet release-qualified; `.app`/`.dmg`, signing, notarization, and CI work remain |
+
 ## Installation
 
 ### Prerequisites
-- Node.js 18+ and npm
-- Rust 1.60+ (for building from source)
-- Windows 10+ (current version targets Windows x64)
+- Node.js 20.19+ or 22.12+ and npm
+- Rust 1.85+ (for building from source)
+- Platform build dependencies:
+  - Windows 10+ with Microsoft C++ Build Tools and WebView2
+  - macOS 10.15+ with Xcode Command Line Tools for experimental source builds
 
 ### Quick Start
 
@@ -66,12 +75,16 @@ npm run tauri-dev
 
 ### Configuration Files
 
-Resh stores configuration in `%AppData%\Resh\`:
+Resh stores configuration in a platform-specific application data directory:
 
 ```
-%AppData%\Resh\
-├── local.json        # Local-only config (overrides)
-└── logs\             # Connection logs
+Windows: %AppData%\Resh\
+macOS:   ~/Library/Application Support/Resh/
+
+Resh/
+├── local.json        # Local-only config and settings
+├── config.db         # Local application database
+└── logs/             # Application and connection logs
 ```
 
 ### Configuration Schema
@@ -111,7 +124,7 @@ npm run sftp:fairness -- -ServerHost <host> -User <user>
 npm run sftp:perf-suite -- -ServerHost <host> -User <user>
 ```
 
-SFTP harness outputs are written under `artifacts/` by default. Use script flags (for example `-PrivateKeyPath`, `-Port`, `-OutputDir`) to adapt runs for your environment.
+SFTP harness outputs are written under `artifacts/` by default. Use script flags (for example `-PrivateKeyPath`, `-Port`, `-OutputDir`) to adapt runs for your environment. The current npm wrappers require Windows PowerShell and are not yet qualified on macOS.
 
 
 ### Adding New Features
@@ -148,6 +161,14 @@ Output: `src-tauri/target/release/Resh.exe` (portable executable)
 1. Build the application
 2. Distribute the `Resh.exe` file
 3. Users run the exe - no installation needed
+
+### macOS Build Status
+
+The codebase has a cross-platform Tauri/Rust foundation, but macOS production
+bundles are not yet supported releases. In particular, the repository still
+needs complete macOS icon assets, architecture-qualified builds, automated
+tests, code signing, and notarization. Do not publish locally produced `.app`
+or `.dmg` files as official releases until release qualification is complete.
 
 ## Usage
 
