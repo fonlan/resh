@@ -1,7 +1,9 @@
 use crate::config::types::{AiChannel, AiModel, Proxy};
 use dashmap::DashMap;
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage as GenaiMessage, ChatRequest, ChatStream, Tool};
+use genai::chat::{
+    ChatMessage as GenaiMessage, ChatOptions, ChatRequest, ChatStream, ReasoningEffort, Tool,
+};
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
@@ -15,6 +17,66 @@ pub struct CopilotToken {
 
 pub struct AiManager {
     copilot_tokens: DashMap<String, CopilotToken>,
+}
+
+fn reasoning_effort_from_level(level: Option<&str>) -> Option<ReasoningEffort> {
+    let normalized = level
+        .map(str::trim)
+        .filter(|level| !level.is_empty())
+        .map(str::to_ascii_lowercase);
+
+    match normalized.as_deref() {
+        Some("minimal") => Some(ReasoningEffort::Minimal),
+        Some("low") => Some(ReasoningEffort::Low),
+        Some("medium") => Some(ReasoningEffort::Medium),
+        Some("high") => Some(ReasoningEffort::High),
+        Some("xhigh") => Some(ReasoningEffort::XHigh),
+        Some("max") => Some(ReasoningEffort::Max),
+        Some("none") | Some("off") | None => None,
+        Some(other) => {
+            tracing::warn!(
+                "[AiManager] Unknown thinking level '{}', using no explicit reasoning effort",
+                other
+            );
+            None
+        }
+    }
+}
+
+fn is_claude_anthropic_request(channel: &AiChannel, model: &AiModel) -> bool {
+    let provider = channel.provider.to_ascii_lowercase();
+    let model_name = model.name.to_ascii_lowercase();
+
+    provider == "anthropic"
+        || provider == "claude"
+        || model_name.starts_with("claude-")
+        || channel
+            .endpoint
+            .as_deref()
+            .map(|endpoint| endpoint.to_ascii_lowercase().contains("anthropic"))
+            .unwrap_or(false)
+}
+
+fn build_chat_options(
+    channel: &AiChannel,
+    model: &AiModel,
+    thinking_level: Option<&str>,
+) -> ChatOptions {
+    let mut options = ChatOptions::default()
+        .with_temperature(0.0)
+        .with_capture_content(true)
+        .with_capture_reasoning_content(true);
+
+    if is_claude_anthropic_request(channel, model) {
+        options = options.with_top_p(1.0);
+    }
+
+    // ponytail: string enum only; unknown values intentionally fall back to no explicit thinking.
+    if let Some(reasoning_effort) = reasoning_effort_from_level(thinking_level) {
+        options = options.with_reasoning_effort(reasoning_effort);
+    }
+
+    options
 }
 
 impl AiManager {
@@ -141,6 +203,7 @@ impl AiManager {
         messages: Vec<GenaiMessage>,
         tools: Option<Vec<Tool>>,
         proxy: Option<Proxy>,
+        thinking_level: Option<&str>,
     ) -> Result<ChatStream, String> {
         let http_client = self.build_http_client(proxy, Some(&channel.provider))?;
         let mut chat_req = ChatRequest::new(messages);
@@ -190,9 +253,7 @@ impl AiManager {
             .with_service_target_resolver(resolver)
             .build();
 
-        let options = genai::chat::ChatOptions::default()
-            .with_capture_content(true)
-            .with_capture_reasoning_content(true);
+        let options = build_chat_options(channel, model, thinking_level);
 
         Ok(genai_client
             .exec_chat_stream(&model.name, chat_req, Some(&options))
@@ -278,5 +339,63 @@ impl AiManager {
             ids.sort();
             Ok(ids)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel(provider: &str, endpoint: Option<&str>) -> AiChannel {
+        AiChannel {
+            id: "channel".to_string(),
+            name: "Channel".to_string(),
+            provider: provider.to_string(),
+            endpoint: endpoint.map(str::to_string),
+            api_key: None,
+            proxy_id: None,
+            is_active: true,
+            synced: true,
+            updated_at: "now".to_string(),
+        }
+    }
+
+    fn model(name: &str) -> AiModel {
+        AiModel {
+            id: "model".to_string(),
+            name: name.to_string(),
+            channel_id: "channel".to_string(),
+            enabled: true,
+            synced: true,
+            updated_at: "now".to_string(),
+        }
+    }
+
+    #[test]
+    fn chat_options_map_thinking_and_claude_defaults() {
+        let options = build_chat_options(
+            &channel("openai", Some("https://api.anthropic.com/v1")),
+            &model("claude-sonnet-4"),
+            Some("high"),
+        );
+
+        assert_eq!(options.temperature, Some(0.0));
+        assert_eq!(options.top_p, Some(1.0));
+        assert_eq!(
+            options
+                .reasoning_effort
+                .as_ref()
+                .map(|effort| effort.variant_name()),
+            Some("high")
+        );
+    }
+
+    #[test]
+    fn unknown_thinking_level_is_no_explicit_effort() {
+        let options = build_chat_options(&channel("openai", None), &model("gpt-4o"), Some("fast"));
+
+        assert_eq!(options.temperature, Some(0.0));
+        assert!(options.top_p.is_none());
+        assert!(options.reasoning_effort.is_none());
     }
 }

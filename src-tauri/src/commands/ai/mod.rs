@@ -679,6 +679,7 @@ pub async fn send_chat_message(
     channel_id: String,
     mode: Option<String>,
     ssh_session_id: Option<String>,
+    thinking_level: Option<String>,
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
@@ -769,6 +770,7 @@ pub async fn send_chat_message(
         tools,
         token,
         bound_ssh_session_id,
+        thinking_level,
     )
     .await;
 
@@ -805,6 +807,7 @@ pub async fn regenerate_ai_response(
     channel_id: String,
     mode: Option<String>,
     ssh_session_id: Option<String>,
+    thinking_level: Option<String>,
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
@@ -887,6 +890,7 @@ pub async fn regenerate_ai_response(
         tools,
         token,
         bound_ssh_session_id,
+        thinking_level,
     )
     .await;
 
@@ -924,6 +928,7 @@ pub async fn execute_agent_tools(
     mode: Option<String>,
     ssh_session_id: Option<String>,
     tool_call_ids: Vec<String>,
+    thinking_level: Option<String>,
 ) -> Result<(), String> {
     let _ = window.emit(&format!("ai-started-{}", session_id), "started");
 
@@ -1025,6 +1030,7 @@ pub async fn execute_agent_tools(
         tools,
         token,
         bound_ssh_session_id,
+        thinking_level,
     )
     .await;
 
@@ -1323,7 +1329,7 @@ pub async fn generate_session_title(
 
     let mut stream = state
         .ai_manager
-        .stream_chat(&channel, &model, title_messages, None, proxy)
+        .stream_chat(&channel, &model, title_messages, None, proxy, None)
         .await?;
     let mut title = String::new();
     loop {

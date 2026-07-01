@@ -638,6 +638,7 @@ pub fn run_ai_turn(
     tools: Option<Vec<ToolDefinition>>,
     cancellation_token: CancellationToken,
     ssh_session_id: Option<String>,
+    thinking_level: Option<String>,
 ) -> futures::future::BoxFuture<'static, Result<Option<Vec<ToolCall>>, String>> {
     Box::pin(async move {
         let (channel, model, proxy) = {
@@ -682,7 +683,14 @@ pub fn run_ai_turn(
 
         let mut stream = state
             .ai_manager
-            .stream_chat(&channel, &model, genai_history, genai_tools, proxy)
+            .stream_chat(
+                &channel,
+                &model,
+                genai_history,
+                genai_tools,
+                proxy,
+                thinking_level.as_deref(),
+            )
             .await?;
 
         let mut full_content = String::new();
@@ -1152,6 +1160,7 @@ pub fn run_ai_turn(
                     tools,
                     cancellation_token,
                     ssh_session_id,
+                    thinking_level,
                 )
                 .await;
             }
