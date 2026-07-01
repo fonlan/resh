@@ -1,30 +1,4 @@
-import { Server, GeneralSettings } from "../types"
-
-/**
- * Add a server to the recent servers list
- * Moves the server to the front if it already exists
- * Limits the list to MAX_RECENT_SERVERS items
- * Also increments the local connection counter used by the new-tab menu.
- */
-export function addRecentServer(
-  general: GeneralSettings,
-  serverId: string,
-): GeneralSettings {
-  const current = general.recentServerIds || []
-  const filtered = current.filter((id) => id !== serverId)
-  // Store at least 20 or maxRecentServers * 2 to have some history
-  const limit = Math.max(20, general.maxRecentServers * 2)
-  const updated = [serverId, ...filtered].slice(0, limit)
-  const serverConnectionCounts = general.serverConnectionCounts || {}
-  return {
-    ...general,
-    recentServerIds: updated,
-    serverConnectionCounts: {
-      ...serverConnectionCounts,
-      [serverId]: (serverConnectionCounts[serverId] || 0) + 1,
-    },
-  }
-}
+import { Server } from "../types"
 
 /**
  * Get the most recent servers from the list

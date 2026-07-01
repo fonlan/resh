@@ -18,6 +18,7 @@ interface ConfigContextType {
   error: string | null
   loadConfig: () => Promise<void>
   saveConfig: (config: Config) => Promise<void>
+  recordServerConnection: (serverId: string) => Promise<void>
   triggerSync: () => Promise<Config>
   /**
    * 同步取出当前 Provider 内最新的 Config 引用。
@@ -98,6 +99,21 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
     [setConfigSafe],
   )
 
+  const recordServerConnection = useCallback(
+    async (serverId: string) => {
+      try {
+        const cfg = await invoke<Config>("record_server_connection", { serverId })
+        setConfigSafe(cfg)
+        setError(null)
+      } catch (err) {
+        logger.error("[ConfigProvider] Failed to record server connection", err)
+        setError(err instanceof Error ? err.message : String(err))
+        throw err
+      }
+    },
+    [setConfigSafe],
+  )
+
   const triggerSync = useCallback(async () => {
     try {
       logger.info("[ConfigProvider] Triggering sync...")
@@ -138,6 +154,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
         error,
         loadConfig,
         saveConfig,
+        recordServerConnection,
         triggerSync,
         getLatestConfig,
       }}

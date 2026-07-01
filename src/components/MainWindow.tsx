@@ -43,7 +43,7 @@ import { ServerContextMenu } from "./ServerContextMenu"
 import { ToastContainer, ToastItem } from "./Toast"
 import { useConfig } from "../hooks/useConfig"
 import { generateId } from "../utils/idGenerator"
-import { addRecentServer, getRecentServers } from "../utils/recentServers"
+import { getRecentServers } from "../utils/recentServers"
 import { useTranslation } from "../i18n"
 import { useTabDragDrop } from "../hooks/useTabDragDrop"
 import { EmojiText } from "./EmojiText"
@@ -106,7 +106,8 @@ const pruneRememberedSplitViews = (
 }
 
 export const MainWindow: React.FC = () => {
-  const { config, saveConfig, getLatestConfig } = useConfig()
+  const { config, saveConfig, recordServerConnection, getLatestConfig } =
+    useConfig()
   const { t } = useTranslation()
   const [tabs, setTabs] = useState<Tab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -630,10 +631,9 @@ export const MainWindow: React.FC = () => {
       setActiveTabId(newTab.id)
       triggerTerminalResize()
 
-      const updatedGeneral = addRecentServer(currentConfig.general, serverId)
-      await saveConfig({ ...currentConfig, general: updatedGeneral })
+      await recordServerConnection(serverId)
     },
-    [saveConfig, getLatestConfig, triggerTerminalResize],
+    [recordServerConnection, getLatestConfig, triggerTerminalResize],
   )
 
   const handleAddQuickConnectTab = useCallback((target: QuickConnectTarget) => {

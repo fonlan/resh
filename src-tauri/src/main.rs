@@ -256,6 +256,7 @@ async fn main() {
             commands::config::get_config,
             commands::config::backend_smoke_check,
             commands::config::save_config,
+            commands::config::record_server_connection,
             commands::config::trigger_sync,
             commands::config::get_app_data_dir,
             commands::config::log_event,

@@ -131,6 +131,44 @@ pub async fn save_config(
     Ok(())
 }
 
+fn apply_server_connection(config: &mut Config, server_id: &str) -> Result<(), String> {
+    if !config.servers.iter().any(|server| server.id == server_id) {
+        return Err(format!("Server not found: {}", server_id));
+    }
+
+    config
+        .general
+        .recent_server_ids
+        .retain(|id| id != server_id);
+    config
+        .general
+        .recent_server_ids
+        .insert(0, server_id.to_string());
+
+    let limit = std::cmp::max(20, config.general.max_recent_servers.saturating_mul(2)) as usize;
+    config.general.recent_server_ids.truncate(limit);
+
+    let count = config
+        .general
+        .server_connection_counts
+        .entry(server_id.to_string())
+        .or_insert(0);
+    *count = count.saturating_add(1);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn record_server_connection(
+    server_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Config, String> {
+    let mut config = state.config.lock().await;
+    apply_server_connection(&mut config, &server_id)?;
+    state.config_manager.save_local_config(&config)?;
+    Ok(config.clone())
+}
+
 #[tauri::command]
 pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
     let mut config = state.config.lock().await;
@@ -248,5 +286,67 @@ mod tests {
                 app_data_dir_name: "Resh",
             }
         );
+    }
+    fn sample_server(id: &str) -> crate::config::types::Server {
+        crate::config::types::Server {
+            id: id.to_string(),
+            name: id.to_string(),
+            group: String::new(),
+            host: "example.test".to_string(),
+            port: 22,
+            username: "alice".to_string(),
+            auth_id: None,
+            proxy_id: None,
+            jumphost_id: None,
+            port_forwards: vec![],
+            keep_alive: 0,
+            auto_exec_commands: vec![],
+            snippets: vec![],
+            ai_models: vec![],
+            sftp_custom_commands: vec![],
+            sftp_favorite_paths: vec![],
+            additional_prompt: None,
+            synced: true,
+            created_at: None,
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn apply_server_connection_moves_recent_truncates_and_increments_count() {
+        let mut config = Config::empty();
+        config.general.max_recent_servers = 3;
+        config.servers = (0..25)
+            .map(|index| sample_server(&format!("srv-{index:02}")))
+            .collect();
+        config.general.recent_server_ids = (0..25).map(|index| format!("srv-{index:02}")).collect();
+        config
+            .general
+            .server_connection_counts
+            .insert("srv-10".to_string(), 4);
+
+        apply_server_connection(&mut config, "srv-10").unwrap();
+
+        assert_eq!(config.general.recent_server_ids.len(), 20);
+        assert_eq!(config.general.recent_server_ids.first().unwrap(), "srv-10");
+        assert_eq!(
+            config
+                .general
+                .recent_server_ids
+                .iter()
+                .filter(|id| id.as_str() == "srv-10")
+                .count(),
+            1
+        );
+        assert_eq!(config.general.server_connection_counts["srv-10"], 5);
+    }
+
+    #[test]
+    fn apply_server_connection_rejects_unknown_server() {
+        let mut config = Config::empty();
+
+        assert!(apply_server_connection(&mut config, "missing").is_err());
+        assert!(config.general.recent_server_ids.is_empty());
+        assert!(config.general.server_connection_counts.is_empty());
     }
 }
