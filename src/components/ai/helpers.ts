@@ -1,4 +1,4 @@
-import type { ChatMessage } from "../../types/ai"
+import type { ChatMessage, ToolCall } from "../../types/ai"
 import type { EditorAIContext } from "../../types"
 
 export const SFTP_PATH_MIME_TYPE = "application/x-resh-sftp-path"
@@ -24,6 +24,44 @@ export const COMMAND_EXECUTION_TOOL_NAMES = new Set([
   "run_in_terminal",
   "run_in_background",
 ])
+
+export const clampAiToolConfirmationCountdown = (value: unknown): number => {
+  const numericValue = typeof value === "number" ? value : 5
+  if (!Number.isFinite(numericValue)) return 5
+  return Math.max(0, Math.min(30, Math.floor(numericValue)))
+}
+
+const alwaysDangerousCommandPattern =
+  /\b(rm|dd|mkfs|fdisk|reboot|shutdown|halt|poweroff|init)\b/
+const potentiallyDangerousCommandPattern =
+  /\b(mv|chmod|chown|chgrp|systemctl|service|kill|pkill|killall)\b/
+const dangerousPipedCommandPattern =
+  /\b(curl|wget)\b.*\|.*\b(bash|sh|zsh|fish|python|perl|ruby)\b/
+
+export const isSensitiveToolCall = (call: ToolCall): boolean => {
+  if (!COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
+    return false
+  }
+
+  const { displayCommand } = parseCommandExecutionToolArgs(
+    call.function.arguments,
+    call.function.name,
+  )
+  if (!displayCommand) return false
+
+  const cleanCommand = displayCommand
+    .replace(/(?:[0-9&]+)?>>?\s*\/dev\/null/g, " ")
+    .replace(/[0-9]+>&[0-9]+/g, " ")
+
+  return (
+    alwaysDangerousCommandPattern.test(cleanCommand) ||
+    potentiallyDangerousCommandPattern.test(cleanCommand) ||
+    dangerousPipedCommandPattern.test(cleanCommand)
+  )
+}
+
+export const hasSensitiveToolCall = (toolCalls: ToolCall[]): boolean =>
+  toolCalls.some(isSensitiveToolCall)
 
 export const getToolDisplayName = (toolName: string, t: any): string => {
   const displayNameMap: Record<string, string> = {

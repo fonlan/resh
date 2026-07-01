@@ -38,7 +38,9 @@ import { MessageBubble } from "./ai/MessageBubble"
 import { ToolConfirmation } from "./ai/ToolConfirmation"
 import {
   buildMessageWithEditorContext,
+  clampAiToolConfirmationCountdown,
   collectAssistantToolOutputs,
+  hasSensitiveToolCall,
   HIDDEN_TOOL_CALL_NAMES,
   MAX_EDITOR_CONTEXT_CHARS,
   normalizeAiErrorMessage,
@@ -197,6 +199,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const currentSession = sessions.find((s) => s.id === activeSessionId)
   const boundSshSessionId =
     currentSession?.sshSessionId || currentSshSessionId || currentTabId
+  const autoConfirmDelaySeconds = clampAiToolConfirmationCountdown(
+    config?.general.aiToolConfirmationCountdown ?? 5,
+  )
 
   const sidebarRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -682,6 +687,47 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }
 
+  const executeToolCalls = useCallback(
+    async (calls: ToolCall[]) => {
+      if (!activeSessionId) return
+
+      isAtBottomRef.current = true
+      setGenerating(activeSessionId, true)
+      clearSessionStopped(activeSessionId)
+
+      try {
+        const model = config?.aiModels.find((m) => m.id === selectedModelId)
+        const channelId = model?.channelId || ""
+
+        await aiService.executeAgentTools(
+          activeSessionId,
+          selectedModelId,
+          channelId,
+          mode,
+          boundSshSessionId,
+          calls.map((c) => c.id),
+          thinkingLevel,
+        )
+        await selectSession(activeSessionId)
+      } catch (err) {
+        setGenerating(activeSessionId, false)
+        showAiError(err)
+      }
+    },
+    [
+      activeSessionId,
+      boundSshSessionId,
+      clearSessionStopped,
+      config,
+      mode,
+      selectSession,
+      selectedModelId,
+      setGenerating,
+      showAiError,
+      thinkingLevel,
+    ],
+  )
+
   // Listen for streaming responses & tool calls
   useEffect(() => {
     if (!activeSessionId) return
@@ -758,36 +804,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
             c.function.name === "read_file",
         )
 
-        if (isAllSafe) {
-          // Ensure we are using valid IDs
-          const model = config?.aiModels.find((m) => m.id === selectedModelId)
-          if (!model) {
-            setGenerating(activeSessionId, false)
-            return
-          }
-          const channelId = model.channelId || ""
+        const shouldExecuteWithoutConfirmation =
+          isAllSafe ||
+          (autoConfirmDelaySeconds === 0 && !hasSensitiveToolCall(calls))
 
-          aiService
-            .executeAgentTools(
-              activeSessionId,
-              selectedModelId,
-              channelId,
-              mode,
-              boundSshSessionId,
-              calls.map((c) => c.id),
-              thinkingLevel,
-            )
-            .catch((err) => {
-              setGenerating(activeSessionId, false)
-              showAiError(err)
-            })
-
-          // Do NOT set pendingToolCalls
-          setGenerating(activeSessionId, true)
+        if (shouldExecuteWithoutConfirmation) {
+          void executeToolCalls(calls)
         } else {
-          // Here we have tool calls that require confirmation.
-          // We set pendingToolCalls to show the UI.
-          // The UI (ToolConfirmation) handles the countdown for non-sensitive commands.
           setGenerating(activeSessionId, false)
           storeSetPendingToolCalls(activeSessionId, calls)
         }
@@ -857,11 +880,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     newAssistantMessage,
     setGenerating,
     storeSetPendingToolCalls,
+    autoConfirmDelaySeconds,
+    executeToolCalls,
     config,
     selectedModelId,
-    thinkingLevel,
-    mode,
-    boundSshSessionId,
     sessions,
     currentServerId,
     loadSessions,
@@ -1153,43 +1175,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const handleConfirmTools = useCallback(async () => {
     if (!activeSessionId || !pendingToolCalls) return
 
-    isAtBottomRef.current = true
-    setGenerating(activeSessionId, true)
-    clearSessionStopped(activeSessionId) // Clear stopped flag when tools are confirmed
-    const callsToExecute = pendingToolCalls.map((c) => c.id)
+    const callsToExecute = pendingToolCalls
     storeSetPendingToolCalls(activeSessionId, null) // Hide confirmation
-
-    try {
-      const model = config?.aiModels.find((m) => m.id === selectedModelId)
-      const channelId = model?.channelId || ""
-
-      await aiService.executeAgentTools(
-        activeSessionId,
-        selectedModelId,
-        channelId,
-        mode,
-        boundSshSessionId,
-        callsToExecute,
-        thinkingLevel,
-      )
-      await selectSession(activeSessionId)
-    } catch (err) {
-      setGenerating(activeSessionId, false)
-      showAiError(err)
-    }
+    await executeToolCalls(callsToExecute)
   }, [
     activeSessionId,
+    executeToolCalls,
     pendingToolCalls,
-    config,
-    selectedModelId,
-    thinkingLevel,
-    mode,
-    boundSshSessionId,
-    setGenerating,
     storeSetPendingToolCalls,
-    clearSessionStopped,
-    selectSession,
-    showAiError,
   ])
 
   const handleCancelTools = useCallback(() => {
@@ -1543,6 +1536,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                         <div className="ai-message-content p-0 overflow-hidden">
                           <ToolConfirmation
                             toolCalls={pendingToolCalls || []}
+                            autoConfirmDelaySeconds={autoConfirmDelaySeconds}
                             onConfirm={handleConfirmTools}
                             onCancel={handleCancelTools}
                           />

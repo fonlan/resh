@@ -5,17 +5,20 @@ import { useTranslation } from "../../i18n"
 import {
   COMMAND_EXECUTION_TOOL_NAMES,
   getToolDisplayName,
+  hasSensitiveToolCall,
   parseCommandExecutionToolArgs,
 } from "./helpers"
 
 interface ToolConfirmationProps {
   toolCalls: ToolCall[]
+  autoConfirmDelaySeconds: number
   onConfirm: () => void
   onCancel: () => void
 }
 
 export const ToolConfirmation = ({
   toolCalls,
+  autoConfirmDelaySeconds,
   onConfirm,
   onCancel,
 }: ToolConfirmationProps) => {
@@ -25,58 +28,17 @@ export const ToolConfirmation = ({
   const confirmedRef = useRef(false)
 
   useEffect(() => {
-    // Dangerous commands that should always require confirmation
-    const alwaysDangerous =
-      /\b(rm|dd|mkfs|fdisk|reboot|shutdown|halt|poweroff|init)\b/
-
-    // Potentially dangerous commands (chmod, kill, etc.)
-    const potentiallyDangerous =
-      /\b(mv|chmod|chown|chgrp|systemctl|service|kill|pkill|killall)\b/
-
-    // Commands that are dangerous when piped to shell (curl xxx | bash)
-    const dangerousWhenPiped =
-      /\b(curl|wget)\b.*\|.*\b(bash|sh|zsh|fish|python|perl|ruby)\b/
-
-    let sensitive = false
-
-    toolCalls.forEach((call) => {
-      if (COMMAND_EXECUTION_TOOL_NAMES.has(call.function.name)) {
-        const { displayCommand: originalCommand } =
-          parseCommandExecutionToolArgs(
-            call.function.arguments,
-            call.function.name,
-          )
-        if (originalCommand) {
-          // Remove safe redirections: 2>/dev/null, >/dev/null, &>/dev/null, 2>&1, 1>&2, etc.
-          let cleanCommand = originalCommand.replace(
-            /(?:[0-9&]+)?>>?\s*\/dev\/null/g,
-            " ",
-          )
-          cleanCommand = cleanCommand.replace(/[0-9]+>&[0-9]+/g, " ")
-
-          // Check for always dangerous commands
-          if (alwaysDangerous.test(cleanCommand)) {
-            sensitive = true
-          }
-          // Check for potentially dangerous commands
-          else if (potentiallyDangerous.test(cleanCommand)) {
-            sensitive = true
-          }
-          // Check for curl/wget piped to shell
-          else if (dangerousWhenPiped.test(cleanCommand)) {
-            sensitive = true
-          }
-        }
-      }
-    })
+    const sensitive = hasSensitiveToolCall(toolCalls)
 
     setIsSensitive(sensitive)
+    confirmedRef.current = false
 
-    // Auto-execute if NOT sensitive
     if (!sensitive) {
-      setCountdown(5)
+      setCountdown(autoConfirmDelaySeconds)
+    } else {
+      setCountdown(null)
     }
-  }, [toolCalls])
+  }, [autoConfirmDelaySeconds, toolCalls])
 
   useEffect(() => {
     if (countdown === null || confirmedRef.current) return
