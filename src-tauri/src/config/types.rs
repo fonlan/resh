@@ -341,6 +341,12 @@ pub struct GeneralSettings {
     #[serde(default = "default_ai_timeout")]
     #[serde(alias = "aiTimeout", alias = "ai_timeout")]
     pub ai_timeout: u32,
+    #[serde(default = "default_ai_tool_confirmation_countdown")]
+    #[serde(
+        alias = "aiToolConfirmationCountdown",
+        alias = "ai_tool_confirmation_countdown"
+    )]
+    pub ai_tool_confirmation_countdown: u32,
     #[serde(default = "default_max_recent_servers")]
     pub max_recent_servers: u32,
     #[serde(default)]
@@ -379,6 +385,20 @@ pub struct GeneralSettings {
     pub ai_thinking_level: Option<String>,
 }
 
+const MAX_AI_TOOL_CONFIRMATION_COUNTDOWN: u32 = 30;
+
+impl GeneralSettings {
+    pub fn normalize_legacy_defaults(&mut self) -> bool {
+        let sftp_changed = self.sftp.normalize_legacy_defaults();
+        let countdown = self
+            .ai_tool_confirmation_countdown
+            .min(MAX_AI_TOOL_CONFIRMATION_COUNTDOWN);
+        let countdown_changed = countdown != self.ai_tool_confirmation_countdown;
+        self.ai_tool_confirmation_countdown = countdown;
+        sftp_changed || countdown_changed
+    }
+}
+
 fn default_recording_mode() -> String {
     "raw".to_string()
 }
@@ -409,6 +429,10 @@ fn default_ai_max_history() -> u32 {
 
 fn default_ai_timeout() -> u32 {
     120
+}
+
+fn default_ai_tool_confirmation_countdown() -> u32 {
+    5
 }
 
 fn default_max_recent_servers() -> u32 {
@@ -496,7 +520,7 @@ pub struct SyncConfig {
 
 impl Config {
     pub fn normalize_legacy_defaults(&mut self) -> bool {
-        self.general.sftp.normalize_legacy_defaults()
+        self.general.normalize_legacy_defaults()
     }
 
     pub fn empty() -> Self {
@@ -551,6 +575,7 @@ impl Config {
                 ai_mode: default_ai_mode(),
                 ai_max_history: 20,
                 ai_timeout: 120,
+                ai_tool_confirmation_countdown: default_ai_tool_confirmation_countdown(),
                 max_recent_servers: 3,
                 recent_server_ids: vec![],
                 window_state: default_window_state(),

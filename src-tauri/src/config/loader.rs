@@ -35,18 +35,15 @@ impl ConfigManager {
         let mut config: Config = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse local config: {}", e))?;
         if config.normalize_legacy_defaults() {
-            tracing::info!(
-                transfer_profile = %config.general.sftp.transfer_profile,
-                migrated_download_max_inflight = config.general.sftp.download_max_inflight,
-                migrated_chunk_size_min = config.general.sftp.chunk_size_min,
-                "normalized legacy SFTP throughput defaults from persisted local config"
-            );
+            tracing::info!("normalized persisted local config defaults");
         }
         Ok(config)
     }
 
     pub fn save_config(&self, config: &Config, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(config)
+        let mut normalized = config.clone();
+        normalized.normalize_legacy_defaults();
+        let json = serde_json::to_string_pretty(&normalized)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
         fs::write(path, json).map_err(|e| format!("Failed to write config: {}", e))
     }
@@ -139,6 +136,39 @@ mod tests {
         assert_eq!(
             loaded.general.sftp.editors[0].editor,
             r"C:\Program Files\Microsoft VS Code\Code.exe"
+        );
+    }
+    #[test]
+    fn ai_tool_confirmation_countdown_defaults_and_clamps() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::new(temp_dir.path().join("Resh"));
+
+        let mut missing_field = serde_json::to_value(Config::empty()).unwrap();
+        missing_field["general"]
+            .as_object_mut()
+            .unwrap()
+            .remove("aiToolConfirmationCountdown");
+        std::fs::write(
+            manager.local_config_path(),
+            serde_json::to_vec_pretty(&missing_field).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = manager.load_local_config().unwrap();
+        assert_eq!(loaded.general.ai_tool_confirmation_countdown, 5);
+
+        let mut config = Config::empty();
+        config.general.ai_tool_confirmation_countdown = 99;
+        manager.save_local_config(&config).unwrap();
+
+        let loaded = manager.load_local_config().unwrap();
+        assert_eq!(loaded.general.ai_tool_confirmation_countdown, 30);
+
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(manager.local_config_path()).unwrap()).unwrap();
+        assert_eq!(
+            raw["general"]["aiToolConfirmationCountdown"],
+            serde_json::json!(30)
         );
     }
 }

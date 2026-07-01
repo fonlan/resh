@@ -71,6 +71,7 @@ export interface GeneralSettings {
   aiMode: AIMode
   aiMaxHistory: number
   aiTimeout: number
+  aiToolConfirmationCountdown: number
   maxRecentServers: number
   recentServerIds: string[]
   recordingMode: RecordingMode
