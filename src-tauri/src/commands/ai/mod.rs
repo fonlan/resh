@@ -20,11 +20,62 @@ use tool_runtime::{
 };
 use turn::{execute_tools_and_save, run_ai_turn};
 
+fn is_read_only_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "get_terminal_output" | "get_selected_terminal_output" | "read_file"
+    )
+}
+
+const DUMMY_TOOL_RESPONSE: &str = "Interrupted or skipped by user";
+
+fn latest_assistant_tool_calls_with_pending_ids(
+    history: &[ChatMessage],
+    requested_ids: &[String],
+) -> Option<Vec<ToolCall>> {
+    let requested: HashSet<&str> = requested_ids.iter().map(String::as_str).collect();
+    let mut responded: HashSet<&str> = HashSet::new();
+
+    for msg in history.iter().rev() {
+        if msg.role == "tool" {
+            if msg.content.as_deref() == Some(DUMMY_TOOL_RESPONSE) {
+                continue;
+            }
+            if let Some(id) = msg.tool_call_id.as_deref() {
+                responded.insert(id);
+            }
+            continue;
+        }
+
+        if msg.role != "assistant" {
+            continue;
+        }
+
+        let Some(calls) = msg.tool_calls.as_ref() else {
+            continue;
+        };
+        let pending: Vec<ToolCall> = calls
+            .iter()
+            .filter(|call| {
+                requested.contains(call.id.as_str()) && !responded.contains(call.id.as_str())
+            })
+            .cloned()
+            .collect();
+
+        if !pending.is_empty() {
+            return Some(pending);
+        }
+    }
+
+    None
+}
+
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent};
 use rusqlite::params;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager, State, Window};
@@ -95,11 +146,98 @@ mod history_window_tests {
 }
 
 #[cfg(test)]
+mod pending_tool_call_tests {
+    use super::{
+        latest_assistant_tool_calls_with_pending_ids, ChatMessage, FunctionCall, ToolCall,
+    };
+
+    fn call(id: &str, name: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            tool_type: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: "{}".to_string(),
+            },
+        }
+    }
+
+    fn assistant(calls: Vec<ToolCall>) -> ChatMessage {
+        ChatMessage {
+            role: "assistant".to_string(),
+            content: None,
+            reasoning_content: Some("trace".to_string()),
+            tool_calls: Some(calls),
+            tool_call_id: None,
+            created_at: None,
+            model_id: None,
+        }
+    }
+
+    fn tool(id: &str, content: &str) -> ChatMessage {
+        ChatMessage {
+            role: "tool".to_string(),
+            content: Some(content.to_string()),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_call_id: Some(id.to_string()),
+            created_at: None,
+            model_id: None,
+        }
+    }
+
+    #[test]
+    fn finds_pending_confirm_call_after_read_only_tool_response() {
+        let history = vec![
+            ChatMessage {
+                role: "user".to_string(),
+                content: Some("run this".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: None,
+                created_at: None,
+                model_id: None,
+            },
+            assistant(vec![
+                call("read_1", "read_file"),
+                call("exec_1", "run_in_terminal"),
+            ]),
+            tool("read_1", "file output"),
+        ];
+
+        let pending =
+            latest_assistant_tool_calls_with_pending_ids(&history, &["exec_1".to_string()])
+                .expect("pending tool call");
+
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "exec_1");
+    }
+
+    #[test]
+    fn does_not_repeat_already_executed_tool() {
+        let history = vec![
+            assistant(vec![
+                call("read_1", "read_file"),
+                call("exec_1", "run_in_terminal"),
+            ]),
+            tool("read_1", "file output"),
+            tool("exec_1", "command output"),
+        ];
+
+        let pending =
+            latest_assistant_tool_calls_with_pending_ids(&history, &["read_1".to_string()]);
+
+        assert!(pending.is_none());
+    }
+}
+
+#[cfg(test)]
 mod streamed_tool_call_tests {
     use super::history::to_genai_messages;
     use super::stream_parsing::{
         accumulate_streamed_tool_call_chunk, normalize_streamed_tool_calls,
     };
+    use super::turn::apply_reasoning_fallback;
     use super::types::{ChatMessage, FunctionCall, ToolCall};
     use std::collections::HashMap;
 
@@ -261,6 +399,20 @@ mod streamed_tool_call_tests {
             Some("thinking trace")
         );
         assert_eq!(messages[0].content.first_text(), Some("final answer"));
+        let tool_calls = messages[0].content.tool_calls();
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].call_id, "tooluse_1");
+    }
+
+    #[test]
+    fn reasoning_fallback_uses_captured_reasoning_only_when_empty() {
+        let mut empty_reasoning = String::new();
+        apply_reasoning_fallback(&mut empty_reasoning, Some("captured trace".to_string()));
+        assert_eq!(empty_reasoning, "captured trace");
+
+        let mut streamed_reasoning = "streamed trace".to_string();
+        apply_reasoning_fallback(&mut streamed_reasoning, Some("captured trace".to_string()));
+        assert_eq!(streamed_reasoning, "streamed trace");
     }
 
     #[test]
@@ -626,7 +778,6 @@ pub async fn send_chat_message(
         Ok(tool_calls) => {
             if let Some(calls) = tool_calls {
                 if !calls.is_empty() {
-                    let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
                     return Ok(());
                 }
             }
@@ -745,7 +896,6 @@ pub async fn regenerate_ai_response(
         Ok(tool_calls) => {
             if let Some(calls) = tool_calls {
                 if !calls.is_empty() {
-                    let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
                     return Ok(());
                 }
             }
@@ -815,17 +965,15 @@ pub async fn execute_agent_tools(
         bound_ssh_session_id.as_deref(),
     )
     .await?;
-    let last_msg = history.last().ok_or("No history found")?;
 
-    if last_msg.role != "assistant" || last_msg.tool_calls.is_none() {
-        return Err("Last message was not an assistant tool call".to_string());
-    }
-
-    let tools_to_run = last_msg.tool_calls.as_ref().unwrap().clone();
-    let tools_filtered: Vec<ToolCall> = tools_to_run
-        .into_iter()
-        .filter(|t| tool_call_ids.contains(&t.id))
-        .collect();
+    let Some(tools_filtered) =
+        latest_assistant_tool_calls_with_pending_ids(&history, &tool_call_ids)
+    else {
+        window
+            .emit(&format!("ai-done-{}", session_id), "DONE")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    };
 
     if tools_filtered.is_empty() {
         window
@@ -886,7 +1034,6 @@ pub async fn execute_agent_tools(
         Ok(next_tool_calls) => {
             if let Some(calls) = next_tool_calls {
                 if !calls.is_empty() {
-                    let _ = window.emit(&format!("ai-tool-call-{}", session_id), calls);
                     return Ok(());
                 }
             }

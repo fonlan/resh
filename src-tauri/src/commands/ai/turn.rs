@@ -24,7 +24,7 @@ use super::tool_runtime::{
     try_recover_terminal_after_timeout, START_MARKER_EXPECT_MS, TIMEOUT_RECOVERY_GRACE_MS,
 };
 use super::types::{ChatMessage, FunctionCall, ToolCall, ToolDefinition};
-use super::AI_STREAM_IDLE_TIMEOUT_SECS;
+use super::{is_read_only_tool, AI_STREAM_IDLE_TIMEOUT_SECS};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 
@@ -614,6 +614,20 @@ pub(super) async fn execute_tools_and_save(
     Ok(())
 }
 
+pub(super) fn apply_reasoning_fallback(
+    full_reasoning: &mut String,
+    captured_reasoning_content: Option<String>,
+) {
+    if !full_reasoning.is_empty() {
+        return;
+    }
+
+    if let Some(reasoning) = captured_reasoning_content.filter(|content| !content.is_empty()) {
+        // ponytail: only fills empty reasoning; provider policy can graduate to model/channel strategy.
+        *full_reasoning = reasoning;
+    }
+}
+
 pub fn run_ai_turn(
     window: Window,
     state: Arc<AppState>,
@@ -913,6 +927,11 @@ pub fn run_ai_turn(
                             has_pending_reasoning = false;
                         }
 
+                        apply_reasoning_fallback(
+                            &mut full_reasoning,
+                            end.captured_reasoning_content,
+                        );
+
                         let tool_calls = if let Some(content) = end.captured_content {
                             let raw_tool_calls = content.tool_calls();
                             tracing::debug!(
@@ -1079,21 +1098,13 @@ pub fn run_ai_turn(
             if !calls.is_empty() {
                 let auto_exec_calls: Vec<ToolCall> = calls
                     .iter()
-                    .filter(|c| {
-                        c.function.name == "get_terminal_output"
-                            || c.function.name == "get_selected_terminal_output"
-                            || c.function.name == "read_file"
-                    })
+                    .filter(|c| is_read_only_tool(&c.function.name))
                     .cloned()
                     .collect();
 
                 let confirm_calls: Vec<ToolCall> = calls
                     .iter()
-                    .filter(|c| {
-                        c.function.name != "get_terminal_output"
-                            && c.function.name != "get_selected_terminal_output"
-                            && c.function.name != "read_file"
-                    })
+                    .filter(|c| !is_read_only_tool(&c.function.name))
                     .cloned()
                     .collect();
 

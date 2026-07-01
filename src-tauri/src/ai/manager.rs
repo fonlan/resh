@@ -190,7 +190,9 @@ impl AiManager {
             .with_service_target_resolver(resolver)
             .build();
 
-        let options = genai::chat::ChatOptions::default().with_capture_content(true);
+        let options = genai::chat::ChatOptions::default()
+            .with_capture_content(true)
+            .with_capture_reasoning_content(true);
 
         Ok(genai_client
             .exec_chat_stream(&model.name, chat_req, Some(&options))
