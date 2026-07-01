@@ -429,6 +429,33 @@ export const AITab: React.FC<AITabProps> = ({
               max={600}
             />
           </div>
+          <div className="flex flex-col gap-1.5 mb-4 flex-1">
+            <label
+              htmlFor="ai-tool-confirmation-countdown"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.ai.toolConfirmationCountdown}
+            </label>
+            <input
+              id="ai-tool-confirmation-countdown"
+              type="number"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              value={general.aiToolConfirmationCountdown ?? 5}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10)
+                const val = isNaN(parsed)
+                  ? 5
+                  : Math.min(30, Math.max(0, parsed))
+                onGeneralUpdate({
+                  ...general,
+                  aiToolConfirmationCountdown: val,
+                })
+              }}
+              min={0}
+              max={30}
+              step={1}
+            />
+          </div>
         </div>
       </div>
 
