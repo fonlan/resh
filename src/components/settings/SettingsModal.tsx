@@ -114,6 +114,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [config])
 
   useEffect(() => {
+    if (!config || !initializedRef.current || !localConfig) {
+      return
+    }
+
+    const incomingConfigStr = JSON.stringify(config)
+    if (incomingConfigStr === lastSavedConfigRef.current) {
+      return
+    }
+
+    const localConfigStr = JSON.stringify(localConfig)
+    const hasLocalChanges = localConfigStr !== lastSavedConfigRef.current
+    if (hasLocalChanges || isSavingRef.current) {
+      return
+    }
+
+    originalConfigRef.current = config
+    lastSavedConfigRef.current = incomingConfigStr
+    setLocalConfig(config)
+    setSaveError(null)
+  }, [config, localConfig])
+
+  useEffect(() => {
     if (!isOpen) {
       initializedRef.current = false
       setLocalConfig(null)
