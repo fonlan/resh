@@ -23,13 +23,14 @@ import {
   Clock,
   Sliders,
   Sparkles,
+  Brain,
   MessageSquare,
   Trash2,
   Square,
 } from "lucide-react"
 import { listen } from "@tauri-apps/api/event"
 import { ToolCall, ChatMessage } from "../types/ai"
-import { EditorAIContext } from "../types"
+import { AIThinkingLevel, EditorAIContext } from "../types"
 import { ConfirmationModal } from "./ConfirmationModal"
 import { CustomSelect } from "./CustomSelect"
 import { EmojiText } from "./EmojiText"
@@ -92,6 +93,20 @@ type RenderableListItem =
 
 type VirtualScrollBehavior = "auto" | "smooth"
 
+const AI_THINKING_OPTIONS: { value: AIThinkingLevel; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "max", label: "Max" },
+]
+
+const DEFAULT_AI_THINKING_LEVEL: AIThinkingLevel = "off"
+
+const getAIThinkingLevel = (value?: string): AIThinkingLevel =>
+  AI_THINKING_OPTIONS.some((option) => option.value === value)
+    ? (value as AIThinkingLevel)
+    : DEFAULT_AI_THINKING_LEVEL
 
 export const AISidebar: React.FC<AISidebarProps> = ({
   isOpen,
@@ -157,6 +172,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     (config?.general.aiMode as "ask" | "agent") || "ask",
   )
   const [selectedModelId, setSelectedModelId] = useState<string>("")
+  const [thinkingLevel, setThinkingLevel] = useState<AIThinkingLevel>(
+    getAIThinkingLevel(config?.general.aiThinkingLevel),
+  )
   const [sessionToDelete, setSessionToDelete] = useState<string | null>(null)
   const [isClearingHistory, setIsClearingHistory] = useState(false)
   const [includeEditorContext, setIncludeEditorContext] = useState(false)
@@ -226,6 +244,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (config?.general.aiMode) {
       setMode(config.general.aiMode as "ask" | "agent")
     }
+    setThinkingLevel(getAIThinkingLevel(config?.general.aiThinkingLevel))
     if (config?.general.aiModelId) {
       setSelectedModelId(config.general.aiModelId)
     } else if (
@@ -244,6 +263,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }, [
     config?.general.aiMode,
     config?.general.aiModelId,
+    config?.general.aiThinkingLevel,
     config?.aiModels,
     config?.aiChannels,
     selectedModelId,
@@ -755,6 +775,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
               mode,
               boundSshSessionId,
               calls.map((c) => c.id),
+              thinkingLevel,
             )
             .catch((err) => {
               setGenerating(activeSessionId, false)
@@ -838,6 +859,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     storeSetPendingToolCalls,
     config,
     selectedModelId,
+    thinkingLevel,
     mode,
     boundSshSessionId,
     sessions,
@@ -984,6 +1006,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         channelId,
         mode,
         boundSshSessionId,
+        thinkingLevel,
       )
 
       if (currentServerId) {
@@ -1010,6 +1033,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     setGenerating,
     config,
     selectedModelId,
+    thinkingLevel,
     mode,
     boundSshSessionId,
     currentServerId,
@@ -1090,6 +1114,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         channelId,
         mode,
         boundSshSessionId,
+        thinkingLevel,
       )
 
       if (currentServerId) {
@@ -1110,6 +1135,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     setGenerating,
     config,
     mode,
+    thinkingLevel,
     currentTabId,
     boundSshSessionId,
     isLoading,
@@ -1144,6 +1170,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         mode,
         boundSshSessionId,
         callsToExecute,
+        thinkingLevel,
       )
       await selectSession(activeSessionId)
     } catch (err) {
@@ -1155,6 +1182,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     pendingToolCalls,
     config,
     selectedModelId,
+    thinkingLevel,
     mode,
     boundSshSessionId,
     setGenerating,
@@ -1262,6 +1290,25 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         await saveConfig(newConfig)
       } catch (err) {
         // Failed to save AI model
+      }
+    }
+  }
+
+  const handleThinkingLevelChange = async (newLevel: string) => {
+    const nextLevel = getAIThinkingLevel(newLevel)
+    setThinkingLevel(nextLevel)
+    if (config) {
+      try {
+        const newConfig = {
+          ...config,
+          general: {
+            ...config.general,
+            aiThinkingLevel: nextLevel,
+          },
+        }
+        await saveConfig(newConfig)
+      } catch (err) {
+        // Failed to save AI thinking level
       }
     }
   }
@@ -1572,6 +1619,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                         : model.name
                       return { value: model.id, label }
                     })}
+                />
+              </div>
+              <div className="relative flex items-center flex-0-auto min-w-[96px] peer">
+                <Brain
+                  size={14}
+                  className="absolute left-2.5 text-[var(--text-muted)] pointer-events-none z-1 transition-colors duration-200 peer-hover:text-[var(--accent-primary)] focus-within:text-[var(--accent-primary)]"
+                />
+                <CustomSelect
+                  value={thinkingLevel}
+                  onChange={handleThinkingLevelChange}
+                  disabled={isLoading || !!pendingToolCalls}
+                  placement="top"
+                  triggerClassName="pl-8"
+                  options={AI_THINKING_OPTIONS}
                 />
               </div>
             </div>

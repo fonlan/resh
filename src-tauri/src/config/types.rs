@@ -374,6 +374,9 @@ pub struct GeneralSettings {
     #[serde(default)]
     #[serde(alias = "aiModelId", alias = "ai_model_id")]
     pub ai_model_id: Option<String>,
+    #[serde(default)]
+    #[serde(alias = "aiThinkingLevel", alias = "ai_thinking_level")]
+    pub ai_thinking_level: Option<String>,
 }
 
 fn default_recording_mode() -> String {
@@ -559,6 +562,7 @@ impl Config {
                 tab_new_server_sort: default_tab_new_server_sort(),
                 server_connection_counts: HashMap::new(),
                 ai_model_id: None,
+                ai_thinking_level: None,
             },
         }
     }

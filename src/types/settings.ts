@@ -45,6 +45,7 @@ export interface SftpSettings {
 export type Theme = "light" | "dark" | "orange" | "green" | "system"
 export type Language = "en" | "zh-CN"
 export type AIMode = "ask" | "agent"
+export type AIThinkingLevel = "off" | "low" | "medium" | "high" | "max"
 export type RecordingMode = "raw" | "text"
 export type TabWidthMode = "adaptive" | "fixed"
 export type TerminalRightClickMode = "contextMenu" | "selectionCopyPaste"
@@ -80,4 +81,5 @@ export interface GeneralSettings {
   tabNewServerSort: NewTabServerSort
   serverConnectionCounts: Record<string, number>
   aiModelId?: string
+  aiThinkingLevel?: AIThinkingLevel
 }
