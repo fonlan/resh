@@ -63,6 +63,22 @@ export const isSensitiveToolCall = (call: ToolCall): boolean => {
 export const hasSensitiveToolCall = (toolCalls: ToolCall[]): boolean =>
   toolCalls.some(isSensitiveToolCall)
 
+const AUTO_EXECUTE_WITHOUT_CONFIRMATION_TOOL_NAMES = new Set([
+  "get_terminal_output",
+  "get_selected_terminal_output",
+  "read_file",
+])
+
+export const shouldExecuteToolCallsWithoutConfirmation = (
+  toolCalls: ToolCall[],
+  autoConfirmDelaySeconds: number,
+): boolean =>
+  toolCalls.every((call) =>
+    AUTO_EXECUTE_WITHOUT_CONFIRMATION_TOOL_NAMES.has(call.function.name),
+  ) ||
+  (clampAiToolConfirmationCountdown(autoConfirmDelaySeconds) === 0 &&
+    !hasSensitiveToolCall(toolCalls))
+
 export const getToolDisplayName = (toolName: string, t: any): string => {
   const displayNameMap: Record<string, string> = {
     get_terminal_output: t.ai.tool.getTerminalOutput,

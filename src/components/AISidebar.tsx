@@ -40,10 +40,10 @@ import {
   buildMessageWithEditorContext,
   clampAiToolConfirmationCountdown,
   collectAssistantToolOutputs,
-  hasSensitiveToolCall,
   HIDDEN_TOOL_CALL_NAMES,
   MAX_EDITOR_CONTEXT_CHARS,
   normalizeAiErrorMessage,
+  shouldExecuteToolCallsWithoutConfirmation,
   SFTP_ENTRY_MIME_TYPE,
   SFTP_PATH_MIME_TYPE,
   type SftpDragEntry,
@@ -796,17 +796,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         // Update store with tool calls so they appear in the message bubble
         appendToolCalls(activeSessionId, calls)
 
-        // Filter: if ALL calls are read-only tools, auto-execute immediately WITHOUT UI
-        const isAllSafe = calls.every(
-          (c) =>
-            c.function.name === "get_terminal_output" ||
-            c.function.name === "get_selected_terminal_output" ||
-            c.function.name === "read_file",
-        )
-
         const shouldExecuteWithoutConfirmation =
-          isAllSafe ||
-          (autoConfirmDelaySeconds === 0 && !hasSensitiveToolCall(calls))
+          shouldExecuteToolCallsWithoutConfirmation(
+            calls,
+            autoConfirmDelaySeconds,
+          )
 
         if (shouldExecuteWithoutConfirmation) {
           void executeToolCalls(calls)
