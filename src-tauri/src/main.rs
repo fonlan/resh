@@ -12,6 +12,7 @@ use resh::ssh_manager::ssh::SSHClient;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use tauri::image::Image;
+#[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::Listener;
 use tauri::Manager;
@@ -317,10 +318,10 @@ async fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
+    app.run(|_app_handle, _event| {
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = event {
-            show_main_window(app_handle);
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            show_main_window(_app_handle);
         }
     });
 }
