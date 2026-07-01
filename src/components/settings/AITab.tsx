@@ -39,6 +39,10 @@ interface DeviceCodeResponse {
   interval: number
 }
 
+type ChannelType = AIChannel["type"]
+
+const ANTHROPIC_ENDPOINT = "https://api.anthropic.com/"
+
 export const AITab: React.FC<AITabProps> = ({
   aiChannels,
   aiModels,
@@ -71,6 +75,7 @@ export const AITab: React.FC<AITabProps> = ({
   const [modelFormData, setModelFormData] = useState<Partial<AIModel>>({})
   const [modelToDelete, setModelToDelete] = useState<string | null>(null)
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null)
   const [isFetchingModels, setIsFetchingModels] = useState(false)
   const [showModelSuggestions, setShowModelSuggestions] = useState(false)
   const [dropdownPosition, setDropdownPosition] = useState<{
@@ -117,6 +122,7 @@ export const AITab: React.FC<AITabProps> = ({
   // Reset fetched models when channel changes
   React.useEffect(() => {
     setFetchedModels([])
+    setFetchModelsError(null)
   }, [modelFormData.channelId])
 
   const handleFetchModels = async () => {
@@ -128,13 +134,14 @@ export const AITab: React.FC<AITabProps> = ({
       return
 
     setIsFetchingModels(true)
+    setFetchModelsError(null)
     try {
       const models = await invoke<string[]>("fetch_ai_models", {
         channelId: modelFormData.channelId,
       })
       setFetchedModels(models)
     } catch (e) {
-      // Failed to fetch models
+      setFetchModelsError(String(e))
     } finally {
       setIsFetchingModels(false)
     }
@@ -256,7 +263,7 @@ export const AITab: React.FC<AITabProps> = ({
     const now = new Date().toISOString()
 
     // Determine active state: Copilot channels must be authenticated (have apiKey) to be active
-    const type = (channelFormData.type as "openai" | "copilot") || "openai"
+    const type = channelFormData.type || "openai"
     const apiKey = channelFormData.apiKey
     let isActive =
       channelFormData.isActive !== undefined ? channelFormData.isActive : true
@@ -670,10 +677,16 @@ export const AITab: React.FC<AITabProps> = ({
             id="channel-type"
             value={channelFormData.type || "openai"}
             onChange={(val) => {
-              const newType = val as any
+              const newType = val as ChannelType
               setChannelFormData({
                 ...channelFormData,
                 type: newType,
+                endpoint:
+                  newType === "anthropic"
+                    ? ANTHROPIC_ENDPOINT
+                    : channelFormData.endpoint === ANTHROPIC_ENDPOINT
+                      ? ""
+                      : channelFormData.endpoint,
                 apiKey: "", // Clear API key on type change
                 isActive:
                   newType === "copilot"
@@ -687,6 +700,7 @@ export const AITab: React.FC<AITabProps> = ({
             }}
             options={[
               { value: "openai", label: "OpenAI" },
+              { value: "anthropic", label: "Anthropic Message" },
               { value: "copilot", label: "GitHub Copilot" },
             ]}
           />
@@ -797,7 +811,11 @@ export const AITab: React.FC<AITabProps> = ({
                     endpoint: e.target.value,
                   })
                 }
-                placeholder="https://api.openai.com/v1"
+                placeholder={
+                  channelFormData.type === "anthropic"
+                    ? ANTHROPIC_ENDPOINT
+                    : "https://api.openai.com/v1"
+                }
               />
             </div>
             <div className="flex flex-col gap-1.5 mb-4">
@@ -998,6 +1016,9 @@ export const AITab: React.FC<AITabProps> = ({
                 document.body,
               )}
           </div>
+          {fetchModelsError && (
+            <div className="mt-2 text-xs text-red-400">{fetchModelsError}</div>
+          )}
         </div>
         <div className="flex flex-col gap-1.5 mb-4">
           <label

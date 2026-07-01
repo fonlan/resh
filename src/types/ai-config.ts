@@ -1,7 +1,7 @@
 export interface AIChannel {
   id: string
   name: string
-  type: "openai" | "copilot"
+  type: "openai" | "copilot" | "anthropic"
   endpoint?: string
   apiKey?: string
   proxyId?: string | null

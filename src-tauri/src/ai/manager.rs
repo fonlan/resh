@@ -57,6 +57,35 @@ fn is_claude_anthropic_request(channel: &AiChannel, model: &AiModel) -> bool {
             .unwrap_or(false)
 }
 
+fn is_provider(channel: &AiChannel, provider: &str) -> bool {
+    channel.provider.eq_ignore_ascii_case(provider)
+}
+
+fn default_endpoint_for_provider(provider: &str) -> &'static str {
+    if provider.eq_ignore_ascii_case("anthropic") {
+        "https://api.anthropic.com/"
+    } else {
+        "https://api.openai.com/v1/"
+    }
+}
+
+fn endpoint_for_channel(channel: &AiChannel) -> &str {
+    channel
+        .endpoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|endpoint| !endpoint.is_empty())
+        .unwrap_or(default_endpoint_for_provider(&channel.provider))
+}
+
+fn adapter_kind_for_provider(provider: &str) -> AdapterKind {
+    if provider.eq_ignore_ascii_case("anthropic") {
+        AdapterKind::Anthropic
+    } else {
+        AdapterKind::OpenAI
+    }
+}
+
 fn build_chat_options(
     channel: &AiChannel,
     model: &AiModel,
@@ -211,7 +240,7 @@ impl AiManager {
             chat_req = chat_req.with_tools(t);
         }
 
-        let (endpoint, auth, adapter_kind) = if channel.provider == "copilot" {
+        let (endpoint, auth, adapter_kind) = if is_provider(channel, "copilot") {
             let oauth_token = channel.api_key.as_deref().unwrap_or_default();
             let session_token = self.get_copilot_token(oauth_token, &http_client).await?;
 
@@ -224,10 +253,7 @@ impl AiManager {
         } else {
             let api_key = channel.api_key.as_deref().unwrap_or_default();
             let auth = AuthData::Key(api_key.to_string());
-            let endpoint_url = channel
-                .endpoint
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1/");
+            let endpoint_url = endpoint_for_channel(channel);
 
             let endpoint_url = if endpoint_url.ends_with('/') {
                 endpoint_url.to_string()
@@ -236,7 +262,7 @@ impl AiManager {
             };
             let endpoint = Endpoint::from_owned(endpoint_url);
 
-            (endpoint, auth, AdapterKind::OpenAI)
+            (endpoint, auth, adapter_kind_for_provider(&channel.provider))
         };
 
         let model_name = model.name.clone();
@@ -267,9 +293,16 @@ impl AiManager {
         channel: &AiChannel,
         proxy: Option<Proxy>,
     ) -> Result<Vec<String>, String> {
+        if is_provider(channel, "anthropic") {
+            return Err(
+                "Anthropic Message channels do not support model fetching via /models; add the model name manually."
+                    .to_string(),
+            );
+        }
+
         let http_client = self.build_http_client(proxy, Some(&channel.provider))?;
 
-        if channel.provider == "copilot" {
+        if is_provider(channel, "copilot") {
             let oauth_token = channel.api_key.as_deref().unwrap_or_default();
             let session_token = self.get_copilot_token(oauth_token, &http_client).await?;
 
@@ -305,10 +338,7 @@ impl AiManager {
             Ok(ids)
         } else {
             let api_key = channel.api_key.as_deref().unwrap_or_default();
-            let endpoint = channel
-                .endpoint
-                .as_deref()
-                .unwrap_or("https://api.openai.com/v1/");
+            let endpoint = endpoint_for_channel(channel);
 
             let url = if endpoint.ends_with("/") {
                 format!("{}models", endpoint)
@@ -397,5 +427,36 @@ mod tests {
         assert_eq!(options.temperature, Some(0.0));
         assert!(options.top_p.is_none());
         assert!(options.reasoning_effort.is_none());
+    }
+    #[test]
+    fn anthropic_provider_uses_anthropic_adapter_and_endpoint() {
+        let anthropic = channel("anthropic", None);
+        let openai = channel("openai", None);
+
+        assert!(matches!(
+            adapter_kind_for_provider(&anthropic.provider),
+            AdapterKind::Anthropic
+        ));
+        assert_eq!(
+            endpoint_for_channel(&anthropic),
+            "https://api.anthropic.com/"
+        );
+
+        assert!(matches!(
+            adapter_kind_for_provider(&openai.provider),
+            AdapterKind::OpenAI
+        ));
+        assert_eq!(endpoint_for_channel(&openai), "https://api.openai.com/v1/");
+    }
+
+    #[tokio::test]
+    async fn anthropic_model_fetch_returns_clear_error() {
+        let err = AiManager::new()
+            .fetch_models(&channel("anthropic", None), None)
+            .await
+            .unwrap_err();
+
+        assert!(err.contains("Anthropic Message"));
+        assert!(err.contains("/models"));
     }
 }
