@@ -4,11 +4,6 @@ import { copyFileSync, createReadStream, existsSync, mkdirSync, readdirSync, rmS
 import { basename, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const targetArch = {
-  'aarch64-apple-darwin': 'aarch64',
-  'x86_64-apple-darwin': 'x64',
-};
-
 function parseArgs(argv) {
   const args = {
     target: process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin',
@@ -19,8 +14,6 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === '--target') {
       args.target = argv[++index];
-    } else if (arg === '--app') {
-      args.app = argv[++index];
     } else if (arg === '--dmg') {
       args.dmg = argv[++index];
     } else if (arg === '--out-dir') {
@@ -36,11 +29,11 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: npm run macos:verify -- [--target aarch64-apple-darwin|x86_64-apple-darwin] [--app path] [--dmg path] [--out-dir path]
+  console.log(`Usage: npm run macos:verify -- [--target aarch64-apple-darwin|x86_64-apple-darwin] [--dmg path] [--out-dir path]
 
 Verifies codesign, Gatekeeper assessment, and stapled notarization tickets for
-the macOS .app and .dmg. It also creates a release-safe .app.zip and writes
-SHA-256 checksums for the .zip and .dmg.`);
+the macOS .dmg. It also copies the .dmg into the artifact directory and writes
+a SHA-256 checksum.`);
 }
 
 function run(command, args) {
@@ -98,33 +91,24 @@ async function main() {
   }
 
   const bundleRoot = join('src-tauri', 'target', args.target, 'release', 'bundle');
-  const app = resolve(args.app ?? findFirst(join(bundleRoot, 'macos'), (path) => path.endsWith('.app') && statSync(path).isDirectory()));
   const dmg = resolve(args.dmg ?? findFirst(join(bundleRoot, 'dmg'), (path) => path.endsWith('.dmg') && statSync(path).isFile()));
   const outDir = resolve(args.outDir ?? join('artifacts', 'macos', args.target));
-  const arch = targetArch[args.target] ?? args.target;
-  const zipPath = join(outDir, `${basename(app, '.app')}_${arch}.app.zip`);
   const dmgOutPath = join(outDir, basename(dmg));
   const checksumPath = join(outDir, 'SHA256SUMS.txt');
 
   mkdirSync(outDir, { recursive: true });
-  rmSync(zipPath, { force: true });
   if (resolve(dmgOutPath) !== dmg) {
     rmSync(dmgOutPath, { force: true });
   }
 
-  run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', dmg]);
-  run('spctl', ['--assess', '--type', 'execute', '--verbose=4', app]);
   run('spctl', ['--assess', '--type', 'open', '--context', 'context:primary-signature', '--verbose=4', dmg]);
-  run('xcrun', ['stapler', 'validate', app]);
   run('xcrun', ['stapler', 'validate', dmg]);
-  run('ditto', ['-c', '-k', '--keepParent', app, zipPath]);
   if (resolve(dmgOutPath) !== dmg) {
     copyFileSync(dmg, dmgOutPath);
   }
 
-  await writeChecksums([zipPath, dmgOutPath], checksumPath);
-  console.log(`Wrote ${zipPath}`);
+  await writeChecksums([dmgOutPath], checksumPath);
   console.log(`Wrote ${dmgOutPath}`);
   console.log(`Wrote ${checksumPath}`);
 }

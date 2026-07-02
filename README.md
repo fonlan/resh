@@ -112,6 +112,7 @@ Only `local.json` support:
 # Frontend development
 npm run dev              # Run Vite dev server
 npm run build            # Build frontend (TypeScript + Vite)
+npm run build:macos      # Build macOS DMG bundle
 
 # Tauri commands
 npm run tauri-dev        # Run Tauri in development mode
@@ -176,15 +177,13 @@ and `rust-toolchain.toml`:
 
 ```bash
 npm ci
-npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked
-npm run tauri-build -- --target aarch64-apple-darwin
+npm run build:macos -- --target aarch64-apple-darwin
 ```
 
-Unsigned development bundles are written to:
+Unsigned development DMGs are written to:
 
 ```text
-src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Resh.app
 src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Resh_<version>_aarch64.dmg
 ```
 

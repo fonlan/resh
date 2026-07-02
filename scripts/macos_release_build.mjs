@@ -14,7 +14,7 @@ const optionalEnv = ['APPLE_SIGNING_IDENTITY', 'APPLE_PROVIDER_SHORT_NAME'];
 function parseArgs(argv) {
   const args = {
     target: process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin',
-    bundles: 'app,dmg',
+    bundles: 'dmg',
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -34,7 +34,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: npm run macos:release -- [--target aarch64-apple-darwin|x86_64-apple-darwin] [--bundles app,dmg]
+  console.log(`Usage: npm run macos:release -- [--target aarch64-apple-darwin|x86_64-apple-darwin] [--bundles dmg]
 
 Required environment:
   ${requiredEnv.join('\n  ')}
@@ -86,7 +86,7 @@ try {
   requireEnvironment();
   run('npm', [
     'run',
-    'tauri-build',
+    'build:macos',
     '--',
     '--config',
     'src-tauri/tauri.macos.conf.json',
