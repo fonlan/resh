@@ -8,6 +8,13 @@ import { debounce } from "../utils/common"
 import { invoke } from "@tauri-apps/api/core"
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager"
 import { isMacOS } from "../utils/platform"
+import {
+  assertMacOsImeShiftSymbolSelfCheck,
+  resolveMacOsImeDroppedShiftSymbol,
+} from "../utils/macOsImeShiftSymbol"
+
+// ponytail: tiny self-check at load; fails if Shift+IME mapping/guards regress.
+assertMacOsImeShiftSymbolSelfCheck()
 
 type ResolvedTerminalTheme = "light" | "dark" | "orange" | "green"
 
@@ -119,6 +126,33 @@ export const useTerminal = (
       console.log(`[resh-ime-debug] ${label}`, payload)
     }
 
+    // macOS Chinese IME: track real composition so we never inject during 组字.
+    // Also short-window dedupe if xterm later delivers the same char via textarea.
+    let imeComposing = false
+    let recentImeInject: { ch: string; at: number } | null = null
+    const IME_INJECT_DEDUPE_MS = 40
+    let imeCompositionCleanup: (() => void) | null = null
+
+    const markImeInjected = (ch: string) => {
+      recentImeInject = { ch, at: performance.now() }
+    }
+
+    // Dedupe only the next matching onData. Any non-match (or expiry) clears the
+    // marker so a later legitimate same char is never swallowed (review P2).
+    const shouldDropDuplicateOnData = (data: string): boolean => {
+      if (!recentImeInject) return false
+      if (performance.now() - recentImeInject.at > IME_INJECT_DEDUPE_MS) {
+        recentImeInject = null
+        return false
+      }
+      if (data !== recentImeInject.ch) {
+        recentImeInject = null
+        return false
+      }
+      recentImeInject = null
+      return true
+    }
+
     term.attachCustomKeyEventHandler((event) => {
       if (debugImeKeys) {
         logImeDebug("customKey", {
@@ -131,6 +165,7 @@ export const useTerminal = (
           ctrlKey: event.ctrlKey,
           altKey: event.altKey,
           isComposing: event.isComposing,
+          imeComposing,
           path:
             event.keyCode === 229
               ? "likely-xterm-composition-helper-229"
@@ -138,7 +173,28 @@ export const useTerminal = (
         })
       }
 
-      // Only intercept macOS Cmd+C/V/A. Shift+symbol keys are never handled here.
+      // Scheme A: macOS IME keyCode 229 + Shift + mappable code → inject symbol.
+      // xterm CompositionHelper would otherwise diff an unchanged textarea and drop.
+      if (isMacOS() && event.type === "keydown") {
+        const dropped = resolveMacOsImeDroppedShiftSymbol(event, {
+          imeComposing,
+        })
+        if (dropped) {
+          markImeInjected(dropped)
+          // Direct onData: avoid term.paste (would re-enter onData and self-dedupe).
+          // return false skips xterm 229 CompositionHelper; short-window dedupe
+          // still drops a later textarea/input path if the IME also commits the char.
+          onDataRef.current?.(dropped)
+          logImeDebug("ime-shift-inject", {
+            code: event.code,
+            ch: dropped,
+            keyCode: event.keyCode,
+          })
+          return false
+        }
+      }
+
+      // Only intercept macOS Cmd+C/V/A. Non-meta keys fall through (except inject above).
       if (!isMacOS() || !event.metaKey || event.ctrlKey || event.altKey) {
         // Control+C must continue through xterm so the shell receives ETX.
         return true
@@ -168,6 +224,11 @@ export const useTerminal = (
 
     // Register onData inside the hook to ensure it's always attached to the current term
     const disposable = term.onData((data) => {
+      // Drop duplicate if xterm also emits the same char we just injected.
+      if (shouldDropDuplicateOnData(data)) {
+        logImeDebug("onData-deduped", { data })
+        return
+      }
       // Keep debug-off hot path allocation-free (SSH output can be high volume).
       if (debugImeKeys) {
         logImeDebug("onData", {
@@ -288,6 +349,32 @@ export const useTerminal = (
 
     let imeDebugCleanup: (() => void) | null = null
 
+    const attachImeCompositionTracking = () => {
+      if (imeCompositionCleanup || !term.element || !isMacOS()) return
+      const textarea = term.element.querySelector(
+        "textarea.xterm-helper-textarea",
+      ) as HTMLTextAreaElement | null
+      if (!textarea) return
+
+      const onCompositionStart = () => {
+        imeComposing = true
+        logImeDebug("composition-tracking", { active: true })
+      }
+      const onCompositionEnd = () => {
+        imeComposing = false
+        logImeDebug("composition-tracking", { active: false })
+      }
+
+      textarea.addEventListener("compositionstart", onCompositionStart)
+      textarea.addEventListener("compositionend", onCompositionEnd)
+
+      imeCompositionCleanup = () => {
+        textarea.removeEventListener("compositionstart", onCompositionStart)
+        textarea.removeEventListener("compositionend", onCompositionEnd)
+        imeComposing = false
+      }
+    }
+
     const attachImeDebugListeners = () => {
       if (!debugImeKeys || imeDebugCleanup || !term.element) return
       const textarea = term.element.querySelector(
@@ -306,6 +393,7 @@ export const useTerminal = (
           ctrlKey: ev.ctrlKey,
           altKey: ev.altKey,
           isComposing: ev.isComposing,
+          imeComposing,
           defaultPrevented: ev.defaultPrevented,
           textareaValue: valueAtEvent,
           textareaValueLen: valueAtEvent.length,
@@ -405,6 +493,7 @@ export const useTerminal = (
         term.open(container)
         refreshTerminal()
         loadWebglAddon()
+        attachImeCompositionTracking()
         attachImeDebugListeners()
       }
     }
@@ -461,6 +550,8 @@ export const useTerminal = (
     return () => {
       imeDebugCleanup?.()
       imeDebugCleanup = null
+      imeCompositionCleanup?.()
+      imeCompositionCleanup = null
       disposable.dispose()
       selectionDisposable.dispose()
       oscDisposable.dispose()
