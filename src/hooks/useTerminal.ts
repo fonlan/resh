@@ -115,19 +115,9 @@ export const useTerminal = (
       theme: getTerminalPalette(actualTheme),
     })
 
-    // TEMP (phase-1 IME debug): enable with localStorage.setItem('resh.debugImeKeys','1')
-    // Remove in phase-3 after macOS IME Shift-symbol fix lands.
-    const debugImeKeys =
-      typeof localStorage !== "undefined" &&
-      localStorage.getItem("resh.debugImeKeys") === "1"
-
-    const logImeDebug = (label: string, payload: Record<string, unknown>) => {
-      if (!debugImeKeys) return
-      console.log(`[resh-ime-debug] ${label}`, payload)
-    }
-
     // macOS Chinese IME: track real composition so we never inject during 组字.
     // Also short-window dedupe if xterm later delivers the same char via textarea.
+    // See notes/macos/phase-2-ime-shift-symbol-fix.md (keyCode 229 + CompositionHelper drop).
     let imeComposing = false
     let recentImeInject: { ch: string; at: number } | null = null
     const IME_INJECT_DEDUPE_MS = 40
@@ -154,25 +144,6 @@ export const useTerminal = (
     }
 
     term.attachCustomKeyEventHandler((event) => {
-      if (debugImeKeys) {
-        logImeDebug("customKey", {
-          type: event.type,
-          key: event.key,
-          code: event.code,
-          keyCode: event.keyCode,
-          shiftKey: event.shiftKey,
-          metaKey: event.metaKey,
-          ctrlKey: event.ctrlKey,
-          altKey: event.altKey,
-          isComposing: event.isComposing,
-          imeComposing,
-          path:
-            event.keyCode === 229
-              ? "likely-xterm-composition-helper-229"
-              : "normal-key-path-if-not-cancelled",
-        })
-      }
-
       // Scheme A: macOS IME keyCode 229 + Shift + mappable code → inject symbol.
       // xterm CompositionHelper would otherwise diff an unchanged textarea and drop.
       if (isMacOS() && event.type === "keydown") {
@@ -185,11 +156,6 @@ export const useTerminal = (
           // return false skips xterm 229 CompositionHelper; short-window dedupe
           // still drops a later textarea/input path if the IME also commits the char.
           onDataRef.current?.(dropped)
-          logImeDebug("ime-shift-inject", {
-            code: event.code,
-            ch: dropped,
-            keyCode: event.keyCode,
-          })
           return false
         }
       }
@@ -226,16 +192,7 @@ export const useTerminal = (
     const disposable = term.onData((data) => {
       // Drop duplicate if xterm also emits the same char we just injected.
       if (shouldDropDuplicateOnData(data)) {
-        logImeDebug("onData-deduped", { data })
         return
-      }
-      // Keep debug-off hot path allocation-free (SSH output can be high volume).
-      if (debugImeKeys) {
-        logImeDebug("onData", {
-          data,
-          length: data.length,
-          codes: [...data].map((c) => c.charCodeAt(0)),
-        })
       }
       onDataRef.current?.(data)
     })
@@ -347,8 +304,6 @@ export const useTerminal = (
       }
     }
 
-    let imeDebugCleanup: (() => void) | null = null
-
     const attachImeCompositionTracking = () => {
       if (imeCompositionCleanup || !term.element || !isMacOS()) return
       const textarea = term.element.querySelector(
@@ -358,11 +313,9 @@ export const useTerminal = (
 
       const onCompositionStart = () => {
         imeComposing = true
-        logImeDebug("composition-tracking", { active: true })
       }
       const onCompositionEnd = () => {
         imeComposing = false
-        logImeDebug("composition-tracking", { active: false })
       }
 
       textarea.addEventListener("compositionstart", onCompositionStart)
@@ -375,115 +328,6 @@ export const useTerminal = (
       }
     }
 
-    const attachImeDebugListeners = () => {
-      if (!debugImeKeys || imeDebugCleanup || !term.element) return
-      const textarea = term.element.querySelector(
-        "textarea.xterm-helper-textarea",
-      ) as HTMLTextAreaElement | null
-      if (!textarea) return
-
-      const onKey = (ev: KeyboardEvent) => {
-        const valueAtEvent = textarea.value
-        logImeDebug(`textarea.${ev.type}`, {
-          key: ev.key,
-          code: ev.code,
-          keyCode: ev.keyCode,
-          shiftKey: ev.shiftKey,
-          metaKey: ev.metaKey,
-          ctrlKey: ev.ctrlKey,
-          altKey: ev.altKey,
-          isComposing: ev.isComposing,
-          imeComposing,
-          defaultPrevented: ev.defaultPrevented,
-          textareaValue: valueAtEvent,
-          textareaValueLen: valueAtEvent.length,
-        })
-
-        // Approximate CompositionHelper._handleAnyTextareaChanges (setTimeout 0):
-        // capture old/new/diff after the same microtask delay xterm uses.
-        if (ev.type === "keydown" && ev.keyCode === 229 && !ev.isComposing) {
-          const oldValue = valueAtEvent
-          window.setTimeout(() => {
-            const newValue = textarea.value
-            const grew = newValue.length > oldValue.length
-            const diff = grew
-              ? newValue.slice(oldValue.length) ||
-                newValue.replace(oldValue, "")
-              : ""
-            logImeDebug("textarea.229-post-timeout-snapshot", {
-              key: ev.key,
-              code: ev.code,
-              shiftKey: ev.shiftKey,
-              isComposing: ev.isComposing,
-              oldValue,
-              newValue,
-              oldLen: oldValue.length,
-              newLen: newValue.length,
-              grew,
-              diff,
-              unchanged: oldValue === newValue,
-              inferenceNote:
-                "Mirrors xterm CompositionHelper textarea-diff path; if unchanged and no onData, path A drop is supported.",
-            })
-          }, 0)
-        }
-      }
-
-      const onInput = (ev: Event) => {
-        const ie = ev as InputEvent
-        logImeDebug(`textarea.${ev.type}`, {
-          inputType: ie.inputType,
-          data: ie.data,
-          composed: ie.composed,
-          isComposing: ie.isComposing,
-          textareaValue: textarea.value,
-          textareaValueLen: textarea.value.length,
-        })
-      }
-
-      const onComposition = (ev: CompositionEvent) => {
-        logImeDebug(`textarea.${ev.type}`, {
-          data: ev.data,
-          textareaValue: textarea.value,
-          textareaValueLen: textarea.value.length,
-        })
-      }
-
-      const types = [
-        "keydown",
-        "keypress",
-        "keyup",
-        "input",
-        "compositionstart",
-        "compositionupdate",
-        "compositionend",
-        "beforeinput",
-      ] as const
-
-      for (const t of types) {
-        if (t === "input" || t === "beforeinput") {
-          textarea.addEventListener(t, onInput)
-        } else if (t.startsWith("composition")) {
-          textarea.addEventListener(t, onComposition as EventListener)
-        } else {
-          textarea.addEventListener(t, onKey as EventListener)
-        }
-      }
-
-      imeDebugCleanup = () => {
-        for (const t of types) {
-          if (t === "input" || t === "beforeinput") {
-            textarea.removeEventListener(t, onInput)
-          } else if (t.startsWith("composition")) {
-            textarea.removeEventListener(t, onComposition as EventListener)
-          } else {
-            textarea.removeEventListener(t, onKey as EventListener)
-          }
-        }
-      }
-      logImeDebug("listeners-attached", { containerId })
-    }
-
     const initTerminal = () => {
       if (
         !term.element &&
@@ -494,7 +338,6 @@ export const useTerminal = (
         refreshTerminal()
         loadWebglAddon()
         attachImeCompositionTracking()
-        attachImeDebugListeners()
       }
     }
 
@@ -548,8 +391,6 @@ export const useTerminal = (
     setIsReady(true)
 
     return () => {
-      imeDebugCleanup?.()
-      imeDebugCleanup = null
       imeCompositionCleanup?.()
       imeCompositionCleanup = null
       disposable.dispose()

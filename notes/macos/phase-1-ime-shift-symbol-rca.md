@@ -92,7 +92,7 @@ onData: "!"
 **路径 B**：出现 `compositionstart` / `isComposing: true` 后再 keyup/finalize → 与「未组字丢上档符」主诉不同。  
 **路径 C**：keydown `defaultPrevented` 且无 input/keypress 字符。
 
-埋点：`src/hooks/useTerminal.ts`（`localStorage.resh.debugImeKeys === '1'`；phase 3 移除）。  
+埋点：`src/hooks/useTerminal.ts`（`localStorage.resh.debugImeKeys === '1'`；**已于 phase 3 从生产代码移除**）。  
 关闭调试时：`onData` **不**构造日志载荷；监听器不挂载。
 
 ### 1.4 实测日志粘贴区（人工 / Phase 3）
