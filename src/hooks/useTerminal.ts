@@ -108,7 +108,37 @@ export const useTerminal = (
       theme: getTerminalPalette(actualTheme),
     })
 
+    // TEMP (phase-1 IME debug): enable with localStorage.setItem('resh.debugImeKeys','1')
+    // Remove in phase-3 after macOS IME Shift-symbol fix lands.
+    const debugImeKeys =
+      typeof localStorage !== "undefined" &&
+      localStorage.getItem("resh.debugImeKeys") === "1"
+
+    const logImeDebug = (label: string, payload: Record<string, unknown>) => {
+      if (!debugImeKeys) return
+      console.log(`[resh-ime-debug] ${label}`, payload)
+    }
+
     term.attachCustomKeyEventHandler((event) => {
+      if (debugImeKeys) {
+        logImeDebug("customKey", {
+          type: event.type,
+          key: event.key,
+          code: event.code,
+          keyCode: event.keyCode,
+          shiftKey: event.shiftKey,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          isComposing: event.isComposing,
+          path:
+            event.keyCode === 229
+              ? "likely-xterm-composition-helper-229"
+              : "normal-key-path-if-not-cancelled",
+        })
+      }
+
+      // Only intercept macOS Cmd+C/V/A. Shift+symbol keys are never handled here.
       if (!isMacOS() || !event.metaKey || event.ctrlKey || event.altKey) {
         // Control+C must continue through xterm so the shell receives ETX.
         return true
@@ -138,6 +168,14 @@ export const useTerminal = (
 
     // Register onData inside the hook to ensure it's always attached to the current term
     const disposable = term.onData((data) => {
+      // Keep debug-off hot path allocation-free (SSH output can be high volume).
+      if (debugImeKeys) {
+        logImeDebug("onData", {
+          data,
+          length: data.length,
+          codes: [...data].map((c) => c.charCodeAt(0)),
+        })
+      }
       onDataRef.current?.(data)
     })
 
@@ -248,6 +286,116 @@ export const useTerminal = (
       }
     }
 
+    let imeDebugCleanup: (() => void) | null = null
+
+    const attachImeDebugListeners = () => {
+      if (!debugImeKeys || imeDebugCleanup || !term.element) return
+      const textarea = term.element.querySelector(
+        "textarea.xterm-helper-textarea",
+      ) as HTMLTextAreaElement | null
+      if (!textarea) return
+
+      const onKey = (ev: KeyboardEvent) => {
+        const valueAtEvent = textarea.value
+        logImeDebug(`textarea.${ev.type}`, {
+          key: ev.key,
+          code: ev.code,
+          keyCode: ev.keyCode,
+          shiftKey: ev.shiftKey,
+          metaKey: ev.metaKey,
+          ctrlKey: ev.ctrlKey,
+          altKey: ev.altKey,
+          isComposing: ev.isComposing,
+          defaultPrevented: ev.defaultPrevented,
+          textareaValue: valueAtEvent,
+          textareaValueLen: valueAtEvent.length,
+        })
+
+        // Approximate CompositionHelper._handleAnyTextareaChanges (setTimeout 0):
+        // capture old/new/diff after the same microtask delay xterm uses.
+        if (ev.type === "keydown" && ev.keyCode === 229 && !ev.isComposing) {
+          const oldValue = valueAtEvent
+          window.setTimeout(() => {
+            const newValue = textarea.value
+            const grew = newValue.length > oldValue.length
+            const diff = grew
+              ? newValue.slice(oldValue.length) ||
+                newValue.replace(oldValue, "")
+              : ""
+            logImeDebug("textarea.229-post-timeout-snapshot", {
+              key: ev.key,
+              code: ev.code,
+              shiftKey: ev.shiftKey,
+              isComposing: ev.isComposing,
+              oldValue,
+              newValue,
+              oldLen: oldValue.length,
+              newLen: newValue.length,
+              grew,
+              diff,
+              unchanged: oldValue === newValue,
+              inferenceNote:
+                "Mirrors xterm CompositionHelper textarea-diff path; if unchanged and no onData, path A drop is supported.",
+            })
+          }, 0)
+        }
+      }
+
+      const onInput = (ev: Event) => {
+        const ie = ev as InputEvent
+        logImeDebug(`textarea.${ev.type}`, {
+          inputType: ie.inputType,
+          data: ie.data,
+          composed: ie.composed,
+          isComposing: ie.isComposing,
+          textareaValue: textarea.value,
+          textareaValueLen: textarea.value.length,
+        })
+      }
+
+      const onComposition = (ev: CompositionEvent) => {
+        logImeDebug(`textarea.${ev.type}`, {
+          data: ev.data,
+          textareaValue: textarea.value,
+          textareaValueLen: textarea.value.length,
+        })
+      }
+
+      const types = [
+        "keydown",
+        "keypress",
+        "keyup",
+        "input",
+        "compositionstart",
+        "compositionupdate",
+        "compositionend",
+        "beforeinput",
+      ] as const
+
+      for (const t of types) {
+        if (t === "input" || t === "beforeinput") {
+          textarea.addEventListener(t, onInput)
+        } else if (t.startsWith("composition")) {
+          textarea.addEventListener(t, onComposition as EventListener)
+        } else {
+          textarea.addEventListener(t, onKey as EventListener)
+        }
+      }
+
+      imeDebugCleanup = () => {
+        for (const t of types) {
+          if (t === "input" || t === "beforeinput") {
+            textarea.removeEventListener(t, onInput)
+          } else if (t.startsWith("composition")) {
+            textarea.removeEventListener(t, onComposition as EventListener)
+          } else {
+            textarea.removeEventListener(t, onKey as EventListener)
+          }
+        }
+      }
+      logImeDebug("listeners-attached", { containerId })
+    }
+
     const initTerminal = () => {
       if (
         !term.element &&
@@ -257,6 +405,7 @@ export const useTerminal = (
         term.open(container)
         refreshTerminal()
         loadWebglAddon()
+        attachImeDebugListeners()
       }
     }
 
@@ -310,6 +459,8 @@ export const useTerminal = (
     setIsReady(true)
 
     return () => {
+      imeDebugCleanup?.()
+      imeDebugCleanup = null
       disposable.dispose()
       selectionDisposable.dispose()
       oscDisposable.dispose()
