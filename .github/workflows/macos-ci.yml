@@ -5,12 +5,12 @@ on:
   push:
     branches:
       - main
-    tags:
-      - 'v*'
+  # Tag push release is owned solely by the cross-platform release workflow.
+  # This workflow no longer runs on tags (avoids duplicate signed macOS jobs).
   workflow_dispatch:
     inputs:
       release_artifacts:
-        description: Build signed and notarized macOS release artifacts
+        description: Optional manual signed/notarized macOS build (not GitHub Release)
         required: false
         default: false
         type: boolean
@@ -82,7 +82,8 @@ jobs:
 
   macos-release-artifacts:
     name: Signed macOS release artifacts (${{ matrix.target }})
-    if: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release_artifacts) }}
+    # Manual signed build only; automatic tag release is a separate workflow.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.release_artifacts }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
