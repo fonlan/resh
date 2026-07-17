@@ -100,6 +100,7 @@ import {
   EMPTY_PROXIES,
   EMPTY_SERVERS,
   getFileNameFromPath,
+  MACOS_TRAFFIC_LIGHT_INSET_WIDTH,
   MAX_FIXED_TAB_WIDTH,
   MIN_FIXED_TAB_WIDTH,
   SPLIT_LAYOUT_REQUIRED_TABS,
@@ -266,6 +267,7 @@ export const MainWindow: React.FC = () => {
     useState<SplitLayout | null>(null)
   const {
     titleBarRef,
+    leftInsetRef,
     tabListRef,
     rightControlsRef,
     newTabButtonRef,
@@ -2010,11 +2012,20 @@ export const MainWindow: React.FC = () => {
           to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-      {/* Title Bar with drag region */}
+      {/* Title bar: macOS native traffic lights overlay the left inset; only the middle spacer is a drag region. */}
       <div
         ref={titleBarRef}
         className="flex min-w-0 bg-[var(--bg-secondary)] h-10 border-b border-[var(--glass-border)] select-none relative shrink-0"
       >
+        {/* macOS: reserve space for native traffic lights (not a drag region). */}
+        {isMacOS() && (
+          <div
+            ref={leftInsetRef}
+            className="h-10 shrink-0"
+            style={{ width: MACOS_TRAFFIC_LIGHT_INSET_WIDTH }}
+            aria-hidden="true"
+          />
+        )}
         {/* Tab Bar */}
         <div
           ref={tabListRef}

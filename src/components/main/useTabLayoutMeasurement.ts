@@ -15,6 +15,7 @@ import { MIN_TITLEBAR_DRAG_SPACER_WIDTH } from "./helpers"
  */
 export const useTabLayoutMeasurement = (tabsLength: number) => {
   const titleBarRef = useRef<HTMLDivElement | null>(null)
+  const leftInsetRef = useRef<HTMLDivElement | null>(null)
   const tabListRef = useRef<HTMLDivElement | null>(null)
   const rightControlsRef = useRef<HTMLDivElement | null>(null)
   const newTabButtonRef = useRef<HTMLDivElement | null>(null)
@@ -29,10 +30,12 @@ export const useTabLayoutMeasurement = (tabsLength: number) => {
 
     const updateLayoutSizes = () => {
       const nextTitleBarWidth = titleBarElement.clientWidth
+      const nextLeftInsetWidth = leftInsetRef.current?.offsetWidth ?? 0
       const nextRightControlsWidth = rightControlsRef.current?.offsetWidth ?? 0
       const nextTabListMaxWidth = Math.max(
         0,
         nextTitleBarWidth -
+          nextLeftInsetWidth -
           nextRightControlsWidth -
           MIN_TITLEBAR_DRAG_SPACER_WIDTH,
       )
@@ -53,6 +56,7 @@ export const useTabLayoutMeasurement = (tabsLength: number) => {
 
     const resizeObserver = new ResizeObserver(updateLayoutSizes)
     resizeObserver.observe(titleBarElement)
+    if (leftInsetRef.current) resizeObserver.observe(leftInsetRef.current)
     if (rightControlsRef.current)
       resizeObserver.observe(rightControlsRef.current)
     if (newTabButtonRef.current) resizeObserver.observe(newTabButtonRef.current)
@@ -67,6 +71,7 @@ export const useTabLayoutMeasurement = (tabsLength: number) => {
 
   return {
     titleBarRef,
+    leftInsetRef,
     tabListRef,
     rightControlsRef,
     newTabButtonRef,
