@@ -437,4 +437,65 @@ mod tests {
         p2.release().await;
         assert!(c.is_idle().await);
     }
+
+    /// After restart is confirmed (draining), concurrent config save / transfer
+    /// must not slip through the maintenance gate.
+    #[tokio::test]
+    async fn concurrent_acquire_while_draining_never_leaks() {
+        let c = Arc::new(OperationCoordinator::new());
+        // Hold a background sync permit across the begin boundary.
+        let sync = c
+            .try_acquire(OperationCategory::WebdavSync)
+            .await
+            .unwrap();
+        let session = c.begin_draining().await;
+        assert!(c.is_draining());
+
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let c2 = Arc::clone(&c);
+            handles.push(tokio::spawn(async move {
+                c2.try_acquire(OperationCategory::ConfigWrite).await
+            }));
+            let c3 = Arc::clone(&c);
+            handles.push(tokio::spawn(async move {
+                c3.try_acquire(OperationCategory::SftpTransfer).await
+            }));
+        }
+        for h in handles {
+            let r = h.await.unwrap();
+            assert!(r.is_err(), "draining must reject concurrent acquires");
+        }
+
+        // Existing permit still held; not idle until released.
+        assert!(!c.is_idle().await);
+        sync.release().await;
+        assert!(c.is_idle().await);
+
+        // Still draining until matching cancel.
+        assert!(
+            c.try_acquire(OperationCategory::ConfigWrite)
+                .await
+                .is_err()
+        );
+        assert!(c.cancel_draining(Some(session)).await);
+        let p = c
+            .try_acquire(OperationCategory::ConfigWrite)
+            .await
+            .unwrap();
+        p.release().await;
+    }
+
+    #[tokio::test]
+    async fn begin_draining_twice_rotates_session() {
+        let c = Arc::new(OperationCoordinator::new());
+        let s1 = c.begin_draining().await;
+        let s2 = c.begin_draining().await;
+        assert_ne!(s1, s2);
+        // Stale cancel must not clear newer drain.
+        assert!(!c.cancel_draining(Some(s1)).await);
+        assert!(c.is_draining());
+        assert!(c.cancel_draining(Some(s2)).await);
+        assert!(!c.is_draining());
+    }
 }

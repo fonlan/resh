@@ -576,6 +576,41 @@ mod tests {
     }
 
     #[test]
+    fn atomic_write_leaves_no_stale_part_or_visible_json_on_success() {
+        let dir = temp_dir();
+        let current = current_app_version().to_string();
+        let snap = sample_snapshot("", &current);
+        let token = write_snapshot(&dir, snap).unwrap();
+        let path = snapshot_path(&dir, &token);
+        assert!(path.is_file());
+        // Successful atomic promote must not leave a sibling .part visible.
+        let part = path.with_extension("json.part");
+        // write_trusted uses "{leaf}.part" → restarts/<token>.json.part
+        let part_alt = path.parent().unwrap().join(format!("{token}.json.part"));
+        assert!(!part.exists(), "no .part after success (ext rewrite)");
+        assert!(!part_alt.exists(), "no .json.part leftover after success");
+        // Cleanup of orphan .part: plant a stale part and run cleanup after aging would
+        // require mtime; instead verify the write path itself is clean and that a planted
+        // part is only removed by trusted relative delete helpers (no public half-file).
+        fs::write(&part_alt, b"{incomplete").unwrap();
+        assert!(part_alt.exists());
+        // A second successful write for another token must not leave its own part either.
+        let snap2 = sample_snapshot("", &current);
+        let token2 = write_snapshot(&dir, snap2).unwrap();
+        let part2 = path.parent().unwrap().join(format!("{token2}.json.part"));
+        assert!(!part2.exists());
+        assert!(load_snapshot(&dir, &token2).is_ok());
+        // Remove planted incomplete part via trusted relative path (simulates cleanup).
+        let relative = PathBuf::from(format!("restarts/{token}.json.part"));
+        assert!(
+            crate::updater::paths::remove_trusted_updates_relative(&dir, &relative),
+            "trusted delete of .json.part must succeed"
+        );
+        assert!(!part_alt.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn rejects_expired() {
         let dir = temp_dir();
         let current = current_app_version().to_string();
@@ -597,5 +632,76 @@ mod tests {
         set_pending_restore_token(Some("tok-ok".to_string()));
         assert_eq!(get_pending_restore_token().as_deref(), Some("tok-ok"));
         set_pending_restore_token(None);
+    }
+
+    #[test]
+    fn snapshot_json_excludes_secrets_and_file_bodies() {
+        let dir = temp_dir();
+        let current = current_app_version().to_string();
+        let snap = sample_snapshot("", &current);
+        let token = write_snapshot(&dir, snap).unwrap();
+        let path = snapshot_path(&dir, &token);
+        let raw = fs::read_to_string(&path).unwrap();
+        // Contract: no credential-ish keys or private key material in snapshot JSON.
+        let lower = raw.to_ascii_lowercase();
+        for banned in [
+            "\"password\"",
+            "\"privatekey\"",
+            "\"private_key\"",
+            "\"passphrase\"",
+            "begin rsa private",
+            "begin openssh private",
+            "\"secret\"",
+        ] {
+            assert!(
+                !lower.contains(banned),
+                "snapshot must not contain sensitive field {banned}"
+            );
+        }
+        // Layout + terminal/editor mapping preserved.
+        let loaded = load_snapshot(&dir, &token).unwrap();
+        assert_eq!(loaded.tabs.len(), 2);
+        assert!(matches!(
+            &loaded.tabs[0],
+            SnapshotTab::Terminal { server_id, .. } if server_id == "s1"
+        ));
+        assert!(matches!(
+            &loaded.tabs[1],
+            SnapshotTab::Editor {
+                remote_path,
+                terminal_tab_id: Some(tid),
+                ..
+            } if remote_path == "/tmp/a.txt" && tid == "t1"
+        ));
+        assert_eq!(
+            loaded.split_view.as_ref().map(|s| s.layout.as_str()),
+            Some("horizontal")
+        );
+        assert_eq!(loaded.schema_version, SNAPSHOT_SCHEMA_VERSION);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn failed_ack_leaves_snapshot_for_retry() {
+        let dir = temp_dir();
+        let current = current_app_version().to_string();
+        let snap = sample_snapshot("", &current);
+        let token = write_snapshot(&dir, snap).unwrap();
+        // Wrong token delete is a no-op for the real snapshot file.
+        ack_restart_session(&dir, "not-the-token").unwrap();
+        assert!(load_snapshot(&dir, &token).is_ok());
+        // Correct ack removes it.
+        ack_restart_session(&dir, &token).unwrap();
+        assert!(load_snapshot(&dir, &token).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rejects_invalid_token_shapes() {
+        assert!(!is_valid_token(""));
+        assert!(!is_valid_token("../evil"));
+        assert!(!is_valid_token("a/b"));
+        assert!(!is_valid_token("has space"));
+        assert!(is_valid_token("abc-123_def"));
     }
 }

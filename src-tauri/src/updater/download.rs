@@ -195,17 +195,11 @@ async fn run_download(
     crate::updater::paths::remove_prepared_download_path(&part_path);
 
     // Guard: any early return after staging starts should remove the .part file.
-    struct PartGuard(PathBuf);
-    impl Drop for PartGuard {
-        fn drop(&mut self) {
-            crate::updater::paths::remove_prepared_download_path(&self.0);
-        }
-    }
-    let part_guard = PartGuard(part_path.clone());
+    let part_guard = PartGuard::new(part_path.clone());
 
     // 1) Download SHA256SUMS.txt into memory (small).
     emit_progress(
-        app,
+        Some(app),
         download_id,
         0,
         Some(update.checksums_asset.size),
@@ -255,7 +249,7 @@ async fn run_download(
 
     // 2) Stream install asset to .part
     emit_progress(
-        app,
+        Some(app),
         download_id,
         0,
         Some(update.install_asset.size).filter(|&s| s > 0),
@@ -263,7 +257,7 @@ async fn run_download(
     );
 
     let (written, computed_sha) = stream_download_to_file(
-        app,
+        Some(app),
         download_id,
         &client,
         &update.install_asset.browser_download_url,
@@ -289,7 +283,7 @@ async fn run_download(
         ));
     }
 
-    emit_progress(app, download_id, written, Some(written), "verifying");
+    emit_progress(Some(app), download_id, written, Some(written), "verifying");
 
     // Ready path is unique per full download_id; refuse unexpected collisions.
     // Re-validate parent immediately before rename (TOCTOU after long download).
@@ -317,7 +311,7 @@ async fn run_download(
                     Path::new(ready_name),
                 )
                 .map_err(|e| format!("Failed to finalize download file: {e}"))?;
-                std::mem::forget(part_guard);
+                part_guard.disarm();
                 fsync_path(&ready_path).await;
                 fsync_path(&staging_dir).await;
                 let prepared = PreparedUpdate {
@@ -339,7 +333,7 @@ async fn run_download(
                         },
                     );
                 }
-                emit_progress(app, download_id, written, Some(written), "ready");
+                emit_progress(Some(app), download_id, written, Some(written), "ready");
                 return Ok(prepared);
             }
         }
@@ -349,7 +343,7 @@ async fn run_download(
         .await
         .map_err(|e| format!("Failed to finalize download file: {}", e))?;
     // Successful rename: disarm part cleanup (file no longer at part_path).
-    std::mem::forget(part_guard);
+    part_guard.disarm();
 
     // Best-effort fsync of the ready file (and parent on Unix).
     fsync_path(&ready_path).await;
@@ -378,7 +372,7 @@ async fn run_download(
         );
     }
 
-    emit_progress(app, download_id, written, Some(written), "ready");
+    emit_progress(Some(app), download_id, written, Some(written), "ready");
     Ok(prepared)
 }
 
@@ -419,6 +413,18 @@ pub fn trusted_download_redirect_policy(max_redirects: usize) -> Policy {
             return attempt.error("too many redirects");
         }
         let next = attempt.url().clone();
+        // Test builds may follow loopback HTTP for mock servers only.
+        #[cfg(test)]
+        {
+            if next.scheme() == "http"
+                && matches!(
+                    next.host_str(),
+                    Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+                )
+            {
+                return attempt.follow();
+            }
+        }
         if next.scheme() != "https" {
             return attempt.error("redirect to non-HTTPS URL is not allowed");
         }
@@ -493,6 +499,32 @@ async fn staging_paths(
         let part = staging.join(&part_name);
         let _ = version;
         Ok((staging, ready, part))
+    }
+}
+
+/// Removes a staging `.part` path when dropped, unless explicitly disarmed after
+/// a successful promote/rename. Extracted so unit tests can exercise the same
+/// cleanup contract as production `run_download` without a Tauri AppHandle.
+struct PartGuard {
+    path: Option<PathBuf>,
+}
+
+impl PartGuard {
+    fn new(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    /// Stop cleaning on drop (file was renamed to the ready path).
+    fn disarm(mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for PartGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            crate::updater::paths::remove_prepared_download_path(&path);
+        }
     }
 }
 
@@ -572,7 +604,7 @@ async fn download_bytes_capped(
 
 #[allow(clippy::too_many_arguments)]
 async fn stream_download_to_file(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     download_id: &str,
     client: &reqwest::Client,
     url: &str,
@@ -668,6 +700,21 @@ async fn stream_download_to_file(
         .map_err(|e| format!("Failed to fsync staging file: {}", e))?;
     drop(file);
 
+    if let Some(len) = content_len {
+        if received != len {
+            return Err(format!(
+                "Downloaded size {} does not match Content-Length {}",
+                received, len
+            ));
+        }
+    }
+    if claimed_size > 0 && received != claimed_size {
+        return Err(format!(
+            "Downloaded size {} does not match GitHub asset size {}",
+            received, claimed_size
+        ));
+    }
+
     let digest = hasher.finalize();
     Ok((received, hex_encode(&digest)))
 }
@@ -725,6 +772,9 @@ async fn create_staging_part_file(part_path: &Path) -> Result<tokio::fs::File, S
 
 fn validate_download_url(url: &str) -> Result<reqwest::Url, String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("Invalid download URL: {}", e))?;
+    if is_test_http_localhost_allowed(&parsed) {
+        return Ok(parsed);
+    }
     if parsed.scheme() != "https" {
         return Err("Update downloads must use HTTPS".to_string());
     }
@@ -738,6 +788,9 @@ fn validate_download_url(url: &str) -> Result<reqwest::Url, String> {
 }
 
 fn ensure_final_url_allowed(url: &reqwest::Url) -> Result<(), String> {
+    if is_test_http_localhost_allowed(url) {
+        return Ok(());
+    }
     if url.scheme() != "https" {
         return Err("Redirected to non-HTTPS download URL".to_string());
     }
@@ -753,13 +806,31 @@ fn ensure_final_url_allowed(url: &reqwest::Url) -> Result<(), String> {
     Ok(())
 }
 
+/// Test-only: allow `http://127.0.0.1` / `http://localhost` for mock HTTP servers.
+/// Production builds always return false (function is cfg-gated empty).
+#[cfg(test)]
+fn is_test_http_localhost_allowed(url: &reqwest::Url) -> bool {
+    if url.scheme() != "http" {
+        return false;
+    }
+    matches!(url.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]"))
+}
+
+#[cfg(not(test))]
+fn is_test_http_localhost_allowed(_url: &reqwest::Url) -> bool {
+    false
+}
+
 fn emit_progress(
-    app: &AppHandle,
+    app: Option<&AppHandle>,
     download_id: &str,
     received: u64,
     total: Option<u64>,
     phase: &str,
 ) {
+    let Some(app) = app else {
+        return;
+    };
     let payload = DownloadProgressEvent {
         download_id: download_id.to_string(),
         received,
@@ -996,5 +1067,486 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  SHA256SUMS.txt
     fn redirect_policy_rejects_untrusted_host() {
         // Policy construction must not panic; custom policy is exercised via client usage.
         let _ = trusted_download_redirect_policy(5);
+    }
+
+    #[test]
+    fn install_asset_size_ceiling_is_enforced_constant() {
+        // Documented hard limit for client + release guidance.
+        assert_eq!(MAX_INSTALL_ASSET_BYTES, 512 * 1024 * 1024);
+        assert_eq!(MAX_CHECKSUMS_BYTES, 1024 * 1024);
+    }
+
+    #[test]
+    fn sha256sums_accepts_optional_dot_slash_prefix() {
+        let text = format!("{}  ./Resh-v1.0.0-windows-x86_64.exe\n", "a".repeat(64));
+        let h = parse_sha256sums_for_file(&text, "Resh-v1.0.0-windows-x86_64.exe").unwrap();
+        assert_eq!(h, "a".repeat(64));
+    }
+
+    #[test]
+    fn empty_sha256sums_errors() {
+        let err = parse_sha256sums_for_file("\n# only comments\n", "foo.exe").unwrap_err();
+        assert!(err.contains("empty"));
+    }
+
+    // --- Mock HTTP integration (loopback only; #[cfg(test)] host bypass) ---
+
+    fn test_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .redirect(trusted_download_redirect_policy(5))
+            .no_proxy()
+            .build()
+            .expect("client")
+    }
+
+    /// Minimal HTTP/1.1 mock: map path -> (status, headers, body bytes).
+    /// When `chunk_sizes` is Some, the body is written as successive pieces
+    /// (simulating multi-chunk transfer) rather than a single write.
+    async fn spawn_routes_chunked(
+        routes: std::collections::HashMap<String, (u16, Vec<(String, String)>, Vec<u8>)>,
+        chunk_sizes: Option<Vec<usize>>,
+        drop_after_bytes: Option<usize>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        use std::net::SocketAddr;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0)))
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let base = format!("http://{addr}");
+        let routes = std::sync::Arc::new(routes);
+        let chunk_sizes = std::sync::Arc::new(chunk_sizes);
+        let drop_after = std::sync::Arc::new(drop_after_bytes);
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    break;
+                };
+                let routes = routes.clone();
+                let chunk_sizes = chunk_sizes.clone();
+                let drop_after = drop_after.clone();
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 8192];
+                    let n = match socket.read(&mut buf).await {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => n,
+                    };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req
+                        .lines()
+                        .next()
+                        .and_then(|l| l.split_whitespace().nth(1))
+                        .unwrap_or("/");
+                    let path = path.split('?').next().unwrap_or(path).to_string();
+                    let (status, headers, body) = routes
+                        .get(&path)
+                        .cloned()
+                        .unwrap_or((404, vec![], b"not found".to_vec()));
+                    let reason = if status == 200 { "OK" } else { "ERR" };
+                    let mut resp = format!(
+                        "HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: {}\r\n",
+                        body.len()
+                    );
+                    for (k, v) in headers {
+                        resp.push_str(&format!("{k}: {v}\r\n"));
+                    }
+                    resp.push_str("\r\n");
+                    let _ = socket.write_all(resp.as_bytes()).await;
+
+                    let mut body = body;
+                    if let Some(max) = *drop_after {
+                        if body.len() > max {
+                            body.truncate(max);
+                        }
+                    }
+                    if let Some(sizes) = chunk_sizes.as_ref() {
+                        let mut offset = 0usize;
+                        let mut size_idx = 0usize;
+                        while offset < body.len() {
+                            let piece = sizes
+                                .get(size_idx)
+                                .copied()
+                                .unwrap_or(sizes.last().copied().unwrap_or(body.len()));
+                            size_idx = size_idx.saturating_add(1);
+                            let end = (offset + piece).min(body.len());
+                            if socket.write_all(&body[offset..end]).await.is_err() {
+                                return;
+                            }
+                            offset = end;
+                            tokio::task::yield_now().await;
+                        }
+                    } else if socket.write_all(&body).await.is_err() {
+                        return;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        (base, handle)
+    }
+
+    async fn spawn_routes(
+        routes: std::collections::HashMap<String, (u16, Vec<(String, String)>, Vec<u8>)>,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        spawn_routes_chunked(routes, None, None).await
+    }
+
+    #[tokio::test]
+    async fn mock_download_bytes_ok() {
+        let payload = b"hello-update-payload-0123456789";
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/asset.bin".into(),
+            (
+                200,
+                vec![("Content-Type".into(), "application/octet-stream".into())],
+                payload.to_vec(),
+            ),
+        );
+        let (base, _h) = spawn_routes(routes).await;
+        let client = test_client();
+        let token = CancellationToken::new();
+        let bytes = download_bytes_capped(&client, &format!("{base}/asset.bin"), 1024, &token)
+            .await
+            .expect("download");
+        assert_eq!(bytes, payload);
+    }
+
+    #[tokio::test]
+    async fn mock_download_exceeds_cap() {
+        let payload = vec![b'x'; 64];
+        let mut routes = std::collections::HashMap::new();
+        routes.insert("/big.bin".into(), (200, vec![], payload));
+        let (base, _h) = spawn_routes(routes).await;
+        let client = test_client();
+        let token = CancellationToken::new();
+        let err = download_bytes_capped(&client, &format!("{base}/big.bin"), 16, &token)
+            .await
+            .unwrap_err();
+        assert!(err.contains("maximum") || err.contains("exceed"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn mock_download_cancel_before_start() {
+        let mut routes = std::collections::HashMap::new();
+        routes.insert("/a".into(), (200, vec![], b"data".to_vec()));
+        let (base, _h) = spawn_routes(routes).await;
+        let client = test_client();
+        let token = CancellationToken::new();
+        token.cancel();
+        let err = download_bytes_capped(&client, &format!("{base}/a"), 1024, &token)
+            .await
+            .unwrap_err();
+        assert!(err.contains("cancel"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn mock_stream_sha256_and_part_write() {
+        let payload = b"stream-me-please-for-sha";
+        let expected = hex_encode(&Sha256::digest(payload));
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/pkg".into(),
+            (
+                200,
+                vec![("Content-Length".into(), payload.len().to_string())],
+                payload.to_vec(),
+            ),
+        );
+        let (base, _h) = spawn_routes(routes).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("x.part");
+        let client = test_client();
+        let token = CancellationToken::new();
+        let bytes = download_bytes_capped(&client, &format!("{base}/pkg"), 1024 * 1024, &token)
+            .await
+            .unwrap();
+        assert_eq!(hex_encode(&Sha256::digest(&bytes)), expected);
+        tokio::fs::write(&part, &bytes).await.unwrap();
+        assert_eq!(tokio::fs::read(&part).await.unwrap(), payload);
+        // Simulate PartGuard cleanup on failed hash: remove .part
+        tokio::fs::remove_file(&part).await.unwrap();
+        assert!(!part.exists());
+    }
+
+    #[tokio::test]
+    async fn mock_stream_download_to_file_chunked_ok() {
+        let payload: Vec<u8> = (0u8..200).collect();
+        let expected = hex_encode(&Sha256::digest(&payload));
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/chunked.bin".into(),
+            (
+                200,
+                vec![("Content-Length".into(), payload.len().to_string())],
+                payload.clone(),
+            ),
+        );
+        let (base, _h) = spawn_routes_chunked(routes, Some(vec![7, 13, 1, 64]), None).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("asset.part");
+        let client = test_client();
+        let token = CancellationToken::new();
+        let (written, sha) = stream_download_to_file(
+            None,
+            "test-dl-id",
+            &client,
+            &format!("{base}/chunked.bin"),
+            &part,
+            payload.len() as u64,
+            1024 * 1024,
+            &token,
+        )
+        .await
+        .expect("stream download");
+        assert_eq!(written, payload.len() as u64);
+        assert_eq!(sha, expected);
+        assert_eq!(tokio::fs::read(&part).await.unwrap(), payload);
+    }
+
+    #[tokio::test]
+    async fn mock_stream_download_claimed_size_mismatch() {
+        let body = vec![b'a'; 50];
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/size.bin".into(),
+            (
+                200,
+                vec![("Content-Length".into(), body.len().to_string())],
+                body,
+            ),
+        );
+        let (base, _h) = spawn_routes(routes).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("bad-size.part");
+        let client = test_client();
+        let token = CancellationToken::new();
+        let err = stream_download_to_file(
+            None,
+            "id",
+            &client,
+            &format!("{base}/size.bin"),
+            &part,
+            999,
+            1024 * 1024,
+            &token,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.contains("does not match GitHub asset size") || err.contains("Content-Length"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_stream_download_truncate_midstream_errors() {
+        // Advertise Content-Length of full payload but drop the connection after partial body.
+        let payload = vec![b'z'; 128];
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/cut.bin".into(),
+            (
+                200,
+                vec![("Content-Length".into(), payload.len().to_string())],
+                payload.clone(),
+            ),
+        );
+        let (base, _h) = spawn_routes_chunked(routes, Some(vec![16]), Some(40)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("cut.part");
+        let client = test_client();
+        let token = CancellationToken::new();
+        // Production path: PartGuard cleans .part on any failure after staging starts.
+        let guard = PartGuard::new(part.clone());
+        let err = stream_download_to_file(
+            None,
+            "id",
+            &client,
+            &format!("{base}/cut.bin"),
+            &part,
+            128,
+            1024 * 1024,
+            &token,
+        )
+        .await
+        .expect_err("truncated midstream must fail");
+        assert!(
+            err.contains("Content-Length")
+                || err.contains("does not match")
+                || err.contains("stream")
+                || err.contains("Download")
+                || err.contains("size"),
+            "{err}"
+        );
+        drop(guard);
+        assert!(!part.exists(), "PartGuard must remove .part after truncate");
+    }
+
+    #[tokio::test]
+    async fn mock_stream_download_cancel_midway_cleans_part() {
+        let payload = vec![b'x'; 512 * 1024];
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/slow.bin".into(),
+            (
+                200,
+                vec![("Content-Length".into(), payload.len().to_string())],
+                payload,
+            ),
+        );
+        // Large body, small chunks so cancel can land after some bytes are written.
+        let (base, _h) = spawn_routes_chunked(routes, Some(vec![256]), None).await;
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("cancel.part");
+        let client = test_client();
+        let token = CancellationToken::new();
+        let cancel = token.clone();
+        // Cancel after a short delay so the stream opens the .part and writes chunks.
+        let cancel_task = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(15)).await;
+            cancel.cancel();
+        });
+        let guard = PartGuard::new(part.clone());
+        let err = stream_download_to_file(
+            None,
+            "id",
+            &client,
+            &format!("{base}/slow.bin"),
+            &part,
+            0,
+            1024 * 1024,
+            &token,
+        )
+        .await
+        .unwrap_err();
+        let _ = cancel_task.await;
+        assert!(err.contains("cancel"), "{err}");
+        drop(guard);
+        assert!(
+            !part.exists(),
+            "PartGuard must remove .part after mid-stream cancel"
+        );
+        // Ready registry must stay empty for this synthetic id path.
+        assert!(get_prepared_update("id").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn part_guard_drop_removes_partial_without_disarm() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("only.part");
+        tokio::fs::write(&part, b"partial").await.unwrap();
+        assert!(part.exists());
+        {
+            let _guard = PartGuard::new(part.clone());
+            // Drop without disarm → cleanup.
+        }
+        assert!(!part.exists());
+    }
+
+    #[tokio::test]
+    async fn part_guard_disarm_keeps_promoted_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("keep.part");
+        tokio::fs::write(&part, b"final").await.unwrap();
+        {
+            let guard = PartGuard::new(part.clone());
+            guard.disarm();
+        }
+        assert!(part.exists(), "disarmed PartGuard must not delete ready path");
+        tokio::fs::remove_file(&part).await.ok();
+    }
+
+    #[tokio::test]
+    async fn mock_content_length_exceeds_cap() {
+        // Server claims a huge Content-Length; client must reject before reading body.
+        // Provide a matching body size so the HTTP framing is valid; cap is still 100.
+        let body = vec![b'z'; 200];
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            "/lie".into(),
+            (
+                200,
+                vec![("Content-Length".into(), body.len().to_string())],
+                body,
+            ),
+        );
+        let (base, _h) = spawn_routes(routes).await;
+        let client = test_client();
+        let token = CancellationToken::new();
+        let err = download_bytes_capped(&client, &format!("{base}/lie"), 100, &token)
+            .await
+            .unwrap_err();
+        assert!(
+            err.contains("Content-Length") || err.contains("maximum") || err.contains("exceed"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_http_error_status() {
+        let mut routes = std::collections::HashMap::new();
+        routes.insert("/missing".into(), (404, vec![], b"nope".to_vec()));
+        let (base, _h) = spawn_routes(routes).await;
+        let client = test_client();
+        let token = CancellationToken::new();
+        let err = download_bytes_capped(&client, &format!("{base}/missing"), 1024, &token)
+            .await
+            .unwrap_err();
+        assert!(err.contains("404") || err.contains("HTTP"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn mock_redirect_to_loopback_followed() {
+        // Server A redirects to server B (both loopback). Policy must allow both hops in tests.
+        let mut final_routes = std::collections::HashMap::new();
+        final_routes.insert("/final".into(), (200, vec![], b"after-redirect".to_vec()));
+        let (final_base, _hf) = spawn_routes(final_routes).await;
+
+        let mut start_routes = std::collections::HashMap::new();
+        start_routes.insert(
+            "/start".into(),
+            (
+                302,
+                vec![("Location".into(), format!("{final_base}/final"))],
+                Vec::new(),
+            ),
+        );
+        let (start_base, _hs) = spawn_routes(start_routes).await;
+
+        let client = test_client();
+        let token = CancellationToken::new();
+        let bytes = download_bytes_capped(&client, &format!("{start_base}/start"), 1024, &token)
+            .await
+            .expect("redirect download");
+        assert_eq!(bytes, b"after-redirect");
+    }
+
+    #[test]
+    fn mock_wrong_hash_detected_by_parse_and_eq() {
+        let good = "a".repeat(64);
+        let bad = "b".repeat(64);
+        assert!(!constant_time_eq_hex(&good, &bad));
+        let sums = format!("{good}  Resh-v1.0.0-windows-x86_64.exe\n");
+        let parsed = parse_sha256sums_for_file(&sums, "Resh-v1.0.0-windows-x86_64.exe").unwrap();
+        assert_eq!(parsed, good);
+        assert!(!constant_time_eq_hex(&parsed, &bad));
+    }
+
+    #[test]
+    fn test_localhost_http_allowed_only_in_tests() {
+        assert!(is_test_http_localhost_allowed(
+            &reqwest::Url::parse("http://127.0.0.1:1/a").unwrap()
+        ));
+        assert!(!is_test_http_localhost_allowed(
+            &reqwest::Url::parse("https://127.0.0.1:1/a").unwrap()
+        ));
+        assert!(!is_test_http_localhost_allowed(
+            &reqwest::Url::parse("http://example.com/a").unwrap()
+        ));
+        assert!(validate_download_url("http://127.0.0.1:9/x").is_ok());
+        assert!(validate_download_url("http://evil.com/x").is_err());
     }
 }

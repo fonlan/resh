@@ -74,6 +74,12 @@ jobs:
       - name: Verify GitHub Actions pinning
         run: npm run ci:pin-actions
 
+      - name: Updater release asset contract (fixture self-test)
+        run: npm run check:updater-assets -- --self-test
+
+      - name: Isolated updater helper regression
+        run: npm run test:updater-helpers
+
       - name: Build macOS app bundle
         run: npm run tauri-build -- --config src-tauri/tauri.macos.conf.json --bundles app
 

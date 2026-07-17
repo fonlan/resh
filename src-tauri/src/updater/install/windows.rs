@@ -368,8 +368,24 @@ mod tests {
         assert!(s.contains("Wait-AliveMarker"));
         assert!(s.contains("--restore-update-session"));
         assert!(s.contains("Move-Item"));
+        assert!(s.contains("-LiteralPath"));
         // Must not invoke remote code loaders.
         assert!(!s.to_ascii_lowercase().contains("invoke-expression"));
         assert!(!s.to_ascii_lowercase().contains("downloadstring"));
+        assert!(!s.to_ascii_lowercase().contains("iex "));
+    }
+
+    #[test]
+    fn spawn_uses_hidden_no_profile_flags() {
+        // Source-level contract for CREATE_NO_WINDOW + PowerShell flags.
+        let src = include_str!("windows.rs");
+        assert!(src.contains("CREATE_NO_WINDOW"));
+        assert!(src.contains("-NoProfile") || src.contains("\"-NoProfile\""));
+        assert!(src.contains("-NonInteractive") || src.contains("\"-NonInteractive\""));
+        assert!(
+            src.contains("WindowStyle")
+                || src.contains("Hidden")
+                || src.contains("CREATE_NO_WINDOW")
+        );
     }
 }

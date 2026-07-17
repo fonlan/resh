@@ -68,6 +68,10 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Isolated Windows updater helper regression
+        run: npm run test:updater-helpers
+        shell: bash
+
       - name: Build Windows portable binary
         run: npm run tauri-build
 
@@ -235,6 +239,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+
       - name: Download release artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -291,7 +303,7 @@ jobs:
           done
 
           # Stable checksum list: GNU sha256sum format, filenames lexicographic.
-          # (Stable interface for future in-app updater.)
+          # (Stable interface for the in-app updater.)
           : > SHA256SUMS.txt
           while IFS= read -r name; do
             sha256sum "$name" >> SHA256SUMS.txt
@@ -299,6 +311,12 @@ jobs:
 
           echo "SHA256SUMS.txt:"
           cat SHA256SUMS.txt
+
+          # Shared long-term contract: asset names + SHA256SUMS must be parseable
+          # by the in-app updater (scripts/check-updater-release-assets.mjs).
+          cd "$GITHUB_WORKSPACE"
+          node scripts/check-updater-release-assets.mjs --tag "$tag" --dir release-assets
+          cd release-assets
 
           final_assets=(
             "$windows_exe"

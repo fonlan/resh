@@ -770,9 +770,58 @@ mod tests {
         assert!(!s.contains("xattr -c "));
         assert!(!s.contains("xattr -cr"));
         assert!(!s.contains("spctl --master-disable"));
+        assert!(!s.contains("spctl --master-enable"));
         assert!(!s.contains("|| true\n  if \"$XATTR\" -lr"));
         // Must not treat xattr list failure as clean via pipe without status.
         assert!(s.contains("if ! listing="));
+        // Quarantine clear is not best-effort: no `|| true` on the -dr line.
+        for line in s.lines() {
+            if line.contains("xattr") && line.contains("com.apple.quarantine") && line.contains("-dr")
+            {
+                assert!(
+                    !line.contains("|| true"),
+                    "xattr -dr quarantine must not ignore failures with || true: {line}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn open_new_app_only_after_quarantine_clear_and_recheck() {
+        let s = macos_update_script();
+        let clear_marker = "clear_quarantine_strict \"$RESH_UPDATE_APP\"";
+        let open_marker = "\"$OPEN\" -n \"$RESH_UPDATE_APP\" --args --restore-update-session";
+        let clear_idx = s
+            .find(clear_marker)
+            .expect("clear_quarantine_strict on final app");
+        let open_idx = s.find(open_marker).expect("open -n new app with restore token");
+        assert!(
+            open_idx > clear_idx,
+            "open -n must run only after quarantine clear/recheck"
+        );
+        // Failure path must rollback, not launch.
+        assert!(s.contains(
+            "rollback_and_relaunch \"could not clear or verify quarantine attributes on the new app\""
+        ));
+        // Success path: wait for alive marker after the open call (not the earlier function def).
+        let after_open = &s[open_idx..];
+        assert!(
+            after_open.contains("wait_alive_marker"),
+            "alive wait must follow open -n on the success path"
+        );
+    }
+
+    #[test]
+    fn script_forbids_global_gatekeeper_and_blanket_xattr() {
+        let s = macos_update_script();
+        let lower = s.to_ascii_lowercase();
+        assert!(!lower.contains("master-disable"));
+        assert!(!lower.contains("master-enable"));
+        assert!(!s.contains("xattr -c"));
+        assert!(!s.contains("xattr -cr"));
+        // Only quarantine attribute name is targeted for recursive delete.
+        assert!(s.contains("com.apple.quarantine"));
+        assert!(!s.contains("xattr -c "));
     }
 
     #[test]

@@ -117,6 +117,8 @@ npm run build:macos      # Build macOS DMG bundle (prefer CI=true for unsigned C
 
 # Release checks
 npm run check:release-version -- vX.Y.Z  # Tag must match package/Cargo/tauri versions
+npm run check:updater-assets -- --tag vX.Y.Z --dir ./assets  # Updater asset names + SHA256SUMS
+npm run test:updater-helpers             # Isolated Windows/macOS helper contract tests
 npm run ci:pin-actions                   # Third-party Actions must be full-SHA pinned
 
 # Tauri commands
@@ -218,9 +220,9 @@ git push origin vX.Y.Z
 
 No `APPLE_*` Repository Secrets are required for automatic releases. macOS jobs run `CI=true npm run build:macos` (unsigned DMG). Windows jobs run `npm run tauri-build` and ship the portable EXE only (no MSI/NSIS installer).
 
-#### Release assets
+#### Release assets (in-app updater API)
 
-Each successful tag release publishes exactly **four** files:
+Each successful tag release publishes exactly **four** files. These names and `SHA256SUMS.txt` are the **in-app updater API**—do not rename them or add updater-only signing secrets:
 
 | Asset | Description |
 | --- | --- |
@@ -238,15 +240,27 @@ Resh-v1.1.0-macos-x86_64.dmg
 SHA256SUMS.txt
 ```
 
-Verify downloads:
+Verify downloads and updater compatibility:
 
 ```bash
 sha256sum -c SHA256SUMS.txt
+npm run check:updater-assets -- --tag v1.1.0 --dir ./path-to-assets
 ```
+
+Full contract (check schedule, proxies, Gatekeeper/quarantine, helpers): [scripts/checklists/updater-release-contract.md](scripts/checklists/updater-release-contract.md).
+
+#### In-app updates
+
+- **Auto-check** defaults to on (Settings → General → Software update); settings are local-only (`local.json`), not WebDAV-synced.
+- After config load, checks once after a short delay, then about every **6 hours**. About always supports **manual** check.
+- Update traffic can use an HTTP/SOCKS5 proxy from your existing proxy list; a bad proxy fails the check/download instead of falling back to direct.
+- Only **stable** Releases are considered (no channel picker, no prerelease subscribe, no silent background install in v1).
+- **Windows:** keep the portable EXE in a **writable** folder; the updater replaces it in place via a hidden PowerShell helper.
+- **macOS:** prefer Applications. DMGs remain unsigned/unnotarized. First manual open may need a Gatekeeper allow; **in-app update** clears **only** `com.apple.quarantine` on the new, checksum-and-bundle-validated `Resh.app` (not a global Gatekeeper off switch, not `spctl --master-disable`, and not a blanket `xattr -c`).
 
 #### macOS Gatekeeper note
 
-Automatic release DMGs are **not** Apple-signed or notarized. On first open, users may need to bypass Gatekeeper (System Settings → Privacy & Security, or right-click the app → Open).
+Automatic release DMGs are **not** Apple-signed or notarized. On **first** open of a manual download, users may need to bypass Gatekeeper (System Settings → Privacy & Security, or right-click the app → Open). After a successful **in-app** update, Resh’s helper removes quarantine from that trusted package so the new build can launch without the “damaged / unidentified developer” block—without changing system Gatekeeper policy.
 
 #### Failure and re-runs
 
