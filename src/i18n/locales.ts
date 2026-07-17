@@ -119,6 +119,8 @@ export const locales = {
     updateRestorePartial:
       "Restored tabs with some failures: {details}",
     updateRestoreSuccess: "Restored previous session after update",
+    updateInstallFailed: "Update install failed: {details}",
+    updateInstallSuccess: "Updated to version {version}",
     updateTitleButton: "Update available",
     updateTitleDownloading: "Downloading update",
     updateTitleReady: "Update ready",
@@ -719,6 +721,8 @@ export const locales = {
     updateRestartCategoryEditUpload: "SFTP 编辑上传",
     updateRestorePartial: "已恢复标签，部分失败：{details}",
     updateRestoreSuccess: "更新后已恢复先前会话",
+    updateInstallFailed: "更新安装失败：{details}",
+    updateInstallSuccess: "已更新到版本 {version}",
     updateTitleButton: "发现新版本",
     updateTitleDownloading: "正在下载更新",
     updateTitleReady: "更新已就绪",

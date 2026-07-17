@@ -4,17 +4,20 @@
 //! one-time CLI token. They must never contain passwords, private keys, or
 //! remote file bodies.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::config::types::Server;
 use crate::updater::current_app_version;
+use crate::updater::paths::{
+    path_entry_is_symlink, remove_trusted_updates_relative, updates_root_exists_and_trusted,
+};
 
 pub const SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 /// Snapshots older than this are rejected and cleaned up.
@@ -95,15 +98,30 @@ fn now_unix_secs() -> u64 {
 }
 
 pub fn restarts_dir(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join("updates").join("restarts")
+    crate::updater::paths::updates_root(app_data_dir).join("restarts")
+}
+
+fn restarts_dir_is_trusted(app_data_dir: &Path) -> bool {
+    if !updates_root_exists_and_trusted(app_data_dir) {
+        return false;
+    }
+    let dir = restarts_dir(app_data_dir);
+    if !dir.exists() {
+        return false;
+    }
+    match fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() => false,
+        Ok(meta) if meta.is_dir() => true,
+        _ => false,
+    }
+}
+
+fn snapshot_relative(token: &str) -> PathBuf {
+    PathBuf::from(format!("restarts/{token}.json"))
 }
 
 fn snapshot_path(app_data_dir: &Path, token: &str) -> PathBuf {
     restarts_dir(app_data_dir).join(format!("{token}.json"))
-}
-
-fn part_path(app_data_dir: &Path, token: &str) -> PathBuf {
-    restarts_dir(app_data_dir).join(format!("{token}.json.part"))
 }
 
 /// Parse `--restore-update-session <token>` from process args. Call once at startup.
@@ -164,8 +182,9 @@ pub fn write_snapshot(
 ) -> Result<String, String> {
     sanitize_snapshot_in_place(&mut snapshot)?;
 
-    let dir = restarts_dir(app_data_dir);
-    fs::create_dir_all(&dir).map_err(|e| format!("create restarts dir: {e}"))?;
+    let updates = crate::updater::paths::ensure_trusted_updates_dir(app_data_dir)?;
+    let dir = crate::updater::paths::ensure_trusted_updates_subdir(app_data_dir, "restarts")?;
+    let _ = updates;
 
     let token = if snapshot.token.is_empty() {
         Uuid::new_v4().to_string()
@@ -187,26 +206,11 @@ pub fn write_snapshot(
         snapshot.expires_at = now.saturating_add(SNAPSHOT_TTL_SECS);
     }
 
-    let part = part_path(app_data_dir, &token);
-    let final_path = snapshot_path(app_data_dir, &token);
-
     let json = serde_json::to_vec_pretty(&snapshot)
         .map_err(|e| format!("serialize restart snapshot: {e}"))?;
 
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&part)
-            .map_err(|e| format!("open snapshot part: {e}"))?;
-        file.write_all(&json)
-            .map_err(|e| format!("write snapshot part: {e}"))?;
-        file.sync_all()
-            .map_err(|e| format!("fsync snapshot part: {e}"))?;
-    }
-
-    fs::rename(&part, &final_path).map_err(|e| format!("rename snapshot: {e}"))?;
+    let relative = PathBuf::from(format!("restarts/{token}.json"));
+    crate::updater::paths::write_trusted_updates_file_atomic(app_data_dir, &relative, &json)?;
 
     // Best-effort fsync of directory (may fail on some platforms).
     if let Ok(dir_file) = File::open(&dir) {
@@ -349,9 +353,14 @@ pub fn ack_restart_session(app_data_dir: &Path, token: &str) -> Result<(), Strin
     if !is_valid_token(token) {
         return Err("invalid restore token".to_string());
     }
-    let path = snapshot_path(app_data_dir, token);
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("delete snapshot: {e}"))?;
+    if restarts_dir_is_trusted(app_data_dir) {
+        let relative = snapshot_relative(token);
+        if !remove_trusted_updates_relative(app_data_dir, &relative) {
+            // Best-effort: still clear pending token; refuse unprotected delete.
+            tracing::warn!("skipping snapshot delete: untrusted updates/restarts tree");
+        }
+    } else {
+        tracing::warn!("skipping snapshot delete: untrusted updates/restarts tree");
     }
     // Clear pending token if it matches.
     if let Ok(mut guard) = PENDING_RESTORE_TOKEN.lock() {
@@ -365,8 +374,12 @@ pub fn ack_restart_session(app_data_dir: &Path, token: &str) -> Result<(), Strin
 
 /// Delete expired snapshots and leftover `.part` files.
 pub fn cleanup_stale_snapshots(app_data_dir: &Path) {
+    if !restarts_dir_is_trusted(app_data_dir) {
+        return;
+    }
     let dir = restarts_dir(app_data_dir);
-    if !dir.is_dir() {
+    // Refuse if restarts became a symlink between the trust check and read_dir.
+    if path_entry_is_symlink(&dir) {
         return;
     }
     let now = now_unix_secs();
@@ -377,10 +390,24 @@ pub fn cleanup_stale_snapshots(app_data_dir: &Path) {
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
-        let meta = match entry.metadata() {
+        // Use symlink_metadata so we never follow planted leaf/dir links.
+        let meta = match fs::symlink_metadata(&path) {
             Ok(m) => m,
             Err(_) => continue,
         };
+        if meta.file_type().is_symlink() {
+            // Only unlink leaf links with known snapshot names; never follow.
+            if name.ends_with(".part") || name.ends_with(".json") {
+                if restarts_dir_is_trusted(app_data_dir) {
+                    let relative = PathBuf::from(format!("restarts/{name}"));
+                    let _ = remove_trusted_updates_relative(app_data_dir, &relative);
+                }
+            }
+            continue;
+        }
+        if !meta.is_file() {
+            continue;
+        }
         let age_secs = meta
             .modified()
             .ok()
@@ -388,33 +415,27 @@ pub fn cleanup_stale_snapshots(app_data_dir: &Path) {
             .map(|d| now.saturating_sub(d.as_secs()))
             .unwrap_or(0);
 
-        if name.ends_with(".part") {
-            if age_secs > SNAPSHOT_STALE_CLEANUP_SECS {
-                let _ = fs::remove_file(&path);
-            }
-            continue;
-        }
-        if !name.ends_with(".json") {
-            continue;
-        }
-        // Load lightly to check expires_at; on parse failure and old file, delete.
-        match fs::read(&path) {
-            Ok(bytes) => {
-                if let Ok(snap) = serde_json::from_slice::<RestartSessionSnapshot>(&bytes) {
-                    if snap.expires_at > 0 && now > snap.expires_at.saturating_add(60) {
-                        let _ = fs::remove_file(&path);
-                    } else if age_secs > SNAPSHOT_STALE_CLEANUP_SECS {
-                        let _ = fs::remove_file(&path);
+        let should_delete = if name.ends_with(".part") {
+            age_secs > SNAPSHOT_STALE_CLEANUP_SECS
+        } else if name.ends_with(".json") {
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    if let Ok(snap) = serde_json::from_slice::<RestartSessionSnapshot>(&bytes) {
+                        (snap.expires_at > 0 && now > snap.expires_at.saturating_add(60))
+                            || age_secs > SNAPSHOT_STALE_CLEANUP_SECS
+                    } else {
+                        age_secs > SNAPSHOT_STALE_CLEANUP_SECS
                     }
-                } else if age_secs > SNAPSHOT_STALE_CLEANUP_SECS {
-                    let _ = fs::remove_file(&path);
                 }
+                Err(_) => age_secs > SNAPSHOT_STALE_CLEANUP_SECS,
             }
-            Err(_) => {
-                if age_secs > Duration::from_secs(SNAPSHOT_STALE_CLEANUP_SECS).as_secs() {
-                    let _ = fs::remove_file(&path);
-                }
-            }
+        } else {
+            false
+        };
+
+        if should_delete && restarts_dir_is_trusted(app_data_dir) {
+            let relative = PathBuf::from(format!("restarts/{name}"));
+            let _ = remove_trusted_updates_relative(app_data_dir, &relative);
         }
     }
 }
@@ -471,6 +492,56 @@ mod tests {
             }),
             remembered_split_views: serde_json::json!({}),
         }
+    }
+
+    #[test]
+    fn ack_refuses_symlink_updates_root() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_dir();
+        let external = dir.join("external");
+        fs::create_dir_all(&external).unwrap();
+        let secret = external.join("tok_secret.json");
+        fs::write(&secret, b"keep").unwrap();
+        // Plant updates -> external so untrusted delete would remove secret as tok_secret.json
+        // via restarts path: make restarts under external.
+        let app = dir.join("app");
+        fs::create_dir_all(&app).unwrap();
+        symlink(&external, app.join("updates")).unwrap();
+        // Also plant restarts/tok via the logical path components for the relative helper.
+        // Secret leaf uses a valid token name under external root (would be updates/restarts
+        // only if restarts existed; here secret is at updates-root level via symlink).
+        let secret2 = external.join("install-alive-tok1.ready");
+        fs::write(&secret2, b"alive").unwrap();
+
+        set_pending_restore_token(Some("tok1".to_string()));
+        ack_restart_session(&app, "tok1").unwrap();
+        assert!(secret.exists());
+        assert!(secret2.exists());
+        set_pending_restore_token(None);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cleanup_stale_refuses_symlink_restarts() {
+        use std::os::unix::fs::symlink;
+        let dir = temp_dir();
+        let app = dir.join("app");
+        let updates = app.join("updates");
+        fs::create_dir_all(&updates).unwrap();
+        let external = dir.join("external");
+        fs::create_dir_all(&external).unwrap();
+        let secret = external.join("oldtok.json");
+        fs::write(&secret, b"{}").unwrap();
+        // Make file look old by setting mtime if possible; cleanup also deletes on parse fail + age.
+        // Force age by writing expired snapshot content.
+        let mut snap = sample_snapshot("oldtok", current_app_version());
+        snap.expires_at = 1;
+        fs::write(&secret, serde_json::to_vec(&snap).unwrap()).unwrap();
+        symlink(&external, updates.join("restarts")).unwrap();
+
+        cleanup_stale_snapshots(&app);
+        assert!(secret.exists(), "must not follow restarts symlink");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

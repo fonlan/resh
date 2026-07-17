@@ -65,14 +65,23 @@ pub async fn get_prepared_update(id: &str) -> Option<(PreparedUpdate, PathBuf)> 
 }
 
 /// Remove a prepared entry and optionally delete its file.
-#[allow(dead_code)]
 pub async fn forget_prepared_update(id: &str, delete_file: bool) {
     let mut map = runtime().prepared.lock().await;
     if let Some(entry) = map.remove(id) {
         if delete_file {
-            let _ = fs::remove_file(&entry.path).await;
+            // Prefer trusted updates-relative delete when the file lives under
+            // app-data/updates; otherwise fall back to nofollow file delete that
+            // also refuses intermediate symlink ancestors.
+            remove_prepared_path_safely(&entry.path);
         }
     }
+}
+
+fn remove_prepared_path_safely(path: &Path) {
+    // Prefer trusted updates-relative delete when the file is a leaf under
+    // app-data/updates; refuse rather than follow when the root is a symlink.
+    // Windows co-located EXE staging falls through to nofollow ancestor checks.
+    crate::updater::paths::remove_prepared_download_path(path);
 }
 
 /// Download install asset + SHA256SUMS for a previously discovered update id.
@@ -183,13 +192,13 @@ async fn run_download(
     .await?;
 
     // Clean leftover partials for this download id.
-    let _ = fs::remove_file(&part_path).await;
+    crate::updater::paths::remove_prepared_download_path(&part_path);
 
     // Guard: any early return after staging starts should remove the .part file.
     struct PartGuard(PathBuf);
     impl Drop for PartGuard {
         fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
+            crate::updater::paths::remove_prepared_download_path(&self.0);
         }
     }
     let part_guard = PartGuard(part_path.clone());
@@ -283,12 +292,59 @@ async fn run_download(
     emit_progress(app, download_id, written, Some(written), "verifying");
 
     // Ready path is unique per full download_id; refuse unexpected collisions.
+    // Re-validate parent immediately before rename (TOCTOU after long download).
+    revalidate_staging_parent_for_write(&ready_path)?;
     if ready_path.exists() {
         return Err(format!(
             "Prepared update path already exists for id {}; refusing to overwrite",
             download_id
         ));
     }
+
+    // Prefer trusted rename when both paths are updates leaves.
+    if let (Some(part_parent), Some(ready_parent)) = (part_path.parent(), ready_path.parent()) {
+        if part_parent.file_name().and_then(|n| n.to_str()) == Some("updates")
+            && ready_parent.file_name().and_then(|n| n.to_str()) == Some("updates")
+        {
+            if let (Some(app_data), Some(part_name), Some(ready_name)) = (
+                part_parent.parent(),
+                part_path.file_name().and_then(|n| n.to_str()),
+                ready_path.file_name().and_then(|n| n.to_str()),
+            ) {
+                crate::updater::paths::rename_trusted_updates_relative(
+                    app_data,
+                    Path::new(part_name),
+                    Path::new(ready_name),
+                )
+                .map_err(|e| format!("Failed to finalize download file: {e}"))?;
+                std::mem::forget(part_guard);
+                fsync_path(&ready_path).await;
+                fsync_path(&staging_dir).await;
+                let prepared = PreparedUpdate {
+                    id: download_id.to_string(),
+                    version: update.version.clone(),
+                    tag_name: update.tag_name.clone(),
+                    asset_name: update.install_asset.name.clone(),
+                    size: written,
+                    sha256: expected_sha,
+                    current_version: update.current_version.clone(),
+                };
+                {
+                    let mut map = runtime().prepared.lock().await;
+                    map.insert(
+                        prepared.id.clone(),
+                        PreparedEntry {
+                            path: ready_path,
+                            prepared: prepared.clone(),
+                        },
+                    );
+                }
+                emit_progress(app, download_id, written, Some(written), "ready");
+                return Ok(prepared);
+            }
+        }
+    }
+
     fs::rename(&part_path, &ready_path)
         .await
         .map_err(|e| format!("Failed to finalize download file: {}", e))?;
@@ -432,10 +488,7 @@ async fn staging_paths(
             .app_data_dir()
             .map_err(|e| format!("app_data_dir: {}", e))?;
         let app_data = crate::app_paths::resolve_app_data_dir_from_default(&default_dir);
-        let staging = app_data.join("updates");
-        fs::create_dir_all(&staging)
-            .await
-            .map_err(|e| format!("Failed to create update staging dir: {}", e))?;
+        let staging = crate::updater::paths::ensure_trusted_updates_dir(&app_data)?;
         let ready = staging.join(&ready_name);
         let part = staging.join(&part_name);
         let _ = version;
@@ -570,9 +623,10 @@ async fn stream_download_to_file(
         None
     });
 
-    let mut file = fs::File::create(part_path)
-        .await
-        .map_err(|e| format!("Failed to create staging file: {}", e))?;
+    // Re-validate staging parent immediately before create so a post-check
+    // updates/ → external symlink swap cannot redirect the download write.
+    revalidate_staging_parent_for_write(part_path)?;
+    let mut file = create_staging_part_file(part_path).await?;
 
     let mut hasher = Sha256::new();
     let mut received: u64 = 0;
@@ -616,6 +670,57 @@ async fn stream_download_to_file(
 
     let digest = hasher.finalize();
     Ok((received, hex_encode(&digest)))
+}
+
+/// When `part_path` lives under `…/updates/<leaf>`, require a currently trusted
+/// updates root and refuse intermediate symlink ancestors. Windows co-located
+/// EXE staging only checks intermediate ancestors (no app-data root).
+fn revalidate_staging_parent_for_write(part_path: &Path) -> Result<(), String> {
+    if let Some(parent) = part_path.parent() {
+        if parent.file_name().and_then(|n| n.to_str()) == Some("updates") {
+            if let Some(app_data) = parent.parent() {
+                crate::updater::paths::ensure_trusted_updates_dir(app_data)?;
+                if crate::updater::paths::path_entry_is_symlink(parent) {
+                    return Err("Updates directory is a symlink; refusing download write".into());
+                }
+            }
+        }
+        // Shared: refuse any near-ancestor directory symlink (covers Windows
+        // co-located paths and nested escapes).
+        if crate::updater::paths::path_entry_is_symlink(parent) {
+            return Err("Staging parent is a symlink; refusing download write".into());
+        }
+    }
+    // Leaf must not already be a symlink (would be truncated/followed).
+    if crate::updater::paths::path_entry_is_symlink(part_path) {
+        return Err("Staging path is a symlink; refusing download write".into());
+    }
+    Ok(())
+}
+
+async fn create_staging_part_file(part_path: &Path) -> Result<tokio::fs::File, String> {
+    // Prefer openat-backed create when under app-data/updates.
+    if let Some(parent) = part_path.parent() {
+        if parent.file_name().and_then(|n| n.to_str()) == Some("updates") {
+            if let (Some(app_data), Some(name)) = (parent.parent(), part_path.file_name()) {
+                let relative = Path::new(name);
+                // Blocking openat in spawn_blocking keeps the async runtime free.
+                let app_data = app_data.to_path_buf();
+                let relative = relative.to_path_buf();
+                let std_file = tokio::task::spawn_blocking(move || {
+                    crate::updater::paths::create_trusted_updates_file(&app_data, &relative)
+                })
+                .await
+                .map_err(|e| format!("create staging join: {e}"))??;
+                return Ok(tokio::fs::File::from_std(std_file));
+            }
+        }
+    }
+    // Windows co-located EXE staging (or fallback): revalidate then create.
+    revalidate_staging_parent_for_write(part_path)?;
+    fs::File::create(part_path)
+        .await
+        .map_err(|e| format!("Failed to create staging file: {}", e))
 }
 
 fn validate_download_url(url: &str) -> Result<reqwest::Url, String> {

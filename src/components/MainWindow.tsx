@@ -80,6 +80,9 @@ import {
   cancelSafeRestart,
   getPendingRestartSession,
   prepareSafeRestart,
+  installPreparedUpdate,
+  getLastInstallFailure,
+  ackUpdateInstall,
 } from "../utils/restartUpdate"
 import {
   isEditorTab,
@@ -406,22 +409,21 @@ export const MainWindow: React.FC = () => {
     }
 
     const snapshot = buildRestartSnapshot()
+    const preparedId = useUpdateStore.getState().prepared?.id
+    if (!preparedId) {
+      showToast(t.updateErrorIncomplete, "error")
+      return
+    }
     try {
-      await prepareSafeRestart({
+      const { token } = await prepareSafeRestart({
         snapshot,
         blockers,
       })
-      // Phase 3: snapshot + draining complete. Install helper / process exit is Phase 4.
-      // Keep restarting status briefly so UI shows ready-for-install; do not exit.
-      // Never surface restore tokens (one-time capability).
-      showToast(
-        "Safe restart prepared. Install will complete in a later update.",
-        "info",
-        6000,
-      )
-      // Return to ready so user can retry after install lands.
-      useUpdateStore.getState().setStatus("ready")
-      await cancelSafeRestart()
+      // Install helper waits on our PID; only exit after helper_started.
+      // Never surface restore tokens in UI/logs.
+      useUpdateStore.getState().setStatus("restarting")
+      await installPreparedUpdate(preparedId, token)
+      // Process will exit via backend schedule; keep restarting UI until then.
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (message === "RESTART_CANCELLED") {
@@ -464,6 +466,29 @@ export const MainWindow: React.FC = () => {
       }
     }
   }, [handleRequestSafeRestart])
+
+  // Surface one-shot install failure from platform helper (if previous restart failed).
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const msg = await getLastInstallFailure()
+        if (!cancelled && msg) {
+          showToast(
+            t.updateInstallFailed.replace("{details}", msg),
+            "error",
+            10000,
+          )
+          useUpdateStore.getState().setError(msg, "unknown")
+        }
+      } catch {
+        // ignore
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [showToast, t])
 
   // Restore tabs after update install (CLI --restore-update-session).
   // Full success → ack & delete snapshot. Partial failure keeps snapshot and
@@ -732,6 +757,14 @@ export const MainWindow: React.FC = () => {
 
         if (fullyRestored || permanentOnly) {
           try {
+            // Install cleanup needs the pending restore token still set; ack session after.
+            try {
+              await ackUpdateInstall(
+                useUpdateStore.getState().prepared?.id ?? null,
+              )
+            } catch {
+              // best-effort cleanup of backup/staging
+            }
             await ackRestartSession(pending.token)
             if (failures.length > 0) {
               showToast(
@@ -743,7 +776,13 @@ export const MainWindow: React.FC = () => {
                 8000,
               )
             } else {
-              showToast(t.updateRestoreSuccess, "success")
+              const ver = snap.targetVersion
+              showToast(
+                ver
+                  ? t.updateInstallSuccess.replace("{version}", ver)
+                  : t.updateRestoreSuccess,
+                "success",
+              )
             }
           } catch {
             sessionRestoreAttemptedRef.current = false

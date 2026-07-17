@@ -4,6 +4,8 @@ mod assets;
 mod check;
 mod download;
 mod github;
+mod install;
+mod paths;
 mod restart_barrier;
 mod restart_session;
 mod types;
@@ -15,8 +17,13 @@ pub use assets::{
 };
 pub use check::{check_for_update, get_discovered_update, CheckForUpdateOptions};
 pub use download::{
-    cancel_update_download, download_update, get_prepared_update, parse_github_sha256_digest,
-    parse_sha256sums_for_file, MAX_INSTALL_ASSET_BYTES,
+    cancel_update_download, download_update, forget_prepared_update, get_prepared_update,
+    parse_github_sha256_digest, parse_sha256sums_for_file, MAX_INSTALL_ASSET_BYTES,
+};
+pub use install::{
+    ack_update_install, clear_last_install_failure, install_prepared_update, load_last_install_failure,
+    platform_supports_install, schedule_exit_after_helper_started, write_install_alive_marker,
+    InstallPreparedUpdateRequest, InstallPreparedUpdateResponse,
 };
 pub use restart_barrier::{
     CategoryCount, CoordinatorMode, OperationCategory, OperationCoordinator, OperationPermit,

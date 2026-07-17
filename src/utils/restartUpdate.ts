@@ -57,6 +57,39 @@ export async function verifyReadyForRestart(
   return invoke("verify_ready_for_restart_cmd", { snapshotToken })
 }
 
+export type InstallPreparedUpdateResponse = {
+  helperStarted: boolean
+  targetVersion: string
+  message: string
+}
+
+/** Spawn platform install helper + schedule process exit. */
+export async function installPreparedUpdate(
+  preparedId: string,
+  snapshotToken: string,
+): Promise<InstallPreparedUpdateResponse> {
+  return invoke<InstallPreparedUpdateResponse>("install_prepared_update_cmd", {
+    preparedId,
+    snapshotToken,
+  })
+}
+
+export async function getLastInstallFailure(): Promise<string | null> {
+  return invoke<string | null>("get_last_install_failure_cmd")
+}
+
+export async function ackUpdateInstall(
+  preparedId?: string | null,
+): Promise<void> {
+  return invoke("ack_update_install_cmd", {
+    preparedId: preparedId ?? null,
+  })
+}
+
+export async function platformSupportsInstall(): Promise<boolean> {
+  return invoke<boolean>("platform_supports_install_cmd")
+}
+
 type WaitGate = {
   resolve: () => void
   reject: (err: Error) => void
@@ -103,9 +136,7 @@ export function continueRestartWait(): void {
 /**
  * Prepare safe restart: frontend blockers must already be clear.
  * Enters draining, waits for backend operations, saves snapshot, final verify.
- *
- * Phase 3 does **not** spawn install helpers or exit the process — that is Phase 4.
- * This returns the token once the app is ready for install+exit.
+ * Returns the token once the app is ready for install+exit (Phase 4 helper).
  *
  * On soft wait timeout the barrier stays draining. Call `continueRestartWait()`
  * to resume the same prepare flow, or `cancelSafeRestart()` to abort.

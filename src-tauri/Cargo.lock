@@ -4521,6 +4521,7 @@ dependencies = [
  "genai",
  "image 0.24.9",
  "lazy_static",
+ "libc",
  "notify",
  "open",
  "reqwest",

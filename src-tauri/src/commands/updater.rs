@@ -2,9 +2,12 @@
 
 use crate::commands::AppState;
 use crate::updater::{
-    ack_restart_session, cancel_update_download, check_for_update, download_update,
-    get_pending_restart_session, write_snapshot, CheckForUpdateOptions, CheckUpdateResult,
-    OperationSnapshot, PendingRestartSession, PreparedUpdate, RestartSessionSnapshot,
+    ack_restart_session, ack_update_install, cancel_update_download, check_for_update,
+    download_update, get_pending_restart_session, install_prepared_update,
+    load_last_install_failure, schedule_exit_after_helper_started, write_snapshot,
+    CheckForUpdateOptions, CheckUpdateResult, InstallPreparedUpdateRequest,
+    InstallPreparedUpdateResponse, OperationSnapshot, PendingRestartSession, PreparedUpdate,
+    RestartSessionSnapshot,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -194,4 +197,60 @@ pub async fn verify_ready_for_restart_cmd(
     // target_version == current yet).
     let _ = crate::updater::load_snapshot_with_options(&app_data_dir, &snapshot_token, false)?;
     Ok(())
+}
+
+/// Install a previously prepared (downloaded + verified) update.
+///
+/// Spawns the platform helper and schedules process exit. Only succeeds when
+/// draining is active, operations are idle, and the snapshot token is valid.
+#[tauri::command]
+pub async fn install_prepared_update_cmd(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    prepared_id: String,
+    snapshot_token: String,
+) -> Result<InstallPreparedUpdateResponse, String> {
+    if !state.operation_coordinator.is_idle().await {
+        return Err("Operations are still in progress".to_string());
+    }
+    if !state.operation_coordinator.is_draining() {
+        return Err("Restart draining is not active".to_string());
+    }
+    let app_data_dir = resolve_app_data_dir(&app)?;
+    let _ = crate::updater::load_snapshot_with_options(&app_data_dir, &snapshot_token, false)?;
+
+    let response = install_prepared_update(
+        &app,
+        InstallPreparedUpdateRequest {
+            prepared_id,
+            snapshot_token,
+        },
+    )
+    .await?;
+
+    // Helper is running and waiting on our PID — exit only after successful spawn.
+    schedule_exit_after_helper_started(app.clone());
+    Ok(response)
+}
+
+/// Load (and clear) a one-shot install failure left by the platform helper.
+#[tauri::command]
+pub async fn get_last_install_failure_cmd(app: AppHandle) -> Result<Option<String>, String> {
+    let app_data_dir = resolve_app_data_dir(&app)?;
+    Ok(load_last_install_failure(&app_data_dir))
+}
+
+/// After successful restore on the new version: cleanup backup/staged artifacts.
+#[tauri::command]
+pub async fn ack_update_install_cmd(
+    app: AppHandle,
+    prepared_id: Option<String>,
+) -> Result<(), String> {
+    ack_update_install(&app, prepared_id).await
+}
+
+/// Whether this build supports automatic in-place install.
+#[tauri::command]
+pub async fn platform_supports_install_cmd() -> Result<bool, String> {
+    Ok(crate::updater::platform_supports_install())
 }

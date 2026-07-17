@@ -175,6 +175,11 @@ async fn main() {
             {
                 let args: Vec<String> = std::env::args().collect();
                 let token = resh::updater::capture_restore_token_from_args(args.iter().map(|s| s.as_str()));
+                if let Some(ref t) = token {
+                    // Signal the install helper ASAP that the new binary is alive
+                    // with a valid restore token (before full UI restore completes).
+                    resh::updater::write_install_alive_marker(&app_data_dir, t);
+                }
                 resh::updater::set_pending_restore_token(token);
                 resh::updater::cleanup_stale_snapshots(&app_data_dir);
             }
@@ -338,6 +343,10 @@ async fn main() {
             commands::updater::get_pending_restart_session_cmd,
             commands::updater::ack_restart_session_cmd,
             commands::updater::verify_ready_for_restart_cmd,
+            commands::updater::install_prepared_update_cmd,
+            commands::updater::get_last_install_failure_cmd,
+            commands::updater::ack_update_install_cmd,
+            commands::updater::platform_supports_install_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
