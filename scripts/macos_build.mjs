@@ -53,6 +53,17 @@ function removeTempRwDmgs(directory) {
   );
 }
 
+function removeFinalDmgs(directory) {
+  // Stale final DMGs can remain when Cargo caches src-tauri/target across CI runs.
+  // Clear them before build so packaging/upload cannot pick an older version.
+  return removeMatching(
+    directory,
+    (name, _path, stats) =>
+      stats.isFile() && name.endsWith('.dmg') && !/^rw\.\d+\..+\.dmg$/.test(name),
+    'stale final DMG',
+  );
+}
+
 function hasArg(argv, name) {
   return argv.includes(name);
 }
@@ -80,6 +91,27 @@ function bundleRoots(target) {
     roots.push(join('src-tauri', 'target', target, 'release', 'bundle'));
   }
   return roots;
+}
+
+function cleanupBeforeDmgBuild(target) {
+  let removedFinals = 0;
+  let removedTemps = 0;
+
+  for (const root of bundleRoots(target)) {
+    const macosDir = join(root, 'macos');
+    const dmgDir = join(root, 'dmg');
+    // Prefer cleaning dmg output dirs; also scrub macos/ for residual RW images.
+    removedFinals += removeFinalDmgs(dmgDir);
+    removedTemps += removeTempRwDmgs(macosDir);
+    removedTemps += removeTempRwDmgs(dmgDir);
+  }
+
+  if (removedFinals > 0) {
+    console.log(`Cleaned ${removedFinals} stale final DMG file(s) before build.`);
+  }
+  if (removedTemps > 0) {
+    console.log(`Cleaned ${removedTemps} temporary RW DMG file(s) before build.`);
+  }
 }
 
 function cleanupAfterDmgBuild(target) {
@@ -110,6 +142,7 @@ try {
   }
   extraArgs.unshift('--bundles', 'dmg');
 
+  cleanupBeforeDmgBuild(parseTarget(extraArgs));
   run('tauri', ['build', ...extraArgs]);
   cleanupAfterDmgBuild(parseTarget(extraArgs));
 } catch (error) {

@@ -1,0 +1,410 @@
+name: Release
+
+# Cross-platform GitHub Release for v* tags.
+# Assets (unsigned macOS DMGs; portable Windows EXE):
+#   Resh-<tag>-windows-x86_64.exe
+#   Resh-<tag>-macos-aarch64.dmg
+#   Resh-<tag>-macos-x86_64.dmg
+#   SHA256SUMS.txt
+# Apple signing/notarization is intentionally not used here.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Least privilege by default; only the publish job elevates to write.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-version:
+    name: Check release version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+
+      - name: Verify tag matches project versions
+        run: npm run check:release-version
+
+      - name: Verify GitHub Actions pinning
+        run: npm run ci:pin-actions
+
+  build-windows:
+    name: Build Windows x86_64
+    needs: check-version
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Cache Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-${{ runner.arch }}-release-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-release-cargo-
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Windows portable binary
+        run: npm run tauri-build
+
+      - name: Stage release EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            throw 'GITHUB_REF_NAME is empty; expected a v* tag ref name.'
+          }
+
+          $candidates = @(
+            'src-tauri/target/release/Resh.exe',
+            'src-tauri/target/release/resh.exe'
+          )
+          $source = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if (-not $source) {
+            throw "Missing Windows EXE. Expected one of: $($candidates -join ', ')"
+          }
+
+          $outDir = 'release-staging'
+          $outName = "Resh-$tag-windows-x86_64.exe"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          $dest = Join-Path $outDir $outName
+          Copy-Item -LiteralPath $source -Destination $dest -Force
+          Write-Host "Staged $dest from $source"
+          Get-Item -LiteralPath $dest | Format-List FullName, Length
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-windows-x86_64
+          path: release-staging/Resh-${{ github.ref_name }}-windows-x86_64.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  build-macos:
+    name: Build macOS ${{ matrix.arch }}
+    needs: check-version
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            arch: aarch64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x86_64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Cache Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-release-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-release-cargo-
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # CI=true → Tauri bundler skips Finder AppleScript DMG layout (no automation grant on runners).
+      # build:macos → scripts/macos_build.mjs forces DMG-only, deletes .app, cleans rw.*.dmg.
+      # No APPLE_* secrets, codesign, notarization, spctl, or stapler.
+      - name: Build unsigned macOS DMG
+        env:
+          CI: 'true'
+        run: npm run build:macos -- --target ${{ matrix.target }}
+
+      - name: Stage release DMG
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME:?GITHUB_REF_NAME is empty}"
+          out_dir="release-staging"
+          out_name="Resh-${tag}-macos-${ARCH}.dmg"
+          mkdir -p "$out_dir"
+          dest="${out_dir}/${out_name}"
+
+          # Prefer the explicit --target output path; fall back to host-default only if empty.
+          # Require exactly one final (non-rw.*) DMG so Cargo-cache leftovers cannot be staged.
+          # Compatible with macOS runner bash 3.2 (no mapfile).
+          list_final_dmgs() {
+            local dir="$1"
+            if [ ! -d "$dir" ]; then
+              return 0
+            fi
+            local path base
+            for path in "$dir"/*.dmg; do
+              [ -e "$path" ] || continue
+              base="$(basename "$path")"
+              case "$base" in
+                rw.*) continue ;;
+              esac
+              if [ -f "$path" ]; then
+                printf '%s\n' "$path"
+              fi
+            done
+          }
+
+          primary_dir="src-tauri/target/${TARGET}/release/bundle/dmg"
+          fallback_dir="src-tauri/target/release/bundle/dmg"
+
+          primary_list="$(list_final_dmgs "$primary_dir" || true)"
+          fallback_list="$(list_final_dmgs "$fallback_dir" || true)"
+
+          if [ -n "$primary_list" ]; then
+            candidate_list="$primary_list"
+            search_label="$primary_dir"
+          else
+            candidate_list="$fallback_list"
+            search_label="$fallback_dir (fallback)"
+          fi
+
+          if [ -z "${candidate_list:-}" ]; then
+            echo "Missing macOS DMG for target=${TARGET}." >&2
+            echo "Searched: ${primary_dir} then ${fallback_dir}" >&2
+            ls -la "$primary_dir" 2>/dev/null || true
+            ls -la "$fallback_dir" 2>/dev/null || true
+            exit 1
+          fi
+
+          candidate_count="$(printf '%s\n' "$candidate_list" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [ "$candidate_count" != "1" ]; then
+            echo "Expected exactly one final DMG under ${search_label}, found ${candidate_count}:" >&2
+            printf '%s\n' "$candidate_list" >&2
+            exit 1
+          fi
+
+          source="$(printf '%s\n' "$candidate_list" | sed '/^$/d' | head -n 1)"
+          cp "$source" "$dest"
+          echo "Staged ${dest} from ${source}"
+          ls -lh "$dest"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: release-staging/Resh-${{ github.ref_name }}-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs:
+      - build-windows
+      - build-macos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify assets, checksums, and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME:?GITHUB_REF_NAME is empty}"
+          cd release-assets
+
+          windows_exe="Resh-${tag}-windows-x86_64.exe"
+          macos_arm="Resh-${tag}-macos-aarch64.dmg"
+          macos_intel="Resh-${tag}-macos-x86_64.dmg"
+          expected=(
+            "$windows_exe"
+            "$macos_arm"
+            "$macos_intel"
+          )
+
+          echo "Downloaded files:"
+          ls -la
+
+          missing=0
+          for name in "${expected[@]}"; do
+            if [[ ! -f "$name" ]]; then
+              echo "Missing required asset: $name" >&2
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+          # Exactly the three install assets before checksum generation.
+          mapfile -t actual < <(find . -maxdepth 1 -type f ! -name '.*' -printf '%f\n' | sort)
+          mapfile -t expected_sorted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [[ "${#actual[@]}" -ne "${#expected_sorted[@]}" ]]; then
+            echo "Unexpected file count in artifact set (want ${#expected_sorted[@]}, got ${#actual[@]}):" >&2
+            printf '  %s\n' "${actual[@]}" >&2
+            exit 1
+          fi
+          for i in "${!expected_sorted[@]}"; do
+            if [[ "${actual[$i]}" != "${expected_sorted[$i]}" ]]; then
+              echo "Asset set mismatch:" >&2
+              echo "  expected: ${expected_sorted[*]}" >&2
+              echo "  actual:   ${actual[*]}" >&2
+              exit 1
+            fi
+          done
+
+          # Stable checksum list: GNU sha256sum format, filenames lexicographic.
+          # (Stable interface for future in-app updater.)
+          : > SHA256SUMS.txt
+          while IFS= read -r name; do
+            sha256sum "$name" >> SHA256SUMS.txt
+          done < <(printf '%s\n' "${expected[@]}" | sort)
+
+          echo "SHA256SUMS.txt:"
+          cat SHA256SUMS.txt
+
+          final_assets=(
+            "$windows_exe"
+            "$macos_arm"
+            "$macos_intel"
+            "SHA256SUMS.txt"
+          )
+
+          # Prerelease when semver body has a pre-release segment (e.g. v1.2.0-beta.1).
+          # Build metadata alone (v1.2.0+build) is treated as a stable release.
+          version_body="${tag#v}"
+          prerelease=false
+          if [[ "$version_body" =~ ^[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            prerelease=true
+          fi
+
+          # Download / Gatekeeper notes prepended to auto-generated changelog on first create.
+          # Re-runs must not rewrite body (keeps first auto-generated notes + download section).
+          download_notes="$(
+            {
+              echo '## Downloads'
+              echo
+              echo '| Asset | Notes |'
+              echo '| --- | --- |'
+              echo "| \`${windows_exe}\` | Portable Windows x64 binary (no installer) |"
+              echo "| \`${macos_arm}\` | **Unsigned / unnotarized** Apple Silicon DMG |"
+              echo "| \`${macos_intel}\` | **Unsigned / unnotarized** Intel DMG |"
+              echo '| `SHA256SUMS.txt` | SHA-256 checksums for all install assets |'
+              echo
+              echo 'macOS builds are **not** Apple-signed or notarized. On first open you may need to bypass Gatekeeper (System Settings → Privacy & Security, or right-click → Open).'
+              echo
+              echo 'Verify downloads:'
+              echo
+              echo '```bash'
+              echo 'sha256sum -c SHA256SUMS.txt'
+              echo '```'
+            }
+          )"
+
+          release_exists=false
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            release_exists=true
+          fi
+
+          if [[ "$release_exists" == true ]]; then
+            echo "Release $tag already exists; drafting for asset replace without rewriting notes."
+            if [[ "$prerelease" == true ]]; then
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --title "$tag"
+            else
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease=false --title "$tag"
+            fi
+
+            # Remove any assets not in the final four-file set (idempotent re-run).
+            while IFS= read -r extra; do
+              [[ -z "$extra" ]] && continue
+              keep=false
+              for name in "${final_assets[@]}"; do
+                if [[ "$extra" == "$name" ]]; then
+                  keep=true
+                  break
+                fi
+              done
+              if [[ "$keep" == false ]]; then
+                echo "Deleting unexpected release asset: $extra"
+                gh release delete-asset "$tag" "$extra" --repo "$GITHUB_REPOSITORY" --yes
+              fi
+            done < <(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          else
+            echo "Creating draft release $tag with generated notes + download section"
+            # --notes prepends to --generate-notes body (gh release create).
+            create_args=(
+              release create "$tag"
+              --repo "$GITHUB_REPOSITORY"
+              --draft
+              --title "$tag"
+              --notes "$download_notes"
+              --generate-notes
+            )
+            if [[ "$prerelease" == true ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh "${create_args[@]}"
+          fi
+
+          # Upload/replace the four final files only (idempotent on re-run).
+          gh release upload "$tag" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            "${final_assets[@]}"
+
+          # Publish only after all assets are in place.
+          if [[ "$prerelease" == true ]]; then
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+          else
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease=false
+          fi
+
+          # Final guard: release must contain exactly the four assets.
+          mapfile -t published < <(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | sort)
+          mapfile -t final_sorted < <(printf '%s\n' "${final_assets[@]}" | sort)
+          if [[ "${#published[@]}" -ne 4 ]] || [[ "${published[*]}" != "${final_sorted[*]}" ]]; then
+            echo "Published asset set mismatch:" >&2
+            echo "  expected: ${final_sorted[*]}" >&2
+            echo "  actual:   ${published[*]:-}" >&2
+            exit 1
+          fi
+
+          echo "Published GitHub Release $tag with assets:"
+          printf '  %s\n' "${final_assets[@]}"
