@@ -158,7 +158,7 @@ export const MARKDOWN_COMPONENTS: Components = {
     return (
       <a
         {...props}
-        className={`underline underline-offset-2 text-[var(--accent-primary)] hover:opacity-85 transition-opacity ${className ?? ""}`}
+        className={`ai-md-link underline underline-offset-2 hover:opacity-85 transition-opacity ${className ?? ""}`}
       >
         {children}
       </a>

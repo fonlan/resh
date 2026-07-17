@@ -274,6 +274,23 @@ body {
   -webkit-user-select: text;
 }
 
+/* Markdown links: accent on assistant bubbles; light on user (accent) bubbles */
+.ai-md-link {
+  color: var(--accent-primary);
+  text-decoration-color: color-mix(in srgb, var(--accent-primary) 70%, transparent);
+}
+
+.ai-user-message-bubble .ai-md-link {
+  color: #fff;
+  text-decoration-color: rgba(255, 255, 255, 0.85);
+}
+
+.ai-user-message-bubble .ai-md-link:hover {
+  color: #fff;
+  opacity: 0.9;
+  text-decoration-color: #fff;
+}
+
 .ai-user-message-bubble::selection,
 .ai-user-message-bubble *::selection {
   background: rgba(255, 255, 255, 0.6);
