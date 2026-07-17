@@ -23,7 +23,10 @@ use super::tool_runtime::{
     execute_command_in_exec_channel, try_reconnect_terminal_after_timeout,
     try_recover_terminal_after_timeout, START_MARKER_EXPECT_MS, TIMEOUT_RECOVERY_GRACE_MS,
 };
-use super::types::{ChatMessage, FunctionCall, ToolCall, ToolDefinition};
+use super::types::{
+    AiErrorEventPayload, AiMessageBatchPayload, AiReasoningEndPayload, AiToolCallEventPayload,
+    ChatMessage, FunctionCall, ToolCall, ToolDefinition,
+};
 use super::{is_read_only_tool, AI_CANCELLED, AI_STREAM_IDLE_TIMEOUT_SECS};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
@@ -35,6 +38,7 @@ pub(super) async fn execute_tools_and_save(
     ssh_session_id: Option<&str>,
     tools: Vec<ToolCall>,
     cancellation_token: CancellationToken,
+    request_id: &str,
 ) -> Result<(), String> {
     for call in tools {
         if cancellation_token.is_cancelled() {
@@ -600,15 +604,18 @@ pub(super) async fn execute_tools_and_save(
 
         let _ = app_handle.emit(
             &format!("ai-message-batch-{}", session_id),
-            vec![ChatMessage {
-                role: "tool".to_string(),
-                content: Some(tool_content),
-                reasoning_content: None,
-                tool_calls: None,
-                tool_call_id: Some(call.id.clone()),
-                created_at: None,
-                model_id: None,
-            }],
+            AiMessageBatchPayload {
+                request_id: request_id.to_string(),
+                messages: vec![ChatMessage {
+                    role: "tool".to_string(),
+                    content: Some(tool_content),
+                    reasoning_content: None,
+                    tool_calls: None,
+                    tool_call_id: Some(call.id.clone()),
+                    created_at: None,
+                    model_id: None,
+                }],
+            },
         );
     }
     Ok(())
@@ -738,7 +745,13 @@ pub fn run_ai_turn(
                     // Do not flush undelivered response/reasoning/tool-call tails on cancel.
                     if has_pending_reasoning {
                         window
-                            .emit(&reasoning_end_event, "end")
+                            .emit(
+                            &reasoning_end_event,
+                            AiReasoningEndPayload {
+                                request_id: request_id.clone(),
+                                status: "end".to_string(),
+                            },
+                        )
                             .map_err(|e| e.to_string())?;
                     }
                     return Err(AI_CANCELLED.to_string());
@@ -755,6 +768,7 @@ pub fn run_ai_turn(
                                 &response_event,
                                 &reasoning_event,
                                 &reasoning_end_event,
+                                &request_id,
                                 &mut think_parser_buffer,
                                 in_think_block,
                                 &mut full_content,
@@ -764,11 +778,17 @@ pub fn run_ai_turn(
                                 &mut has_pending_reasoning,
                                 &mut last_emit_at,
                             )?;
-                            flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                            flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                            flush_response_buffer(&window, &response_event, &request_id, &mut response_emit_buffer)?;
+                            flush_reasoning_buffer(&window, &reasoning_event, &request_id, &mut reasoning_emit_buffer)?;
                             if has_pending_reasoning {
                                 window
-                                    .emit(&reasoning_end_event, "end")
+                                    .emit(
+                            &reasoning_end_event,
+                            AiReasoningEndPayload {
+                                request_id: request_id.clone(),
+                                status: "end".to_string(),
+                            },
+                        )
                                     .map_err(|e| e.to_string())?;
                             }
 
@@ -784,7 +804,13 @@ pub fn run_ai_turn(
                                 accumulated_tool_calls.len()
                             );
                             window
-                                .emit(&error_event, err_msg.clone())
+                                .emit(
+                                &error_event,
+                                AiErrorEventPayload {
+                                    request_id: request_id.clone(),
+                                    error: err_msg.clone(),
+                                },
+                            )
                                 .map_err(|e| e.to_string())?;
                             return Err(err_msg);
                         }
@@ -807,6 +833,7 @@ pub fn run_ai_turn(
                                 append_reasoning_stream_text(
                                     &window,
                                     &reasoning_event,
+                                    &request_id,
                                     &segment,
                                     &mut full_reasoning,
                                     &mut reasoning_emit_buffer,
@@ -819,6 +846,7 @@ pub fn run_ai_turn(
                                     &response_event,
                                     &reasoning_event,
                                     &reasoning_end_event,
+                                    &request_id,
                                     &segment,
                                     &mut full_content,
                                     &mut response_emit_buffer,
@@ -833,6 +861,7 @@ pub fn run_ai_turn(
                         append_reasoning_stream_text(
                             &window,
                             &reasoning_event,
+                            &request_id,
                             &chunk.content,
                             &mut full_reasoning,
                             &mut reasoning_emit_buffer,
@@ -846,6 +875,7 @@ pub fn run_ai_turn(
                             &response_event,
                             &reasoning_event,
                             &reasoning_end_event,
+                            &request_id,
                             &mut think_parser_buffer,
                             in_think_block,
                             &mut full_content,
@@ -855,10 +885,11 @@ pub fn run_ai_turn(
                             &mut has_pending_reasoning,
                             &mut last_emit_at,
                         )?;
-                        flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
+                        flush_response_buffer(&window, &response_event, &request_id, &mut response_emit_buffer)?;
                         flush_reasoning_buffer(
                             &window,
                             &reasoning_event,
+                            &request_id,
                             &mut reasoning_emit_buffer,
                         )?;
                         last_emit_at = Instant::now();
@@ -927,6 +958,7 @@ pub fn run_ai_turn(
                             &response_event,
                             &reasoning_event,
                             &reasoning_end_event,
+                            &request_id,
                             &mut think_parser_buffer,
                             in_think_block,
                             &mut full_content,
@@ -938,7 +970,13 @@ pub fn run_ai_turn(
                         )?;
                         if has_pending_reasoning {
                             window
-                                .emit(&format!("ai-reasoning-end-{}", session_id), "end")
+                                .emit(
+                                &format!("ai-reasoning-end-{}", session_id),
+                                AiReasoningEndPayload {
+                                    request_id: request_id.clone(),
+                                    status: "end".to_string(),
+                                },
+                            )
                                 .map_err(|e| e.to_string())?;
                             has_pending_reasoning = false;
                         }
@@ -1035,6 +1073,7 @@ pub fn run_ai_turn(
                         &response_event,
                         &reasoning_event,
                         &reasoning_end_event,
+                        &request_id,
                         &mut think_parser_buffer,
                         in_think_block,
                         &mut full_content,
@@ -1044,16 +1083,28 @@ pub fn run_ai_turn(
                         &mut has_pending_reasoning,
                         &mut last_emit_at,
                     )?;
-                    flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                    flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                    flush_response_buffer(&window, &response_event, &request_id, &mut response_emit_buffer)?;
+                    flush_reasoning_buffer(&window, &reasoning_event, &request_id, &mut reasoning_emit_buffer)?;
 
                     if has_pending_reasoning {
-                        window.emit(&reasoning_end_event, "end").ok();
+                        window.emit(
+                            &reasoning_end_event,
+                            AiReasoningEndPayload {
+                                request_id: request_id.clone(),
+                                status: "end".to_string(),
+                            },
+                        ).ok();
                     }
 
                     let err_msg = e.to_string();
                     window
-                        .emit(&error_event, err_msg.clone())
+                        .emit(
+                        &error_event,
+                        AiErrorEventPayload {
+                            request_id: request_id.clone(),
+                            error: err_msg.clone(),
+                        },
+                    )
                         .map_err(|e| e.to_string())?;
                     return Err(err_msg);
                 }
@@ -1065,6 +1116,7 @@ pub fn run_ai_turn(
             &response_event,
             &reasoning_event,
             &reasoning_end_event,
+            &request_id,
             &mut think_parser_buffer,
             in_think_block,
             &mut full_content,
@@ -1074,11 +1126,17 @@ pub fn run_ai_turn(
             &mut has_pending_reasoning,
             &mut last_emit_at,
         )?;
-        flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-        flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+        flush_response_buffer(&window, &response_event, &request_id, &mut response_emit_buffer)?;
+        flush_reasoning_buffer(&window, &reasoning_event, &request_id, &mut reasoning_emit_buffer)?;
 
         if has_pending_reasoning {
-            window.emit(&reasoning_end_event, "end").ok();
+            window.emit(
+                            &reasoning_end_event,
+                            AiReasoningEndPayload {
+                                request_id: request_id.clone(),
+                                status: "end".to_string(),
+                            },
+                        ).ok();
         }
 
         let ai_msg_id = Uuid::new_v4().to_string();
@@ -1136,6 +1194,7 @@ pub fn run_ai_turn(
                         ssh_session_id.as_deref(),
                         auto_exec_calls,
                         cancellation_token.clone(),
+                        &request_id,
                     )
                     .await?;
                 }
@@ -1149,7 +1208,10 @@ pub fn run_ai_turn(
                         window
                             .emit(
                                 &format!("ai-tool-call-{}", session_id),
-                                confirm_calls.clone(),
+                                AiToolCallEventPayload {
+                                    request_id: request_id.clone(),
+                                    tool_calls: confirm_calls.clone(),
+                                },
                             )
                             .map_err(|e| e.to_string())?;
                         return Ok(Some(confirm_calls));

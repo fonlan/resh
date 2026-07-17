@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import { ChatMessage, AISession, ToolCall } from "../types/ai"
+import { ChatMessage, AISession, ToolCall, AiRequestId } from "../types/ai"
 import { aiService } from "../services/aiService"
 
 interface AIState {
@@ -10,6 +10,8 @@ interface AIState {
   messages: Record<string, ChatMessage[]>
   isLoading: boolean
   isGenerating: Record<string, boolean>
+  /** Current AI run id per session; used to ignore late events from older runs. */
+  activeRequestId: Record<string, AiRequestId | null>
   pendingToolCalls: Record<string, ToolCall[] | null>
   stoppedSessions: Set<string> // Track sessions that were manually stopped
 
@@ -35,6 +37,26 @@ interface AIState {
   setPendingToolCalls: (sessionId: string, toolCalls: ToolCall[] | null) => void
   markSessionStopped: (sessionId: string) => void
   clearSessionStopped: (sessionId: string) => void
+  /** Begin a request-scoped run: sets activeRequestId + generating, clears stopped. */
+  startRun: (sessionId: string, requestId: AiRequestId) => void
+  /**
+   * End a matching run: clear generating + activeRequestId.
+   * Returns false if requestId is not the session's active run.
+   */
+  finishRun: (sessionId: string, requestId: AiRequestId) => boolean
+  /**
+   * Local cancel: mark stopped, clear pending tools / generating / activeRequestId
+   * when requestId matches (or when requestId is omitted and any run is active).
+   */
+  cancelRunLocally: (
+    sessionId: string,
+    requestId?: AiRequestId | null,
+  ) => boolean
+  /** True when event requestId matches the session's active run. */
+  isActiveRequest: (
+    sessionId: string,
+    requestId: string | null | undefined,
+  ) => boolean
   deleteSession: (serverId: string, sessionId: string) => Promise<void>
   clearSessions: (serverId: string) => Promise<void>
   addCompleteMessage: (sessionId: string, message: ChatMessage) => void
@@ -49,6 +71,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   messages: {},
   isLoading: false,
   isGenerating: {},
+  activeRequestId: {},
   pendingToolCalls: {},
   stoppedSessions: new Set<string>(),
 
@@ -77,6 +100,62 @@ export const useAIStore = create<AIState>((set, get) => ({
       newStoppedSessions.delete(sessionId)
       return { stoppedSessions: newStoppedSessions }
     }),
+
+  startRun: (sessionId, requestId) =>
+    set((state) => {
+      const stoppedSessions = new Set(state.stoppedSessions)
+      stoppedSessions.delete(sessionId)
+      return {
+        activeRequestId: {
+          ...state.activeRequestId,
+          [sessionId]: requestId,
+        },
+        isGenerating: { ...state.isGenerating, [sessionId]: true },
+        stoppedSessions,
+      }
+    }),
+
+  finishRun: (sessionId, requestId) => {
+    const current = get().activeRequestId[sessionId]
+    if (current !== requestId) {
+      return false
+    }
+    set((state) => ({
+      activeRequestId: { ...state.activeRequestId, [sessionId]: null },
+      isGenerating: { ...state.isGenerating, [sessionId]: false },
+    }))
+    return true
+  },
+
+  cancelRunLocally: (sessionId, requestId) => {
+    const current = get().activeRequestId[sessionId]
+    if (
+      requestId != null &&
+      requestId !== "" &&
+      current != null &&
+      current !== requestId
+    ) {
+      return false
+    }
+    set((state) => {
+      const stoppedSessions = new Set(state.stoppedSessions)
+      stoppedSessions.add(sessionId)
+      return {
+        activeRequestId: { ...state.activeRequestId, [sessionId]: null },
+        isGenerating: { ...state.isGenerating, [sessionId]: false },
+        pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: null },
+        stoppedSessions,
+      }
+    })
+    return true
+  },
+
+  isActiveRequest: (sessionId, requestId) => {
+    if (requestId == null || requestId === "") {
+      return false
+    }
+    return get().activeRequestId[sessionId] === requestId
+  },
 
   loadSessions: async (serverId) => {
     set({ isLoading: true })
@@ -317,11 +396,13 @@ export const useAIStore = create<AIState>((set, get) => ({
     // Clean up session-specific state
     set((s) => {
       const isGenerating = { ...s.isGenerating }
+      const activeRequestId = { ...s.activeRequestId }
       const pendingToolCalls = { ...s.pendingToolCalls }
       const messages = { ...s.messages }
       const activeSessionIdBySshSession = { ...s.activeSessionIdBySshSession }
       const stoppedSessions = new Set(s.stoppedSessions)
       delete isGenerating[sessionId]
+      delete activeRequestId[sessionId]
       delete pendingToolCalls[sessionId]
       delete messages[sessionId]
       Object.keys(activeSessionIdBySshSession).forEach((sshSessionId) => {
@@ -332,6 +413,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       stoppedSessions.delete(sessionId)
       return {
         isGenerating,
+        activeRequestId,
         pendingToolCalls,
         messages,
         activeSessionIdBySshSession,
@@ -365,6 +447,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         [serverId]: null,
       },
       isGenerating: {},
+      activeRequestId: {},
       pendingToolCalls: {},
       messages: {},
       stoppedSessions: new Set<string>(),

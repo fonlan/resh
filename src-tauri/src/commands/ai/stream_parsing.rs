@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Window};
 
-use super::types::{FunctionCall, ToolCall};
+use super::types::{
+    AiReasoningEndPayload, AiStreamTextPayload, FunctionCall, ToolCall,
+};
 
 pub(super) const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 pub(super) const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;
@@ -252,6 +254,7 @@ pub(super) fn append_response_stream_text(
     response_event: &str,
     reasoning_event: &str,
     reasoning_end_event: &str,
+    request_id: &str,
     text: &str,
     full_content: &mut String,
     response_emit_buffer: &mut String,
@@ -264,9 +267,15 @@ pub(super) fn append_response_stream_text(
     }
 
     if *has_pending_reasoning {
-        flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
+        flush_reasoning_buffer(window, reasoning_event, request_id, reasoning_emit_buffer)?;
         window
-            .emit(reasoning_end_event, "end")
+            .emit(
+                reasoning_end_event,
+                AiReasoningEndPayload {
+                    request_id: request_id.to_string(),
+                    status: "end".to_string(),
+                },
+            )
             .map_err(|e| e.to_string())?;
         *has_pending_reasoning = false;
         *last_emit_at = Instant::now();
@@ -278,7 +287,7 @@ pub(super) fn append_response_stream_text(
     if response_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN
         || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL
     {
-        flush_response_buffer(window, response_event, response_emit_buffer)?;
+        flush_response_buffer(window, response_event, request_id, response_emit_buffer)?;
         *last_emit_at = Instant::now();
     }
 
@@ -288,6 +297,7 @@ pub(super) fn append_response_stream_text(
 pub(super) fn append_reasoning_stream_text(
     window: &Window,
     reasoning_event: &str,
+    request_id: &str,
     text: &str,
     full_reasoning: &mut String,
     reasoning_emit_buffer: &mut String,
@@ -305,7 +315,7 @@ pub(super) fn append_reasoning_stream_text(
     if reasoning_emit_buffer.len() >= STREAM_EMIT_MAX_BUFFER_LEN
         || last_emit_at.elapsed() >= STREAM_EMIT_INTERVAL
     {
-        flush_reasoning_buffer(window, reasoning_event, reasoning_emit_buffer)?;
+        flush_reasoning_buffer(window, reasoning_event, request_id, reasoning_emit_buffer)?;
         *last_emit_at = Instant::now();
     }
 
@@ -317,6 +327,7 @@ pub(super) fn flush_think_parser_remainder(
     response_event: &str,
     reasoning_event: &str,
     reasoning_end_event: &str,
+    request_id: &str,
     parser_buffer: &mut String,
     in_think_block: bool,
     full_content: &mut String,
@@ -335,6 +346,7 @@ pub(super) fn flush_think_parser_remainder(
         append_reasoning_stream_text(
             window,
             reasoning_event,
+            request_id,
             &remaining,
             full_reasoning,
             reasoning_emit_buffer,
@@ -347,6 +359,7 @@ pub(super) fn flush_think_parser_remainder(
             response_event,
             reasoning_event,
             reasoning_end_event,
+            request_id,
             &remaining,
             full_content,
             response_emit_buffer,
@@ -360,29 +373,43 @@ pub(super) fn flush_think_parser_remainder(
 pub(super) fn flush_response_buffer(
     window: &Window,
     response_event: &str,
+    request_id: &str,
     buffer: &mut String,
 ) -> Result<(), String> {
     if buffer.is_empty() {
         return Ok(());
     }
 
-    let payload = std::mem::take(buffer);
+    let content = std::mem::take(buffer);
     window
-        .emit(response_event, payload)
+        .emit(
+            response_event,
+            AiStreamTextPayload {
+                request_id: request_id.to_string(),
+                content,
+            },
+        )
         .map_err(|e| e.to_string())
 }
 
 pub(super) fn flush_reasoning_buffer(
     window: &Window,
     reasoning_event: &str,
+    request_id: &str,
     buffer: &mut String,
 ) -> Result<(), String> {
     if buffer.is_empty() {
         return Ok(());
     }
 
-    let payload = std::mem::take(buffer);
+    let content = std::mem::take(buffer);
     window
-        .emit(reasoning_event, payload)
+        .emit(
+            reasoning_event,
+            AiStreamTextPayload {
+                request_id: request_id.to_string(),
+                content,
+            },
+        )
         .map_err(|e| e.to_string())
 }

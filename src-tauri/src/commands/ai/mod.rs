@@ -8,8 +8,8 @@ mod types;
 
 pub use tool_registry::create_tools;
 pub use types::{
-    AccessTokenResponse, ChatMessage, DeviceCodeResponse, FunctionCall, FunctionDefinition,
-    ToolCall, ToolDefinition,
+    AccessTokenResponse, AiErrorEventPayload, ChatMessage, DeviceCodeResponse, FunctionCall,
+    FunctionDefinition, ToolCall, ToolDefinition,
 };
 
 use history::{enrich_user_message_with_tagged_files, load_history};
@@ -129,7 +129,13 @@ fn finish_ai_run(
                 e
             );
             window
-                .emit(&format!("ai-error-{}", session_id), e.clone())
+                .emit(
+                    &format!("ai-error-{}", session_id),
+                    AiErrorEventPayload {
+                        request_id: request_id.to_string(),
+                        error: e.clone(),
+                    },
+                )
                 .ok();
             Err(e)
         }
@@ -1144,6 +1150,7 @@ pub async fn execute_agent_tools(
         bound_ssh_session_id.as_deref(),
         tools_filtered,
         token.clone(),
+        &request_id,
     )
     .await;
 

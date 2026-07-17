@@ -45,6 +45,41 @@ pub struct FunctionDefinition {
     pub parameters: serde_json::Value,
 }
 
+/// Stream text chunk for `ai-response-*` / `ai-reasoning-*` (request-scoped).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiStreamTextPayload {
+    pub request_id: String,
+    pub content: String,
+}
+
+/// Tool confirmation / auto-exec signal for `ai-tool-call-*`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiToolCallEventPayload {
+    pub request_id: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+/// Batch of complete messages for `ai-message-batch-*`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiMessageBatchPayload {
+    pub request_id: String,
+    pub messages: Vec<ChatMessage>,
+}
+
+/// Provider / stream error for `ai-error-*`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiErrorEventPayload {
+    pub request_id: String,
+    pub error: String,
+}
+
+/// Reasoning stream end marker for `ai-reasoning-end-*`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiReasoningEndPayload {
+    pub request_id: String,
+    pub status: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceCodeResponse {
     pub device_code: String,

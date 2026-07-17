@@ -2363,12 +2363,18 @@ impl SftpManager {
 
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
-                vec![serde_json::json!({
-                    "role": "system",
-                    "content": content
-                })],
+                serde_json::json!({
+                    // Out-of-band SFTP completion is not part of an AI run.
+                    // Empty request_id is only accepted by the frontend when
+                    // the session is not generating; in-flight runs ignore it.
+                    "request_id": "",
+                    "messages": [{
+                        "role": "system",
+                        "content": content
+                    }]
+                }),
             );
-            let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+            // SFTP completion is not an AI run terminal; do not emit ai-done.
         }
 
         let mut tasks = TRANSFER_TASKS.lock().await;
@@ -3191,12 +3197,18 @@ impl SftpManager {
 
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
-                vec![serde_json::json!({
-                    "role": "system",
-                    "content": content
-                })],
+                serde_json::json!({
+                    // Out-of-band SFTP completion is not part of an AI run.
+                    // Empty request_id is only accepted by the frontend when
+                    // the session is not generating; in-flight runs ignore it.
+                    "request_id": "",
+                    "messages": [{
+                        "role": "system",
+                        "content": content
+                    }]
+                }),
             );
-            let _ = app.emit(&format!("ai-done-{}", ai_sid), "DONE");
+            // SFTP completion is not an AI run terminal; do not emit ai-done.
         }
 
         let mut tasks = TRANSFER_TASKS.lock().await;

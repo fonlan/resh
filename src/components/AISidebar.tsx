@@ -30,7 +30,14 @@ import {
 } from "lucide-react"
 import { listen } from "@tauri-apps/api/event"
 import { v4 as uuidv4 } from "uuid"
-import { ToolCall, ChatMessage } from "../types/ai"
+import {
+  ToolCall,
+  ChatMessage,
+  AiStreamTextPayload,
+  AiToolCallEventPayload,
+  AiMessageBatchPayload,
+  AiErrorEventPayload,
+} from "../types/ai"
 import { AIThinkingLevel, EditorAIContext } from "../types"
 import { ConfirmationModal } from "./ConfirmationModal"
 import { CustomSelect } from "./CustomSelect"
@@ -158,7 +165,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     (state) => state.setPendingToolCalls,
   )
   const markSessionStopped = useAIStore((state) => state.markSessionStopped)
-  const clearSessionStopped = useAIStore((state) => state.clearSessionStopped)
+  const startRun = useAIStore((state) => state.startRun)
+  const finishRun = useAIStore((state) => state.finishRun)
+  const cancelRunLocally = useAIStore((state) => state.cancelRunLocally)
   const deleteSession = useAIStore((state) => state.deleteSession)
   const clearSessions = useAIStore((state) => state.clearSessions)
   const addCompleteMessage = useAIStore((state) => state.addCompleteMessage)
@@ -208,13 +217,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isAtBottomRef = useRef(true)
+  // Stream chunk buffers are request-scoped so late/auto-exec races cannot
+  // flush run-A text into a newly started run-B assistant message.
+  const streamBufferRequestIdRef = useRef<string | null>(null)
   const responseChunkBufferRef = useRef("")
   const reasoningChunkBufferRef = useRef("")
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastErrorToastRef = useRef<{ message: string; at: number } | null>(null)
   const scrollPositionsRef = useRef<Record<string, number>>({})
-  /** sessionId -> active AI requestId for cancel matching (phase 1; store moves in phase 2). */
-  const activeRequestIdBySessionRef = useRef<Record<string, string>>({})
   const pendingScrollRestoreRef = useRef<{
     key: string
     scrollTop: number
@@ -246,6 +256,33 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     },
     [onShowToast, t],
   )
+  const showAiErrorRef = useRef(showAiError)
+
+  const selectedModelIdRef = useRef(selectedModelId)
+  const sessionsRef = useRef(sessions)
+  const configRef = useRef(config)
+  const currentServerIdRef = useRef(currentServerId)
+  const autoConfirmDelaySecondsRef = useRef(autoConfirmDelaySeconds)
+
+  useEffect(() => {
+    showAiErrorRef.current = showAiError
+  }, [showAiError])
+  useEffect(() => {
+    selectedModelIdRef.current = selectedModelId
+  }, [selectedModelId])
+  useEffect(() => {
+    sessionsRef.current = sessions
+  }, [sessions])
+  useEffect(() => {
+    configRef.current = config
+  }, [config])
+  useEffect(() => {
+    currentServerIdRef.current = currentServerId
+  }, [currentServerId])
+  useEffect(() => {
+    autoConfirmDelaySecondsRef.current = autoConfirmDelaySeconds
+  }, [autoConfirmDelaySeconds])
+
 
   // Load mode & model from config, with fallback to default model
   useEffect(() => {
@@ -695,11 +732,18 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       if (!activeSessionId) return
 
       isAtBottomRef.current = true
-      setGenerating(activeSessionId, true)
-      clearSessionStopped(activeSessionId)
+      // Drop any in-flight 33ms stream buffer from the previous run before
+      // starting a new requestId (tool continue must not inherit old chunks).
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current)
+        streamFlushTimerRef.current = null
+      }
+      streamBufferRequestIdRef.current = null
+      responseChunkBufferRef.current = ""
+      reasoningChunkBufferRef.current = ""
 
       const requestId = uuidv4()
-      activeRequestIdBySessionRef.current[activeSessionId] = requestId
+      startRun(activeSessionId, requestId)
 
       try {
         const model = config?.aiModels.find((m) => m.id === selectedModelId)
@@ -715,158 +759,270 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           thinkingLevel,
           requestId,
         )
-        await selectSession(activeSessionId)
+        // Only refresh history if this run is still active (not superseded/cancelled).
+        if (useAIStore.getState().isActiveRequest(activeSessionId, requestId)) {
+          await selectSession(activeSessionId)
+        }
       } catch (err) {
-        setGenerating(activeSessionId, false)
-        showAiError(err)
-      } finally {
-        if (activeRequestIdBySessionRef.current[activeSessionId] === requestId) {
-          delete activeRequestIdBySessionRef.current[activeSessionId]
+        if (finishRun(activeSessionId, requestId)) {
+          showAiError(err)
         }
       }
     },
     [
       activeSessionId,
       boundSshSessionId,
-      clearSessionStopped,
       config,
+      finishRun,
       mode,
       selectSession,
       selectedModelId,
-      setGenerating,
       showAiError,
+      startRun,
       thinkingLevel,
     ],
   )
 
-  // Listen for streaming responses & tool calls
+  const executeToolCallsRef = useRef(executeToolCalls)
+  useEffect(() => {
+    executeToolCallsRef.current = executeToolCalls
+  }, [executeToolCalls])
+
+  // Listen for streaming responses & tool calls (session-scoped; requestId-gated)
   useEffect(() => {
     if (!activeSessionId) return
 
-    const flushStreamBuffers = () => {
+    const sessionId = activeSessionId
+
+    const isCurrentRequest = (requestId: string | undefined | null) =>
+      useAIStore.getState().isActiveRequest(sessionId, requestId)
+
+    const clearStreamBuffers = () => {
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current)
+        streamFlushTimerRef.current = null
+      }
+      streamBufferRequestIdRef.current = null
+      responseChunkBufferRef.current = ""
+      reasoningChunkBufferRef.current = ""
+    }
+
+    /** Flush only if buffer still belongs to the active run (or no active run when requestId null is allowed). */
+    const flushStreamBuffers = (expectedRequestId?: string | null) => {
+      const bufferRequestId = streamBufferRequestIdRef.current
+      if (bufferRequestId == null) {
+        // Nothing buffered under a known run.
+        if (!responseChunkBufferRef.current && !reasoningChunkBufferRef.current) {
+          return
+        }
+      }
+
+      if (expectedRequestId != null && expectedRequestId !== "") {
+        if (bufferRequestId !== expectedRequestId) {
+          return
+        }
+        if (!isCurrentRequest(expectedRequestId)) {
+          clearStreamBuffers()
+          return
+        }
+      } else if (bufferRequestId != null) {
+        // Unscoped flush (effect cleanup / stop): only write if still active, else drop.
+        if (!isCurrentRequest(bufferRequestId)) {
+          clearStreamBuffers()
+          return
+        }
+      }
+
       if (responseChunkBufferRef.current) {
-        appendResponse(activeSessionId, responseChunkBufferRef.current)
+        appendResponse(sessionId, responseChunkBufferRef.current)
         responseChunkBufferRef.current = ""
       }
 
       if (reasoningChunkBufferRef.current) {
-        appendReasoning(activeSessionId, reasoningChunkBufferRef.current)
+        appendReasoning(sessionId, reasoningChunkBufferRef.current)
         reasoningChunkBufferRef.current = ""
+      }
+      // Keep bufferRequestId until next append/clear so a mid-flush race is still keyed.
+      if (!responseChunkBufferRef.current && !reasoningChunkBufferRef.current) {
+        streamBufferRequestIdRef.current = null
       }
     }
 
-    const scheduleStreamFlush = () => {
+    const scheduleStreamFlush = (requestId: string) => {
       if (streamFlushTimerRef.current) return
       streamFlushTimerRef.current = setTimeout(() => {
-        flushStreamBuffers()
         streamFlushTimerRef.current = null
+        flushStreamBuffers(requestId)
       }, 33)
     }
 
+    const appendBufferedChunk = (
+      requestId: string,
+      kind: "response" | "reasoning",
+      content: string,
+    ) => {
+      if (!isCurrentRequest(requestId)) return
+
+      // Switch buffer ownership if a late chunk somehow arrives under a new id
+      // after we already buffered another (should not happen with gating).
+      if (
+        streamBufferRequestIdRef.current != null &&
+        streamBufferRequestIdRef.current !== requestId
+      ) {
+        clearStreamBuffers()
+      }
+
+      streamBufferRequestIdRef.current = requestId
+      if (kind === "response") {
+        responseChunkBufferRef.current += content
+      } else {
+        reasoningChunkBufferRef.current += content
+      }
+      scheduleStreamFlush(requestId)
+    }
+
     const startedListener = listen<string>(
-      `ai-started-${activeSessionId}`,
-      () => {
-        storeSetPendingToolCalls(activeSessionId, null)
-        newAssistantMessage(activeSessionId, selectedModelId)
+      `ai-started-${sessionId}`,
+      (event) => {
+        const requestId = event.payload
+        if (!isCurrentRequest(requestId)) return
+        // New assistant bubble: drop any leftover buffer from a prior run.
+        clearStreamBuffers()
+        storeSetPendingToolCalls(sessionId, null)
+        newAssistantMessage(sessionId, selectedModelIdRef.current)
       },
     )
 
-    // Handle MessageBatch events (minimax-style multiple messages in one response)
-    const messageBatchListener = listen<ChatMessage[]>(
-      `ai-message-batch-${activeSessionId}`,
+    const messageBatchListener = listen<AiMessageBatchPayload>(
+      `ai-message-batch-${sessionId}`,
       (event) => {
-        const messages = event.payload
-        // Add each message as a separate bubble
-        messages.forEach((msg) => {
-          addCompleteMessage(activeSessionId, msg)
+        const payload = event.payload
+        // Tool results during a run must match activeRequestId.
+        // Out-of-band system injections (e.g. SFTP completion) use empty
+        // request_id and are only accepted when no AI run is generating.
+        if (payload.request_id) {
+          if (!isCurrentRequest(payload.request_id)) return
+        } else if (useAIStore.getState().isGenerating[sessionId]) {
+          // Reject empty-id batches while a run is active so cancelled/old
+          // work cannot inject into an in-flight request.
+          return
+        }
+        payload.messages.forEach((msg) => {
+          addCompleteMessage(sessionId, msg)
         })
       },
     )
 
-    const responseListener = listen<string>(
-      `ai-response-${activeSessionId}`,
+    const responseListener = listen<AiStreamTextPayload>(
+      `ai-response-${sessionId}`,
       (event) => {
-        responseChunkBufferRef.current += event.payload
-        scheduleStreamFlush()
+        appendBufferedChunk(
+          event.payload.request_id,
+          "response",
+          event.payload.content,
+        )
       },
     )
 
-    const reasoningListener = listen<string>(
-      `ai-reasoning-${activeSessionId}`,
+    const reasoningListener = listen<AiStreamTextPayload>(
+      `ai-reasoning-${sessionId}`,
       (event) => {
-        reasoningChunkBufferRef.current += event.payload
-        scheduleStreamFlush()
+        appendBufferedChunk(
+          event.payload.request_id,
+          "reasoning",
+          event.payload.content,
+        )
       },
     )
 
-    const toolCallListener = listen<ToolCall[]>(
-      `ai-tool-call-${activeSessionId}`,
+    const toolCallListener = listen<AiToolCallEventPayload>(
+      `ai-tool-call-${sessionId}`,
       (event) => {
-        const calls = event.payload
+        const { request_id: requestId, tool_calls: calls } = event.payload
+        if (!isCurrentRequest(requestId)) return
 
-        // Update store with tool calls so they appear in the message bubble
-        appendToolCalls(activeSessionId, calls)
+        // Commit any remaining stream text for this run before tool handling.
+        flushStreamBuffers(requestId)
+        appendToolCalls(sessionId, calls)
 
         const shouldExecuteWithoutConfirmation =
           shouldExecuteToolCallsWithoutConfirmation(
             calls,
-            autoConfirmDelaySeconds,
+            autoConfirmDelaySecondsRef.current,
           )
 
         if (shouldExecuteWithoutConfirmation) {
-          void executeToolCalls(calls)
+          // Auto-exec starts a new requestId via executeToolCalls (which clears buffers).
+          void executeToolCallsRef.current(calls)
         } else {
-          setGenerating(activeSessionId, false)
-          storeSetPendingToolCalls(activeSessionId, calls)
+          // Pending confirmation: end generating for this run; keep request cleared for next action.
+          finishRun(sessionId, requestId)
+          storeSetPendingToolCalls(sessionId, calls)
         }
       },
     )
 
-    const errorListener = listen<string>(
-      `ai-error-${activeSessionId}`,
+    const errorListener = listen<AiErrorEventPayload>(
+      `ai-error-${sessionId}`,
       (event) => {
-        flushStreamBuffers()
-        setGenerating(activeSessionId, false)
-        storeSetPendingToolCalls(activeSessionId, null)
-        showAiError(event.payload)
+        const payload = event.payload
+        const requestId = payload?.request_id
+        // Only structured, request-scoped errors may change run state.
+        if (!requestId || !isCurrentRequest(requestId)) return
+        flushStreamBuffers(requestId)
+        finishRun(sessionId, requestId)
+        storeSetPendingToolCalls(sessionId, null)
+        showAiErrorRef.current(payload.error)
       },
     )
 
     const doneListener = listen<string>(
-      `ai-done-${activeSessionId}`,
-      async () => {
-        flushStreamBuffers()
-        setGenerating(activeSessionId, false)
+      `ai-done-${sessionId}`,
+      async (event) => {
+        const requestId = event.payload
+        if (!isCurrentRequest(requestId)) return
+        flushStreamBuffers(requestId)
+        finishRun(sessionId, requestId)
 
-        // Auto-generate title for new sessions after first response
-        const currentSession = sessions.find((s) => s.id === activeSessionId)
+        // Auto-generate title only after a normal completion.
+        const currentSession = sessionsRef.current.find((s) => s.id === sessionId)
         if (currentSession && currentSession.title === "New Chat") {
           try {
-            const model = config?.aiModels.find((m) => m.id === selectedModelId)
+            const modelId = selectedModelIdRef.current
+            const model = configRef.current?.aiModels.find((m) => m.id === modelId)
             const channelId = model?.channelId || ""
 
-            await aiService.generateTitle(
-              activeSessionId,
-              selectedModelId,
-              channelId,
-            )
+            await aiService.generateTitle(sessionId, modelId, channelId)
 
-            // Reload sessions to get the updated title
-            if (currentServerId) {
-              await loadSessions(currentServerId)
+            const serverId = currentServerIdRef.current
+            if (serverId) {
+              await loadSessions(serverId)
             }
-          } catch (err) {
+          } catch {
             // Failed to generate title
           }
         }
       },
     )
 
+    const cancelledListener = listen<string>(
+      `ai-cancelled-${sessionId}`,
+      (event) => {
+        const requestId = event.payload
+        // If user already cancelled locally, activeRequestId is null — ignore quietly.
+        if (!isCurrentRequest(requestId)) return
+        clearStreamBuffers()
+        cancelRunLocally(sessionId, requestId)
+      },
+    )
+
     return () => {
+      // Always cancel pending timer so a late flush cannot hit the next session's refs.
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current)
         streamFlushTimerRef.current = null
       }
+      // On session switch / unmount: flush only if still the active run, else drop.
       flushStreamBuffers()
       startedListener.then((unlisten) => unlisten())
       messageBatchListener.then((unlisten) => unlisten())
@@ -875,6 +1031,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       toolCallListener.then((unlisten) => unlisten())
       errorListener.then((unlisten) => unlisten())
       doneListener.then((unlisten) => unlisten())
+      cancelledListener.then((unlisten) => unlisten())
     }
   }, [
     activeSessionId,
@@ -882,17 +1039,11 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     appendResponse,
     appendReasoning,
     appendToolCalls,
-    newAssistantMessage,
-    setGenerating,
-    storeSetPendingToolCalls,
-    autoConfirmDelaySeconds,
-    executeToolCalls,
-    config,
-    selectedModelId,
-    sessions,
-    currentServerId,
+    cancelRunLocally,
+    finishRun,
     loadSessions,
-    showAiError,
+    newAssistantMessage,
+    storeSetPendingToolCalls,
   ])
 
   // Resizing logic
@@ -1018,13 +1169,20 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     if (!activeSessionId || isLoading || !!pendingToolCalls) return
     if (latestAssistantMessageSourceIndex === null) return
 
-    clearSessionStopped(activeSessionId)
     isAtBottomRef.current = true
     removeLatestAssistantMessage(activeSessionId)
-    setGenerating(activeSessionId, true)
+
+    // Drop leftover stream buffer from any prior run before starting regenerate.
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current)
+      streamFlushTimerRef.current = null
+    }
+    streamBufferRequestIdRef.current = null
+    responseChunkBufferRef.current = ""
+    reasoningChunkBufferRef.current = ""
 
     const requestId = uuidv4()
-    activeRequestIdBySessionRef.current[activeSessionId] = requestId
+    startRun(activeSessionId, requestId)
 
     try {
       const model = config?.aiModels.find((m) => m.id === selectedModelId)
@@ -1040,22 +1198,22 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         requestId,
       )
 
-      if (currentServerId) {
+      if (
+        currentServerId &&
+        useAIStore.getState().isActiveRequest(activeSessionId, requestId)
+      ) {
         await loadSessions(currentServerId)
       }
     } catch (err) {
-      setGenerating(activeSessionId, false)
-      showAiError(err)
-      try {
-        if (currentTabId) {
-          await selectSession(activeSessionId, currentServerId, currentTabId)
-        } else {
-          await selectSession(activeSessionId, currentServerId)
-        }
-      } catch {}
-    } finally {
-      if (activeRequestIdBySessionRef.current[activeSessionId] === requestId) {
-        delete activeRequestIdBySessionRef.current[activeSessionId]
+      if (finishRun(activeSessionId, requestId)) {
+        showAiError(err)
+        try {
+          if (currentTabId) {
+            await selectSession(activeSessionId, currentServerId, currentTabId)
+          } else {
+            await selectSession(activeSessionId, currentServerId)
+          }
+        } catch {}
       }
     }
   }, [
@@ -1063,9 +1221,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     isLoading,
     pendingToolCalls,
     latestAssistantMessageSourceIndex,
-    clearSessionStopped,
     removeLatestAssistantMessage,
-    setGenerating,
+    startRun,
+    finishRun,
     config,
     selectedModelId,
     thinkingLevel,
@@ -1118,8 +1276,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     if (!sessionId) return
 
-    // Clear the stopped flag when sending a new message
-    clearSessionStopped(sessionId)
     isAtBottomRef.current = true
     setInputValue("")
     if (textareaRef.current) {
@@ -1136,10 +1292,18 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     addOptimisticMessage(optimisticUserMessage)
 
     addMessage(sessionId, optimisticUserMessage)
-    setGenerating(sessionId, true)
+
+    // Drop leftover stream buffer from any prior run before starting a new send.
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current)
+      streamFlushTimerRef.current = null
+    }
+    streamBufferRequestIdRef.current = null
+    responseChunkBufferRef.current = ""
+    reasoningChunkBufferRef.current = ""
 
     const requestId = uuidv4()
-    activeRequestIdBySessionRef.current[sessionId] = requestId
+    startRun(sessionId, requestId)
 
     try {
       const model = config?.aiModels.find((m) => m.id === selectedModelId)
@@ -1156,15 +1320,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         requestId,
       )
 
-      if (currentServerId) {
+      if (
+        currentServerId &&
+        useAIStore.getState().isActiveRequest(sessionId, requestId)
+      ) {
         await loadSessions(currentServerId)
       }
     } catch (err) {
-      setGenerating(sessionId, false)
-      showAiError(err)
-    } finally {
-      if (activeRequestIdBySessionRef.current[sessionId] === requestId) {
-        delete activeRequestIdBySessionRef.current[sessionId]
+      if (finishRun(sessionId, requestId)) {
+        showAiError(err)
       }
     }
   }, [
@@ -1175,7 +1339,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     currentSshSessionId,
     createSession,
     addMessage,
-    setGenerating,
+    startRun,
+    finishRun,
     config,
     mode,
     thinkingLevel,
@@ -1187,7 +1352,6 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     activeEditorContext,
     activeEditorContextCharCount,
     shouldBlockEditorContextSend,
-    clearSessionStopped,
     loadSessions,
     t.ai.editorContext.tooLarge,
     showAiError,
@@ -1220,59 +1384,50 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     markSessionStopped,
   ])
 
-  const handleStopGeneration = useCallback(async () => {
-    // 1. Clear frontend pending tools and mark session as stopped
-    if (activeSessionId && pendingToolCalls) {
-      storeSetPendingToolCalls(activeSessionId, null)
-    }
+  const handleStopGeneration = useCallback(() => {
+    if (!activeSessionId) return
 
-    // 2. Cancel backend processing if active (match requestId)
-    if (activeSessionId && isLoading) {
-      const requestId = activeRequestIdBySessionRef.current[activeSessionId]
-      if (requestId) {
-        try {
-          await aiService.cancelMessage(activeSessionId, requestId)
-        } catch (err) {
-          // Failed to cancel message
-        }
+    const sessionId = activeSessionId
+    const requestId = useAIStore.getState().activeRequestId[sessionId] ?? null
+
+    // 1. Stop UI immediately: flush buffered chunks only for this run, then clear.
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current)
+      streamFlushTimerRef.current = null
+    }
+    const bufferRequestId = streamBufferRequestIdRef.current
+    const canFlushBuffered =
+      requestId != null &&
+      bufferRequestId != null &&
+      bufferRequestId === requestId
+    if (canFlushBuffered) {
+      // Keep already-buffered stream text that was received before stop (flush once).
+      if (responseChunkBufferRef.current) {
+        appendResponse(sessionId, responseChunkBufferRef.current)
+      }
+      if (reasoningChunkBufferRef.current) {
+        appendReasoning(sessionId, reasoningChunkBufferRef.current)
       }
     }
+    streamBufferRequestIdRef.current = null
+    responseChunkBufferRef.current = ""
+    reasoningChunkBufferRef.current = ""
 
-    // 3. Ensure loading is turned off and mark as stopped
-    if (activeSessionId) {
-      setGenerating(activeSessionId, false)
-      markSessionStopped(activeSessionId)
+    cancelRunLocally(sessionId, requestId)
 
-      const currentSession = sessions.find((s) => s.id === activeSessionId)
-      if (currentSession && currentSession.title === "New Chat") {
-        try {
-          const model = config?.aiModels.find((m) => m.id === selectedModelId)
-          const channelId = model?.channelId || ""
-
-          await aiService.generateTitle(
-            activeSessionId,
-            selectedModelId,
-            channelId,
-          )
-
-          if (currentServerId) {
-            await loadSessions(currentServerId)
-          }
-        } catch (err) {}
-      }
+    // 2. Notify backend asynchronously; never block UI, never start title generation.
+    if (requestId) {
+      void aiService.cancelMessage(sessionId, requestId).catch((err) => {
+        console.error("[AI] cancel_ai_chat failed", { sessionId, requestId, err })
+        showAiError(err)
+      })
     }
   }, [
     activeSessionId,
-    isLoading,
-    pendingToolCalls,
-    setGenerating,
-    storeSetPendingToolCalls,
-    markSessionStopped,
-    sessions,
-    selectedModelId,
-    config,
-    currentServerId,
-    loadSessions,
+    appendResponse,
+    appendReasoning,
+    cancelRunLocally,
+    showAiError,
   ])
 
   const handleModeChange = async (newMode: "ask" | "agent") => {

@@ -28,3 +28,24 @@ export interface AISession {
 /** Identifies one AI run for a session (send / regenerate / tool continue). */
 export type AiRequestId = string
 
+/** Stream text chunk (response / reasoning). Matches Rust snake_case serde. */
+export interface AiStreamTextPayload {
+  request_id: string
+  content: string
+}
+
+export interface AiToolCallEventPayload {
+  request_id: string
+  tool_calls: ToolCall[]
+}
+
+export interface AiMessageBatchPayload {
+  request_id: string
+  messages: ChatMessage[]
+}
+
+export interface AiErrorEventPayload {
+  request_id: string
+  error: string
+}
+
