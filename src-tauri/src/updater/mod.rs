@@ -4,6 +4,8 @@ mod assets;
 mod check;
 mod download;
 mod github;
+mod restart_barrier;
+mod restart_session;
 mod types;
 mod version;
 
@@ -15,6 +17,17 @@ pub use check::{check_for_update, get_discovered_update, CheckForUpdateOptions};
 pub use download::{
     cancel_update_download, download_update, get_prepared_update, parse_github_sha256_digest,
     parse_sha256sums_for_file, MAX_INSTALL_ASSET_BYTES,
+};
+pub use restart_barrier::{
+    CategoryCount, CoordinatorMode, OperationCategory, OperationCoordinator, OperationPermit,
+    OperationSnapshot, RESTART_PREPARING_ERROR,
+};
+pub use restart_session::{
+    ack_restart_session, capture_restore_token_from_args, cleanup_stale_snapshots,
+    get_pending_restart_session, get_pending_restore_token, is_valid_token, load_snapshot,
+    load_snapshot_with_options, restore_session_cli_args, restarts_dir, set_pending_restore_token,
+    write_snapshot, PendingRestartSession, RestartSessionSnapshot, SnapshotSplitLayout,
+    SnapshotTab, SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_TTL_SECS,
 };
 pub use types::{
     CheckUpdateResult, DownloadProgressEvent, GitHubAssetDto, GitHubReleaseDto, PreparedUpdate,

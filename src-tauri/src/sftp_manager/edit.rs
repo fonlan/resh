@@ -1,13 +1,14 @@
+use crate::commands::AppState;
 use crate::sftp_manager::{SftpManager, TransferProgress};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncReadExt;
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 const EDIT_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
@@ -74,6 +75,54 @@ impl SftpEditManager {
                                 tokio::spawn(async move {
                                     info!("Uploading modified file {:?} to remote {}", path_inner, remote_path);
 
+                                    let permit = if let Some(state) =
+                                        app_inner.try_state::<Arc<AppState>>()
+                                    {
+                                        match state
+                                            .operation_coordinator
+                                            .try_acquire(
+                                                crate::updater::OperationCategory::SftpEditUpload,
+                                            )
+                                            .await
+                                        {
+                                            Ok(p) => Some(p),
+                                            Err(e) => {
+                                                warn!(
+                                                    "Skipping SFTP edit auto-upload (restart barrier): {}",
+                                                    e
+                                                );
+                                                let task_id = Uuid::new_v4().to_string();
+                                                let file_name = path_inner
+                                                    .file_name()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy()
+                                                    .to_string();
+                                                let _ = app_inner.emit(
+                                                    "transfer-progress",
+                                                    TransferProgress {
+                                                        task_id,
+                                                        type_: "upload".to_string(),
+                                                        session_id: session_id.clone(),
+                                                        file_name,
+                                                        source: path_inner
+                                                            .to_string_lossy()
+                                                            .to_string(),
+                                                        destination: remote_path.clone(),
+                                                        total_bytes: 0,
+                                                        transferred_bytes: 0,
+                                                        speed: 0.0,
+                                                        eta: None,
+                                                        status: "failed".to_string(),
+                                                        error: Some(e),
+                                                    },
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    } else {
+                                        None
+                                    };
+
                                     let task_id = Uuid::new_v4().to_string();
                                     let file_name = path_inner.file_name().unwrap_or_default().to_string_lossy().to_string();
                                     let initial_total_bytes = tokio::fs::metadata(&path_inner).await.map(|m| m.len()).unwrap_or(0);
@@ -120,6 +169,10 @@ impl SftpEditManager {
                                         status: final_status,
                                         error: final_error,
                                     });
+
+                                    if let Some(permit) = permit {
+                                        permit.release().await;
+                                    }
                                 });
                             }
                         }

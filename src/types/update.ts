@@ -64,7 +64,6 @@ export interface DownloadProgressEvent {
 
 /**
  * High-level UI / lifecycle status for the update flow.
- * waitingForSafeRestart / restarting are reserved for later install phases.
  */
 export type UpdateStatus =
   | "idle"
@@ -85,4 +84,79 @@ export type UpdateErrorCode =
   | "download"
   | "checksum"
   | "cancelled"
+  | "restartBlocked"
   | "unknown"
+
+export type OperationCategory =
+  | "configWrite"
+  | "webdavSync"
+  | "sftpTransfer"
+  | "sftpEditUpload"
+
+export interface CategoryCount {
+  category: OperationCategory
+  count: number
+}
+
+export interface OperationSnapshot {
+  mode: "normal" | "draining"
+  total: number
+  categories: CategoryCount[]
+  idle: boolean
+}
+
+export interface WaitUntilIdleResult {
+  idle: boolean
+  snapshot: OperationSnapshot
+}
+
+/** Local frontend blockers not tracked by the backend coordinator. */
+export interface FrontendRestartBlockers {
+  dirtyEditors: Array<{ tabId: string; label: string }>
+  savingEditors: Array<{ tabId: string; label: string }>
+  recordingTabs: Array<{ tabId: string; label: string }>
+  settingsSaving: boolean
+  settingsSaveError: string | null
+  settingsDirty: boolean
+}
+
+export type SnapshotTab =
+  | {
+      kind: "terminal"
+      id: string
+      label: string
+      serverId: string
+      temporaryServer?: import("./server").Server | null
+    }
+  | {
+      kind: "editor"
+      id: string
+      label: string
+      serverId: string
+      remotePath: string
+      language: string
+      terminalTabId?: string | null
+    }
+
+export interface SnapshotSplitLayout {
+  layout: string
+  tabIds: string[]
+}
+
+export interface RestartSessionSnapshot {
+  schemaVersion: number
+  token: string
+  sourceVersion: string
+  targetVersion: string
+  createdAt: number
+  expiresAt: number
+  tabs: SnapshotTab[]
+  activeTabId?: string | null
+  splitView?: SnapshotSplitLayout | null
+  rememberedSplitViews?: Record<string, unknown>
+}
+
+export interface PendingRestartSession {
+  token: string
+  snapshot: RestartSessionSnapshot
+}

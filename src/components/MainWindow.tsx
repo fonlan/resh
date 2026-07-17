@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   Suspense,
 } from "react"
 import {
@@ -68,6 +69,18 @@ import {
 } from "../stores/useUpdateStore"
 import { UpdateDialog } from "./UpdateDialog"
 import { updateManagerApi } from "../hooks/useUpdateManager"
+import type { SettingsSaveApi } from "./settings/SettingsModal"
+import type {
+  FrontendRestartBlockers,
+  RestartSessionSnapshot,
+  SnapshotTab,
+} from "../types/update"
+import {
+  ackRestartSession,
+  cancelSafeRestart,
+  getPendingRestartSession,
+  prepareSafeRestart,
+} from "../utils/restartUpdate"
 import {
   isEditorTab,
   isTerminalTab,
@@ -230,6 +243,13 @@ export const MainWindow: React.FC = () => {
   } | null>(null)
   const [editServerId, setEditServerId] = useState<string | null>(null)
   const [recordingTabs, setRecordingTabs] = useState<Set<string>>(new Set())
+  const settingsSaveApiRef = useRef<SettingsSaveApi | null>(null)
+  const sessionRestoreAttemptedRef = useRef(false)
+  const sessionRestoreCompletedOldIdsRef = useRef(new Set<string>())
+  /** Full old tab id → new tab id across restore attempts (for split remaps). */
+  const sessionRestoreIdRemapRef = useRef(new Map<string, string>())
+  const sessionRestoreRetryCountRef = useRef(0)
+  const [sessionRestoreRetryTick, setSessionRestoreRetryTick] = useState(0)
   const [tabSessions, setTabSessions] = useState<Record<string, string>>({}) // tabId -> sessionId
   const [editorDocuments, setEditorDocuments] = useState<
     Record<string, EditorDocumentState>
@@ -252,6 +272,537 @@ export const MainWindow: React.FC = () => {
   const [isTabListOverflowing, setIsTabListOverflowing] = useState(false)
 
   const servers = config?.servers || EMPTY_SERVERS
+
+  const collectFrontendRestartBlockers = useCallback((): FrontendRestartBlockers => {
+    const dirtyEditors: FrontendRestartBlockers["dirtyEditors"] = []
+    const savingEditors: FrontendRestartBlockers["savingEditors"] = []
+    const recording: FrontendRestartBlockers["recordingTabs"] = []
+
+    for (const tab of tabs) {
+      if (isEditorTab(tab)) {
+        if (tab.dirty) {
+          dirtyEditors.push({ tabId: tab.id, label: tab.label })
+        }
+        const doc = editorDocuments[tab.id]
+        if (doc?.isSaving) {
+          savingEditors.push({ tabId: tab.id, label: tab.label })
+        }
+      }
+      if (isTerminalTab(tab) && recordingTabs.has(tab.id)) {
+        recording.push({ tabId: tab.id, label: tab.label })
+      }
+    }
+
+    const settingsStatus = settingsSaveApiRef.current?.getStatus()
+    return {
+      dirtyEditors,
+      savingEditors,
+      recordingTabs: recording,
+      settingsSaving: settingsStatus?.isSaving ?? false,
+      settingsSaveError: settingsStatus?.saveError ?? null,
+      settingsDirty: settingsStatus?.dirty ?? false,
+    }
+  }, [tabs, editorDocuments, recordingTabs])
+
+  const buildRestartSnapshot = useCallback((): RestartSessionSnapshot => {
+    const prepared = useUpdateStore.getState().prepared
+    const update = useUpdateStore.getState().update
+    const currentVersion =
+      useUpdateStore.getState().currentVersion ??
+      update?.currentVersion ??
+      prepared?.currentVersion ??
+      "0.0.0"
+    const targetVersion =
+      prepared?.version ?? update?.version ?? currentVersion
+
+    const snapshotTabs: SnapshotTab[] = []
+    for (const tab of tabs) {
+      if (isTerminalTab(tab)) {
+        snapshotTabs.push({
+          kind: "terminal",
+          id: tab.id,
+          label: tab.label,
+          serverId: tab.serverId,
+          temporaryServer: tab.temporaryServer ?? null,
+        })
+        continue
+      }
+      if (isEditorTab(tab)) {
+        // Dirty editors must not enter the snapshot.
+        if (tab.dirty) continue
+        const doc = editorDocuments[tab.id]
+        if (doc?.isSaving) continue
+        snapshotTabs.push({
+          kind: "editor",
+          id: tab.id,
+          label: tab.label,
+          serverId: tab.serverId,
+          remotePath: tab.remotePath,
+          language: tab.language || "plaintext",
+          terminalTabId: null,
+        })
+      }
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000)
+    return {
+      schemaVersion: 1,
+      token: "",
+      sourceVersion: currentVersion,
+      targetVersion,
+      createdAt: nowSec,
+      expiresAt: nowSec + 24 * 60 * 60,
+      tabs: snapshotTabs,
+      activeTabId,
+      splitView: splitView
+        ? {
+            layout: splitView.layout,
+            tabIds: splitView.tabIds,
+          }
+        : null,
+      rememberedSplitViews: rememberedSplitViews as Record<string, unknown>,
+    }
+  }, [
+    tabs,
+    editorDocuments,
+    activeTabId,
+    splitView,
+    rememberedSplitViews,
+  ])
+
+  const handleRequestSafeRestart = useCallback(async () => {
+    // Flush settings if open.
+    if (isSettingsOpen && settingsSaveApiRef.current) {
+      const flush = await settingsSaveApiRef.current.flush()
+      if (!flush.ok) {
+        showToast(
+          flush.error || t.updateRestartBlockedSettings,
+          "error",
+        )
+        return
+      }
+    }
+
+    const blockers = collectFrontendRestartBlockers()
+    if (blockers.dirtyEditors.length > 0) {
+      showToast(t.updateRestartBlockedDirty, "error")
+      return
+    }
+    if (blockers.savingEditors.length > 0) {
+      showToast(t.updateRestartBlockedSaving, "error")
+      return
+    }
+    if (blockers.recordingTabs.length > 0) {
+      showToast(t.updateRestartBlockedRecording, "error")
+      return
+    }
+    if (
+      blockers.settingsSaving ||
+      blockers.settingsDirty ||
+      blockers.settingsSaveError
+    ) {
+      showToast(t.updateRestartBlockedSettings, "error")
+      return
+    }
+
+    const snapshot = buildRestartSnapshot()
+    try {
+      await prepareSafeRestart({
+        snapshot,
+        blockers,
+      })
+      // Phase 3: snapshot + draining complete. Install helper / process exit is Phase 4.
+      // Keep restarting status briefly so UI shows ready-for-install; do not exit.
+      // Never surface restore tokens (one-time capability).
+      showToast(
+        "Safe restart prepared. Install will complete in a later update.",
+        "info",
+        6000,
+      )
+      // Return to ready so user can retry after install lands.
+      useUpdateStore.getState().setStatus("ready")
+      await cancelSafeRestart()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (message === "RESTART_CANCELLED") {
+        // User cancelled while waiting; cancelSafeRestart already restored status.
+        return
+      }
+      if (message === "RESTART_WAIT_TIMEOUT") {
+        showToast(t.updateRestartTimeout, "error")
+        // stay in waiting; user can keep waiting or cancel
+        return
+      }
+      await cancelSafeRestart().catch(() => {})
+      useUpdateStore.getState().setStatus("ready")
+      if (message === "DIRTY_EDITORS") {
+        showToast(t.updateRestartBlockedDirty, "error")
+      } else if (message === "SAVING_EDITORS") {
+        showToast(t.updateRestartBlockedSaving, "error")
+      } else if (message === "RECORDING_TABS") {
+        showToast(t.updateRestartBlockedRecording, "error")
+      } else if (message === "SETTINGS_PENDING") {
+        showToast(t.updateRestartBlockedSettings, "error")
+      } else {
+        showToast(message, "error")
+      }
+    }
+  }, [
+    isSettingsOpen,
+    collectFrontendRestartBlockers,
+    buildRestartSnapshot,
+    showToast,
+    t,
+  ])
+
+  useEffect(() => {
+    updateManagerApi.requestSafeRestart = handleRequestSafeRestart
+    updateManagerApi.cancelSafeRestart = cancelSafeRestart
+    return () => {
+      updateManagerApi.requestSafeRestart = async () => {
+        throw new Error("Safe restart is not registered")
+      }
+    }
+  }, [handleRequestSafeRestart])
+
+  // Restore tabs after update install (CLI --restore-update-session).
+  // Full success → ack & delete snapshot. Partial failure keeps snapshot and
+  // allows limited in-session retries without recreating already restored tabs.
+  // Terminals are connected first so editors can reopen; final tab bar order
+  // and activeTabId follow the snapshot sequence after remapping.
+  useEffect(() => {
+    if (!config || sessionRestoreAttemptedRef.current) return
+    sessionRestoreAttemptedRef.current = true
+    let cancelled = false
+
+    void (async () => {
+      try {
+        const pending = await getPendingRestartSession()
+        if (!pending || cancelled) {
+          // Strict Mode remount / effect re-run: allow a fresh attempt when
+          // this run was aborted before any restore work.
+          if (cancelled && sessionRestoreCompletedOldIdsRef.current.size === 0) {
+            sessionRestoreAttemptedRef.current = false
+          }
+          return
+        }
+
+        const snap = pending.snapshot
+        const failures: string[] = []
+        const idRemap = sessionRestoreIdRemapRef.current
+        const already = sessionRestoreCompletedOldIdsRef.current
+        const newTerminalsThisPass: Tab[] = []
+
+        // 1) Restore missing terminal tabs (without recordServerConnection).
+        for (const tab of snap.tabs) {
+          if (tab.kind !== "terminal") continue
+          if (already.has(tab.id)) continue
+          const newId = generateId()
+          if (tab.temporaryServer) {
+            newTerminalsThisPass.push({
+              id: newId,
+              kind: "terminal",
+              label: tab.label,
+              serverId: tab.temporaryServer.id || tab.serverId,
+              temporaryServer: tab.temporaryServer,
+            })
+            idRemap.set(tab.id, newId)
+            already.add(tab.id)
+          } else {
+            const serverExists = config.servers.some((s) => s.id === tab.serverId)
+            if (!serverExists) {
+              failures.push(`${tab.label}: server missing`)
+              continue
+            }
+            newTerminalsThisPass.push({
+              id: newId,
+              kind: "terminal",
+              label: tab.label,
+              serverId: tab.serverId,
+            })
+            idRemap.set(tab.id, newId)
+            already.add(tab.id)
+          }
+        }
+
+        if (newTerminalsThisPass.length > 0) {
+          setTabs((prev) => {
+            if (prev.length === 0) return newTerminalsThisPass
+            const existingIds = new Set(prev.map((t) => t.id))
+            return [
+              ...prev,
+              ...newTerminalsThisPass.filter((t) => !existingIds.has(t.id)),
+            ]
+          })
+        }
+
+        // 2) Wait briefly for terminal sessions to register via onSessionChange.
+        if (newTerminalsThisPass.length > 0 || snap.tabs.some((t) => t.kind === "editor")) {
+          await new Promise((r) => setTimeout(r, 1200))
+        }
+        if (cancelled) return
+
+        // 3) Reopen saved editor tabs by remotePath (new sessionId/localPath).
+        let latestSessions: Record<string, string> = {}
+        setTabSessions((prev) => {
+          latestSessions = prev
+          return prev
+        })
+        await new Promise((r) => setTimeout(r, 0))
+
+        let allTerminals: Tab[] = []
+        setTabs((prev) => {
+          allTerminals = prev.filter((t) => isTerminalTab(t))
+          return prev
+        })
+        await new Promise((r) => setTimeout(r, 0))
+
+        const resolveSessionForServer = async (
+          serverId: string,
+        ): Promise<string | undefined> => {
+          for (const term of allTerminals) {
+            if (isTerminalTab(term) && term.serverId === serverId) {
+              const sid = latestSessions[term.id]
+              if (sid) return sid
+            }
+          }
+          await new Promise((r) => setTimeout(r, 800))
+          setTabSessions((prev) => {
+            latestSessions = prev
+            return prev
+          })
+          await new Promise((r) => setTimeout(r, 0))
+          for (const term of allTerminals) {
+            if (isTerminalTab(term) && term.serverId === serverId) {
+              const sid = latestSessions[term.id]
+              if (sid) return sid
+            }
+          }
+          return undefined
+        }
+
+        for (const tab of snap.tabs) {
+          if (tab.kind !== "editor") continue
+          if (already.has(tab.id)) continue
+
+          const sessionId = await resolveSessionForServer(tab.serverId)
+          if (!sessionId) {
+            failures.push(`${tab.label}: no SSH session`)
+            continue
+          }
+          try {
+            const opened = await invoke<{
+              sessionId: string
+              remotePath: string
+              localPath: string
+              content: string
+              encoding: string
+              languageHint?: string | null
+            }>("sftp_open_text_file", {
+              sessionId,
+              remotePath: tab.remotePath,
+            })
+            const editorTabId = generateId()
+            const language =
+              opened.languageHint || tab.language || "plaintext"
+            setTabs((prev) => [
+              ...prev,
+              {
+                id: editorTabId,
+                kind: "editor",
+                label: tab.label,
+                serverId: tab.serverId,
+                sessionId: opened.sessionId,
+                remotePath: opened.remotePath,
+                localPath: opened.localPath,
+                dirty: false,
+                language,
+              },
+            ])
+            setEditorDocuments((prev) => ({
+              ...prev,
+              [editorTabId]: {
+                content: opened.content,
+                savedContent: opened.content,
+                encoding: opened.encoding,
+                isSaving: false,
+              },
+            }))
+            idRemap.set(tab.id, editorTabId)
+            already.add(tab.id)
+          } catch (e) {
+            failures.push(
+              `${tab.label}: ${e instanceof Error ? e.message : String(e)}`,
+            )
+          }
+        }
+
+        if (cancelled) return
+
+        // 4) Reorder tabs to snapshot order and set activeTabId after full remap.
+        setTabs((prev) => {
+          const byNewId = new Map(prev.map((t) => [t.id, t]))
+          const ordered: Tab[] = []
+          const used = new Set<string>()
+          for (const tab of snap.tabs) {
+            const newId = idRemap.get(tab.id)
+            if (!newId) continue
+            const live = byNewId.get(newId)
+            if (!live || used.has(newId)) continue
+            ordered.push(live)
+            used.add(newId)
+          }
+          for (const t of prev) {
+            if (!used.has(t.id)) ordered.push(t)
+          }
+          return ordered
+        })
+
+        if (snap.activeTabId) {
+          const activeNew = idRemap.get(snap.activeTabId)
+          if (activeNew) setActiveTabId(activeNew)
+        } else if (idRemap.size > 0) {
+          setActiveTabId((prev) => {
+            if (prev) return prev
+            const first = snap.tabs
+              .map((t) => idRemap.get(t.id))
+              .find((id): id is string => !!id)
+            return first || null
+          })
+        }
+
+        // 5) Restore current + remembered split layouts with full remap.
+        const remapSplit = (
+          layout: { layout: string; tabIds: string[] } | null | undefined,
+        ): SplitViewState | null => {
+          if (!layout) return null
+          const remapped = layout.tabIds
+            .map((id) => idRemap.get(id))
+            .filter((id): id is string => !!id)
+          if (remapped.length < 2) return null
+          return {
+            layout: layout.layout as SplitLayout,
+            tabIds: remapped,
+          }
+        }
+
+        if (snap.splitView) {
+          const current = remapSplit(snap.splitView)
+          if (current) setSplitView(current)
+        }
+
+        if (snap.rememberedSplitViews) {
+          const nextRemembered: RememberedSplitViews = {}
+          for (const [oldKey, value] of Object.entries(
+            snap.rememberedSplitViews,
+          )) {
+            const newKey = idRemap.get(oldKey)
+            if (!newKey) continue
+            const raw = value as {
+              layout?: string
+              tabIds?: string[]
+            } | null
+            if (!raw || !raw.layout || !Array.isArray(raw.tabIds)) continue
+            const remapped = remapSplit({
+              layout: raw.layout,
+              tabIds: raw.tabIds,
+            })
+            if (remapped) nextRemembered[newKey] = remapped
+          }
+          if (Object.keys(nextRemembered).length > 0) {
+            setRememberedSplitViews((prev) => ({ ...prev, ...nextRemembered }))
+          }
+        }
+
+        // Permanent failures (missing server) should not block ack of the rest.
+        const permanentOnly =
+          failures.length > 0 &&
+          failures.every((f) => f.includes("server missing"))
+        const hasRetryableFailure =
+          failures.length > 0 &&
+          failures.some((f) => !f.includes("server missing"))
+        const expectedRestorable = snap.tabs.filter((tab) => {
+          if (tab.kind === "terminal" && !tab.temporaryServer) {
+            return config.servers.some((s) => s.id === tab.serverId)
+          }
+          return true
+        }).length
+        const fullyRestored =
+          already.size >= expectedRestorable && !hasRetryableFailure
+
+        if (fullyRestored || permanentOnly) {
+          try {
+            await ackRestartSession(pending.token)
+            if (failures.length > 0) {
+              showToast(
+                t.updateRestorePartial.replace(
+                  "{details}",
+                  failures.slice(0, 3).join("; "),
+                ),
+                "error",
+                8000,
+              )
+            } else {
+              showToast(t.updateRestoreSuccess, "success")
+            }
+          } catch {
+            sessionRestoreAttemptedRef.current = false
+            if (sessionRestoreRetryCountRef.current < 2) {
+              sessionRestoreRetryCountRef.current += 1
+              window.setTimeout(() => {
+                setSessionRestoreRetryTick((n) => n + 1)
+              }, 1500)
+            }
+            showToast(
+              t.updateRestorePartial.replace("{details}", "ack failed"),
+              "error",
+            )
+          }
+        } else {
+          showToast(
+            t.updateRestorePartial.replace(
+              "{details}",
+              failures.slice(0, 3).join("; ") || "incomplete restore",
+            ),
+            "error",
+            8000,
+          )
+          sessionRestoreAttemptedRef.current = false
+          if (hasRetryableFailure && sessionRestoreRetryCountRef.current < 2) {
+            sessionRestoreRetryCountRef.current += 1
+            window.setTimeout(() => {
+              setSessionRestoreRetryTick((n) => n + 1)
+            }, 2000)
+          }
+        }
+      } catch (e) {
+        // Transient load/parse failures: allow limited retry this session.
+        const detail =
+          e instanceof Error ? e.message : String(e ?? "restore failed")
+        showToast(
+          t.updateRestorePartial.replace("{details}", detail.slice(0, 120)),
+          "error",
+          8000,
+        )
+        sessionRestoreAttemptedRef.current = false
+        if (sessionRestoreRetryCountRef.current < 2) {
+          sessionRestoreRetryCountRef.current += 1
+          window.setTimeout(() => {
+            setSessionRestoreRetryTick((n) => n + 1)
+          }, 2000)
+        }
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      // Allow remount (Strict Mode) to retry when nothing was restored yet.
+      if (sessionRestoreCompletedOldIdsRef.current.size === 0) {
+        sessionRestoreAttemptedRef.current = false
+      }
+    }
+  }, [config, showToast, t, sessionRestoreRetryTick])
+
   const authentications = config?.authentications || EMPTY_AUTHENTICATIONS
   const proxies = config?.proxies || EMPTY_PROXIES
 
@@ -1843,6 +2394,7 @@ export const MainWindow: React.FC = () => {
             onConnectServer={handleConnectServer}
             initialTab={settingsInitialTab}
             editServerId={editServerId}
+            settingsSaveApiRef={settingsSaveApiRef}
           />
         )}
       </Suspense>

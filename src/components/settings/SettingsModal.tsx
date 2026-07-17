@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react"
+import React, { useState, useEffect, useRef, useCallback } from "react"
 import {
   X,
   Server,
@@ -42,6 +42,21 @@ export interface SettingsModalProps {
   onConnectServer?: (serverId: string) => void
   initialTab?: TabType
   editServerId?: string | null
+  /** Imperative handle for restart flow: flush debounced save / query status. */
+  settingsSaveApiRef?: React.MutableRefObject<SettingsSaveApi | null>
+}
+
+export interface SettingsSaveApi {
+  /** Flush pending debounced save and wait for in-flight save. */
+  flush: () => Promise<{ ok: boolean; error?: string }>
+  /** Snapshot of save pipeline state. */
+  getStatus: () => {
+    isOpen: boolean
+    isSaving: boolean
+    dirty: boolean
+    saveError: string | null
+    saveStatus: SaveStatus
+  }
 }
 
 type TabType =
@@ -62,6 +77,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onConnectServer,
   initialTab = "servers",
   editServerId,
+  settingsSaveApiRef,
 }) => {
   const { config, loading, error, saveConfig } = useConfig()
   const { t } = useTranslation()
@@ -201,6 +217,87 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   }, [localConfig, saveConfig])
 
+  const flushPendingSave = useCallback(async (): Promise<{
+    ok: boolean
+    error?: string
+  }> => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+
+    if (localConfig) {
+      const currentConfigStr = JSON.stringify(localConfig)
+      if (currentConfigStr !== lastSavedConfigRef.current) {
+        isSavingRef.current = true
+        setSaveStatus("saving")
+        setSaveError(null)
+        try {
+          await saveConfig(localConfig)
+          lastSavedConfigRef.current = JSON.stringify(localConfig)
+          setSaveStatus("saved")
+          return { ok: true }
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Failed to save configuration"
+          setSaveStatus("error")
+          setSaveError(message)
+          return { ok: false, error: message }
+        } finally {
+          isSavingRef.current = false
+        }
+      }
+    }
+
+    // Wait for any in-flight save started by debounce timer.
+    let checks = 0
+    while (isSavingRef.current && checks < 50) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      checks++
+    }
+    if (isSavingRef.current) {
+      return { ok: false, error: "Settings save is still in progress" }
+    }
+    if (saveStatus === "error" || saveError) {
+      return {
+        ok: false,
+        error: saveError ?? "Settings save failed",
+      }
+    }
+    return { ok: true }
+  }, [localConfig, saveConfig, saveStatus, saveError])
+
+  useEffect(() => {
+    if (!settingsSaveApiRef) return
+    settingsSaveApiRef.current = {
+      flush: flushPendingSave,
+      getStatus: () => {
+        const dirty =
+          !!localConfig &&
+          JSON.stringify(localConfig) !== lastSavedConfigRef.current
+        return {
+          isOpen,
+          isSaving: isSavingRef.current || saveStatus === "saving",
+          dirty,
+          saveError,
+          saveStatus,
+        }
+      },
+    }
+    return () => {
+      if (settingsSaveApiRef) {
+        settingsSaveApiRef.current = null
+      }
+    }
+  }, [
+    settingsSaveApiRef,
+    flushPendingSave,
+    isOpen,
+    localConfig,
+    saveError,
+    saveStatus,
+  ])
+
   const handleOverlayMouseDown = (e: React.MouseEvent) => {
     if (modalRef.current && modalRef.current.contains(e.target as Node)) {
       mouseDownInsideRef.current = true
@@ -303,34 +400,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }
 
   const handleConnectServer = async (serverId: string) => {
-    // If there's a pending save, flush it immediately
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-      saveTimeoutRef.current = null
-
-      if (localConfig) {
-        setSaveStatus("saving")
-        try {
-          await saveConfig(localConfig)
-          setSaveStatus("saved")
-          // Short delay to show "saved" status before closing/connecting
-          await new Promise((resolve) => setTimeout(resolve, 300))
-        } catch (err) {
-          setSaveStatus("error")
-          // If save failed, we probably shouldn't proceed with connection
-          // as the server might not exist in the backend yet
-          return
-        }
-      }
-    } else if (isSavingRef.current) {
-      // If currently saving, wait for it to complete
-      let checks = 0
-      while (isSavingRef.current && checks < 20) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
-        checks++
-      }
+    const flush = await flushPendingSave()
+    if (!flush.ok) {
+      return
     }
-
     onConnectServer?.(serverId)
   }
 

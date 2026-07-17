@@ -8,11 +8,14 @@ import {
   selectUpdateProgress,
   selectPreparedUpdate,
   selectUpdateErrorMessage,
+  selectRestartWaitTimedOut,
 } from "../stores/useUpdateStore"
+import type { OperationSnapshot } from "../types/update"
 import {
   formatBytes,
   updateManagerApi,
 } from "../hooks/useUpdateManager"
+import { getOperationSnapshot as invokeOpSnapshot } from "../utils/restartUpdate"
 
 interface UpdateDialogProps {
   isOpen: boolean
@@ -29,9 +32,51 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const progress = useUpdateStore(selectUpdateProgress)
   const prepared = useUpdateStore(selectPreparedUpdate)
   const errorMessage = useUpdateStore(selectUpdateErrorMessage)
+  const restartWaitTimedOut = useUpdateStore(selectRestartWaitTimedOut)
   const currentVersion = useUpdateStore((s) => s.currentVersion)
   const panelRef = useRef<HTMLDivElement>(null)
   const previouslyFocusedRef = useRef<HTMLElement | null>(null)
+  const [drainSnapshot, setDrainSnapshot] = React.useState<
+    OperationSnapshot | null
+  >(null)
+
+  const categoryLabel = (category: string) => {
+    switch (category) {
+      case "configWrite":
+        return t.updateRestartCategoryConfig
+      case "webdavSync":
+        return t.updateRestartCategorySync
+      case "sftpTransfer":
+        return t.updateRestartCategoryTransfer
+      case "sftpEditUpload":
+        return t.updateRestartCategoryEditUpload
+      default:
+        return category
+    }
+  }
+
+  // Poll backend operation snapshot while waiting for safe restart.
+  useEffect(() => {
+    if (status !== "waitingForSafeRestart" && status !== "restarting") {
+      setDrainSnapshot(null)
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const snap = await invokeOpSnapshot()
+        if (!cancelled) setDrainSnapshot(snap)
+      } catch {
+        // ignore poll errors
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), 500)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [status])
 
   const targetVersion = update?.version ?? prepared?.version ?? "—"
   const current =
@@ -62,6 +107,8 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
   const canRetryCheck =
     status === "error" || status === "upToDate" || status === "idle"
   const showRestartConfirm = status === "ready"
+  const isWaitingRestart =
+    status === "waitingForSafeRestart" || status === "restarting"
 
   useEffect(() => {
     if (!isOpen) return
@@ -84,7 +131,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return
       if (e.key === "Escape") {
-        if (isDownloading) return
+        if (isDownloading || isWaitingRestart) return
         e.preventDefault()
         onClose()
         return
@@ -121,7 +168,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       previouslyFocusedRef.current?.focus?.()
       previouslyFocusedRef.current = null
     }
-  }, [isOpen, isDownloading, onClose])
+  }, [isOpen, isDownloading, isWaitingRestart, onClose])
 
   if (!isOpen) return null
 
@@ -144,7 +191,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
       aria-modal="true"
       aria-labelledby="update-dialog-title"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget && !isDownloading) {
+        if (e.target === e.currentTarget && !isDownloading && !isWaitingRestart) {
           onClose()
         }
       }}
@@ -247,6 +294,26 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               {t.updateRestartConfirmHint}
             </p>
           )}
+
+          {(status === "waitingForSafeRestart" || status === "restarting") && (
+            <div className="text-[12px] opacity-90 flex flex-col gap-1.5">
+              <p className="m-0">{t.updateRestartWaiting}</p>
+              {drainSnapshot && drainSnapshot.total > 0 && (
+                <ul className="m-0 pl-4 list-disc">
+                  {drainSnapshot.categories
+                    .filter((c) => c.count > 0)
+                    .map((c) => (
+                      <li key={c.category}>
+                        {categoryLabel(c.category)}: {c.count}
+                      </li>
+                    ))}
+                </ul>
+              )}
+              {restartWaitTimedOut && (
+                <p className="m-0 text-amber-400/90">{t.updateRestartTimeout}</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div
@@ -263,7 +330,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </button>
           )}
 
-          {!isDownloading && (
+          {!isDownloading && !isWaitingRestart && (
             <button
               type="button"
               className="px-4 py-2 rounded text-[13px] font-semibold cursor-pointer transition-all duration-200 border border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
@@ -308,6 +375,31 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
             </button>
           )}
 
+          {status === "waitingForSafeRestart" && (
+            <>
+              <button
+                type="button"
+                className="px-4 py-2 rounded text-[13px] font-semibold cursor-pointer transition-all duration-200 border border-[var(--glass-border)] bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+                onClick={() => void updateManagerApi.cancelSafeRestart()}
+              >
+                {t.updateRestartCancelWait}
+              </button>
+              {restartWaitTimedOut && (
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded text-[13px] font-semibold cursor-pointer transition-all duration-200 border-none text-white hover:brightness-110"
+                  style={{
+                    background: "var(--accent-primary)",
+                    boxShadow: "0 4px 12px rgba(59, 130, 246, 0.2)",
+                  }}
+                  onClick={() => void updateManagerApi.continueRestartWait()}
+                >
+                  {t.updateRestartKeepWaiting}
+                </button>
+              )}
+            </>
+          )}
+
           {showRestartConfirm && (
             <button
               type="button"
@@ -316,13 +408,10 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
                 background: "var(--accent-primary)",
                 boxShadow: "0 4px 12px rgba(59, 130, 246, 0.2)",
               }}
-              title={t.updateRestartLaterHint}
-              onClick={() => {
-                // Phase 2: no install yet — keep ready state and close.
-                onClose()
-              }}
+              title={t.updateRestartConfirmHint}
+              onClick={() => void updateManagerApi.requestSafeRestart()}
             >
-              {t.updateInstallLater}
+              {t.updateRestartNow}
             </button>
           )}
         </div>

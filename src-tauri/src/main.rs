@@ -165,8 +165,19 @@ async fn main() {
                 ai_cancellation_tokens: commands::AiRunRegistry::new(),
                 ai_manager: resh::ai::manager::AiManager::new(),
                 sftp_edit_manager: SftpEditManager::new(app.handle().clone()),
+                operation_coordinator: std::sync::Arc::new(
+                    resh::updater::OperationCoordinator::new(),
+                ),
             });
             app.manage(state.clone());
+
+            // Capture optional post-update restore token (validated later when loading snapshot).
+            {
+                let args: Vec<String> = std::env::args().collect();
+                let token = resh::updater::capture_restore_token_from_args(args.iter().map(|s| s.as_str()));
+                resh::updater::set_pending_restore_token(token);
+                resh::updater::cleanup_stale_snapshots(&app_data_dir);
+            }
 
             // Apply window state
             if let Some(window) = app.get_webview_window("main") {
@@ -319,6 +330,14 @@ async fn main() {
             commands::updater::get_app_version_cmd,
             commands::updater::download_update_cmd,
             commands::updater::cancel_update_download_cmd,
+            commands::updater::get_operation_snapshot_cmd,
+            commands::updater::begin_restart_draining_cmd,
+            commands::updater::cancel_restart_draining_cmd,
+            commands::updater::wait_until_operations_idle_cmd,
+            commands::updater::save_restart_session_snapshot_cmd,
+            commands::updater::get_pending_restart_session_cmd,
+            commands::updater::ack_restart_session_cmd,
+            commands::updater::verify_ready_for_restart_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

@@ -27,6 +27,11 @@ interface UpdateState {
   /** Manual check feedback for About tab (cleared on next action). */
   lastManualResult: "upToDate" | "available" | "error" | null
   dialogOpen: boolean
+  /**
+   * Soft drain wait timeout: still in maintenance; UI may offer keep-waiting
+   * or cancel (never force-kill).
+   */
+  restartWaitTimedOut: boolean
 
   setStatus: (status: UpdateStatus) => void
   setCurrentVersion: (version: string | null) => void
@@ -40,6 +45,7 @@ interface UpdateState {
     result: "upToDate" | "available" | "error" | null,
   ) => void
   setDialogOpen: (open: boolean) => void
+  setRestartWaitTimedOut: (timedOut: boolean) => void
   resetToIdle: () => void
 }
 
@@ -72,6 +78,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   lastCheckedAt: null,
   lastManualResult: null,
   dialogOpen: false,
+  restartWaitTimedOut: false,
 
   setStatus: (status) => set({ status }),
   setCurrentVersion: (currentVersion) => set({ currentVersion }),
@@ -88,6 +95,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   setLastCheckedAt: (lastCheckedAt) => set({ lastCheckedAt }),
   setLastManualResult: (lastManualResult) => set({ lastManualResult }),
   setDialogOpen: (dialogOpen) => set({ dialogOpen }),
+  setRestartWaitTimedOut: (restartWaitTimedOut) => set({ restartWaitTimedOut }),
   resetToIdle: () =>
     set({
       status: "idle",
@@ -97,6 +105,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
       errorMessage: null,
       errorCode: null,
       lastManualResult: null,
+      restartWaitTimedOut: false,
     }),
 }))
 
@@ -108,6 +117,8 @@ export const selectUpdateDialogOpen = (s: UpdateState) => s.dialogOpen
 export const selectUpdateErrorMessage = (s: UpdateState) => s.errorMessage
 export const selectUpdateErrorCode = (s: UpdateState) => s.errorCode
 export const selectPreparedUpdate = (s: UpdateState) => s.prepared
+export const selectRestartWaitTimedOut = (s: UpdateState) =>
+  s.restartWaitTimedOut
 export const selectShowTitleUpdateButton = (s: UpdateState) =>
   s.status === "available" ||
   s.status === "downloading" ||

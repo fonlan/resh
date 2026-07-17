@@ -84,6 +84,9 @@ lazy_static! {
     static ref SCHEDULER_RUNNING: AtomicBool = AtomicBool::new(false);
     static ref DIRECTORY_LISTING_CACHE: Mutex<HashMap<String, CachedDirectoryListing>> =
         Mutex::new(HashMap::new());
+    /// task_id -> transfer permit (held from queue until active transfer finishes).
+    static ref TRANSFER_PERMITS: Mutex<HashMap<String, crate::updater::OperationPermit>> =
+        Mutex::new(HashMap::new());
 }
 
 pub struct SftpManager;
@@ -1022,6 +1025,12 @@ impl SftpManager {
                     drop(active);
                     let mut active_task_sessions = ACTIVE_TASK_SESSIONS.lock().await;
                     active_task_sessions.remove(&task_id);
+                    // Release restart-barrier permit for this transfer (success/error/cancel).
+                    if let Some(permit) = TRANSFER_PERMITS.lock().await.remove(&task_id) {
+                        permit.release().await;
+                    }
+                    // Always drop cancel registry so custom task ids can be reused.
+                    TRANSFER_TASKS.lock().await.remove(&task_id);
                     QUEUE_NOTIFY.notify_one();
                 });
 
@@ -1071,13 +1080,21 @@ impl SftpManager {
     ) -> Result<String, String> {
         Self::sync_queue_concurrency_from_app(&app).await;
         let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        // Acquire transfer permit before enqueue so restart draining sees queued work.
+        let permit = if let Some(state) = app.try_state::<Arc<AppState>>() {
+            state
+                .operation_coordinator
+                .try_acquire(crate::updater::OperationCategory::SftpTransfer)
+                .await?
+        } else {
+            return Err("App state not available for SFTP transfer".to_string());
+        };
+
         let cancel_token = Arc::new(AtomicBool::new(false));
 
-        {
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.insert(task_id.clone(), cancel_token.clone());
-        }
-
+        // Atomically register cancel token + permit + queue entry so cancel_transfer
+        // cannot miss a task that is "registered but not yet queued".
         let pending_task = PendingTask {
             task_id: task_id.clone(),
             transfer_type: TransferType::Download,
@@ -1086,8 +1103,25 @@ impl SftpManager {
             local_path: local_path.clone(),
             app: Arc::new(app.clone()),
             db_manager,
-            cancel_token,
+            cancel_token: cancel_token.clone(),
         };
+        {
+            let mut tasks = TRANSFER_TASKS.lock().await;
+            let mut permits = TRANSFER_PERMITS.lock().await;
+            let mut queue = TASK_QUEUE.lock().await;
+            if tasks.contains_key(&task_id) || permits.contains_key(&task_id) {
+                drop(queue);
+                drop(permits);
+                drop(tasks);
+                permit.release().await;
+                return Err(format!(
+                    "SFTP transfer task id already in use: {task_id}"
+                ));
+            }
+            tasks.insert(task_id.clone(), cancel_token);
+            permits.insert(task_id.clone(), permit);
+            queue.push_back(pending_task);
+        }
 
         // Emit queued status
         let _ = app.emit(
@@ -1112,11 +1146,6 @@ impl SftpManager {
             },
         );
 
-        {
-            let mut queue = TASK_QUEUE.lock().await;
-            queue.push_back(pending_task);
-        }
-
         Self::spawn_scheduler();
         QUEUE_NOTIFY.notify_one();
 
@@ -1133,13 +1162,20 @@ impl SftpManager {
     ) -> Result<String, String> {
         Self::sync_queue_concurrency_from_app(&app).await;
         let task_id = task_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+
+        let permit = if let Some(state) = app.try_state::<Arc<AppState>>() {
+            state
+                .operation_coordinator
+                .try_acquire(crate::updater::OperationCategory::SftpTransfer)
+                .await?
+        } else {
+            return Err("App state not available for SFTP transfer".to_string());
+        };
+
         let cancel_token = Arc::new(AtomicBool::new(false));
 
-        {
-            let mut tasks = TRANSFER_TASKS.lock().await;
-            tasks.insert(task_id.clone(), cancel_token.clone());
-        }
-
+        // Atomically register cancel token + permit + queue entry so cancel_transfer
+        // cannot miss a task that is "registered but not yet queued".
         let pending_task = PendingTask {
             task_id: task_id.clone(),
             transfer_type: TransferType::Upload,
@@ -1148,8 +1184,25 @@ impl SftpManager {
             local_path: local_path.clone(),
             app: Arc::new(app.clone()),
             db_manager,
-            cancel_token,
+            cancel_token: cancel_token.clone(),
         };
+        {
+            let mut tasks = TRANSFER_TASKS.lock().await;
+            let mut permits = TRANSFER_PERMITS.lock().await;
+            let mut queue = TASK_QUEUE.lock().await;
+            if tasks.contains_key(&task_id) || permits.contains_key(&task_id) {
+                drop(queue);
+                drop(permits);
+                drop(tasks);
+                permit.release().await;
+                return Err(format!(
+                    "SFTP transfer task id already in use: {task_id}"
+                ));
+            }
+            tasks.insert(task_id.clone(), cancel_token);
+            permits.insert(task_id.clone(), permit);
+            queue.push_back(pending_task);
+        }
 
         // Emit queued status
         let _ = app.emit(
@@ -1173,11 +1226,6 @@ impl SftpManager {
                 error: None,
             },
         );
-
-        {
-            let mut queue = TASK_QUEUE.lock().await;
-            queue.push_back(pending_task);
-        }
 
         Self::spawn_scheduler();
         QUEUE_NOTIFY.notify_one();
@@ -1528,6 +1576,18 @@ impl SftpManager {
         let tasks = TRANSFER_TASKS.lock().await;
         if let Some(token) = tasks.get(task_id) {
             token.store(true, Ordering::SeqCst);
+            // If still only queued (not yet active), remove from queue and release permit now.
+            drop(tasks);
+            let mut queue = TASK_QUEUE.lock().await;
+            if let Some(pos) = queue.iter().position(|t| t.task_id == task_id) {
+                queue.remove(pos);
+                drop(queue);
+                if let Some(permit) = TRANSFER_PERMITS.lock().await.remove(task_id) {
+                    permit.release().await;
+                }
+                let mut transfer_tasks = TRANSFER_TASKS.lock().await;
+                transfer_tasks.remove(task_id);
+            }
             Ok(())
         } else {
             Err("Task not found".to_string())
@@ -3574,6 +3634,36 @@ impl SftpManager {
     }
 
     async fn copy_item_with_mode(
+        app: AppHandle,
+        session_id: &str,
+        source_path: &str,
+        dest_path: &str,
+        task_id: Option<String>,
+        copy_mode: CopyMode,
+    ) -> Result<(), String> {
+        let copy_permit = if let Some(state) = app.try_state::<Arc<AppState>>() {
+            state
+                .operation_coordinator
+                .try_acquire(crate::updater::OperationCategory::SftpTransfer)
+                .await?
+        } else {
+            return Err("App state not available for SFTP copy".to_string());
+        };
+
+        let result = Self::copy_item_with_mode_inner(
+            app,
+            session_id,
+            source_path,
+            dest_path,
+            task_id,
+            copy_mode,
+        )
+        .await;
+        copy_permit.release().await;
+        result
+    }
+
+    async fn copy_item_with_mode_inner(
         app: AppHandle,
         session_id: &str,
         source_path: &str,

@@ -406,28 +406,51 @@ pub async fn sftp_open_text_file(
 
 #[tauri::command]
 pub async fn sftp_save_text_file(
+    state: State<'_, Arc<AppState>>,
     session_id: String,
     remote_path: String,
     local_path: String,
     content: String,
     encoding: String,
 ) -> Result<SftpSaveTextFileResult, String> {
+    use crate::updater::OperationCategory;
+
+    let permit = state
+        .operation_coordinator
+        .try_acquire(OperationCategory::SftpEditUpload)
+        .await?;
+
     let local_path_buf = PathBuf::from(&local_path);
     if local_path_buf.file_name().is_none() {
+        permit.release().await;
         return Err("Invalid local path".to_string());
     }
 
-    let encoded_bytes = encode_text_content(&content, &encoding)?;
-    write_local_file_atomically(&local_path_buf, &encoded_bytes).await?;
-    upload_text_bytes_to_remote(&session_id, &remote_path, &encoded_bytes).await?;
+    let encoded_bytes = match encode_text_content(&content, &encoding) {
+        Ok(b) => b,
+        Err(e) => {
+            permit.release().await;
+            return Err(e);
+        }
+    };
+    if let Err(e) = write_local_file_atomically(&local_path_buf, &encoded_bytes).await {
+        permit.release().await;
+        return Err(e);
+    }
+    if let Err(e) = upload_text_bytes_to_remote(&session_id, &remote_path, &encoded_bytes).await {
+        permit.release().await;
+        return Err(e);
+    }
 
-    Ok(SftpSaveTextFileResult {
+    let result = SftpSaveTextFileResult {
         session_id,
         remote_path,
         local_path,
         bytes_written: encoded_bytes.len() as u64,
         encoding,
-    })
+    };
+    permit.release().await;
+    Ok(result)
 }
 
 #[tauri::command]

@@ -93,6 +93,8 @@ pub struct AppState {
     pub ai_cancellation_tokens: AiRunRegistry,
     pub ai_manager: AiManager,
     pub sftp_edit_manager: SftpEditManager,
+    /// Tracks config/sync/SFTP write work for safe update restart draining.
+    pub operation_coordinator: std::sync::Arc<crate::updater::OperationCoordinator>,
 }
 
 impl AppState {
@@ -171,6 +173,14 @@ pub async fn save_config(
     state: State<'_, Arc<AppState>>,
     window: Window,
 ) -> Result<(), String> {
+    use crate::updater::OperationCategory;
+
+    // Hold configWrite for the entire local save so restart draining sees it.
+    let write_permit = state
+        .operation_coordinator
+        .try_acquire(OperationCategory::ConfigWrite)
+        .await?;
+
     if config.normalize_legacy_defaults() {
         tracing::info!(
             transfer_profile = %config.general.sftp.transfer_profile,
@@ -196,6 +206,7 @@ pub async fn save_config(
 
     // If sync is enabled, trigger async sync in background without blocking
     // Local save is already complete, sync failures should not block the operation
+    // Acquire webdavSync permit BEFORE spawn so restart never sees an idle gap.
     if config.general.webdav.enabled && !config.general.webdav.url.is_empty() {
         let proxy = config
             .general
@@ -217,6 +228,10 @@ pub async fn save_config(
         let sync_path = local_path.clone();
 
         let window = window.clone();
+        let sync_permit = state
+            .operation_coordinator
+            .try_acquire(OperationCategory::WebdavSync)
+            .await?;
         tokio::spawn(async move {
             let mut local_copy = sync_config;
             if let Err(e) = sync_manager.sync(&mut local_copy, sync_removed_ids).await {
@@ -237,9 +252,11 @@ pub async fn save_config(
 
                 let _ = window.emit("config-updated", local_copy);
             }
+            sync_permit.release().await;
         });
     }
 
+    write_permit.release().await;
     Ok(())
 }
 
@@ -275,16 +292,34 @@ pub async fn record_server_connection(
     server_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Config, String> {
+    use crate::updater::OperationCategory;
+
+    // Local-only write; still blocked during restart draining.
+    let write_permit = state
+        .operation_coordinator
+        .try_acquire(OperationCategory::ConfigWrite)
+        .await?;
     let mut config = state.config.lock().await;
     apply_server_connection(&mut config, &server_id)?;
     state.config_manager.save_local_config(&config)?;
-    Ok(config.clone())
+    let result = config.clone();
+    write_permit.release().await;
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
+    use crate::updater::OperationCategory;
+
+    // Full-lifecycle sync permit so restart wait covers the whole call.
+    let sync_permit = state
+        .operation_coordinator
+        .try_acquire(OperationCategory::WebdavSync)
+        .await?;
+
     let mut config = state.config.lock().await;
     if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
+        sync_permit.release().await;
         return Err("WebDAV sync is not enabled or configured".to_string());
     }
 
@@ -302,7 +337,11 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         proxy,
     );
 
-    sync_manager.sync(&mut config, vec![]).await?;
+    let sync_result = sync_manager.sync(&mut config, vec![]).await;
+    if let Err(e) = sync_result {
+        sync_permit.release().await;
+        return Err(e);
+    }
     if config.normalize_legacy_defaults() {
         tracing::info!(
             transfer_profile = %config.general.sftp.transfer_profile,
@@ -313,9 +352,14 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
     }
 
     let local_path = state.config_manager.local_config_path();
-    state.config_manager.save_config(&config, &local_path)?;
+    if let Err(e) = state.config_manager.save_config(&config, &local_path) {
+        sync_permit.release().await;
+        return Err(e);
+    }
 
-    Ok(config.clone())
+    let result = config.clone();
+    sync_permit.release().await;
+    Ok(result)
 }
 
 fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {

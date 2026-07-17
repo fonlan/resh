@@ -381,6 +381,22 @@ export const updateManagerApi = {
   cancelDownload: async () => {},
   openDialog: () => {},
   closeDialog: () => {},
+  /**
+   * Request safe restart after download. MainWindow should register
+   * `requestSafeRestart` to collect session snapshot + blockers.
+   */
+  requestSafeRestart: async (): Promise<void> => {
+    throw new Error("Safe restart is not registered")
+  },
+  cancelSafeRestart: async (): Promise<void> => {
+    const { cancelSafeRestart } = await import("../utils/restartUpdate")
+    await cancelSafeRestart()
+  },
+  /** Resume soft drain wait after RESTART_WAIT_TIMEOUT (keep waiting). */
+  continueRestartWait: async (): Promise<void> => {
+    const { continueRestartWait } = await import("../utils/restartUpdate")
+    continueRestartWait()
+  },
 }
 
 export function formatBytes(n: number | null | undefined): string {
