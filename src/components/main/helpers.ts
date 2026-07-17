@@ -18,8 +18,12 @@ export const MIN_TITLEBAR_DRAG_SPACER_WIDTH = 40
 
 /**
  * macOS Overlay 标题栏中原生交通灯占用的左侧安全区宽度（逻辑像素）。
- * 与 `tauri.macos.conf.json` 的 `trafficLightPosition`（x≈12）及三枚按钮间距对齐；
- * 最终可在真机上微调，但布局测量须与此视觉宽度同源（经 leftInset ref 实测）。
+ *
+ * Phase 3 定稿（与 `src-tauri/tauri.macos.conf.json` 同步锁定）：
+ * - `trafficLightPosition`: `{ x: 12, y: 13 }`（40px / `h-10` 行内垂直居中）
+ * - 左 inset: `78`（x=12 + 三枚系统按钮与间距 + 与首个标签的呼吸间距）
+ * - 仅 `isMacOS()` 渲染；Windows 无此占位，仍用自绘 `WindowControls`
+ * - 布局测量经 `leftInsetRef` 读取实测宽度，与此常量同源
  */
 export const MACOS_TRAFFIC_LIGHT_INSET_WIDTH = 78
 
