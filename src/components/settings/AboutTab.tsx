@@ -6,14 +6,25 @@ import {
   Shield,
   Cpu,
   ExternalLink,
+  Loader2,
+  RefreshCw,
 } from "lucide-react"
 import { useTranslation } from "../../i18n"
 import { invoke } from "@tauri-apps/api/core"
 import { getVersion } from "@tauri-apps/api/app"
+import { useUpdateStore } from "../../stores/useUpdateStore"
+import { updateManagerApi } from "../../hooks/useUpdateManager"
 
 export const AboutTab: React.FC = () => {
   const { t } = useTranslation()
   const [appVersion, setAppVersion] = React.useState("...")
+  const status = useUpdateStore((s) => s.status)
+  const update = useUpdateStore((s) => s.update)
+  const errorMessage = useUpdateStore((s) => s.errorMessage)
+  const lastManualResult = useUpdateStore((s) => s.lastManualResult)
+  const storeVersion = useUpdateStore((s) => s.currentVersion)
+
+  const isChecking = status === "checking"
 
   React.useEffect(() => {
     let isMounted = true
@@ -27,7 +38,7 @@ export const AboutTab: React.FC = () => {
       } catch (err) {
         console.error("Failed to load app version:", err)
         if (isMounted) {
-          setAppVersion("Unknown")
+          setAppVersion(storeVersion || "Unknown")
         }
       }
     }
@@ -37,7 +48,7 @@ export const AboutTab: React.FC = () => {
     return () => {
       isMounted = false
     }
-  }, [])
+  }, [storeVersion])
 
   const techStack = [
     "Tauri 2.0",
@@ -57,6 +68,26 @@ export const AboutTab: React.FC = () => {
       window.open(url, "_blank")
     }
   }
+
+  const handleCheckUpdate = () => {
+    void updateManagerApi.check(true)
+  }
+
+  const feedbackText = (() => {
+    if (isChecking) return t.updateStatusChecking
+    if (lastManualResult === "upToDate" || status === "upToDate") {
+      return t.updateStatusUpToDate
+    }
+    if (lastManualResult === "available" || status === "available" || status === "ready") {
+      const v = update?.version ?? ""
+      return t.updateStatusAvailable.replace("{version}", v)
+    }
+    if (lastManualResult === "error" || status === "error") {
+      return errorMessage || t.updateStatusError
+    }
+    if (status === "downloading") return t.updateStatusDownloading
+    return null
+  })()
 
   return (
     <div
@@ -87,6 +118,45 @@ export const AboutTab: React.FC = () => {
         </h1>
         <div className="font-mono text-[0.8rem] text-zinc-500 bg-white/5 px-3 py-1 rounded-full mt-2 border border-white/10">
           {t.about.version} {appVersion}
+        </div>
+
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            onClick={handleCheckUpdate}
+            disabled={isChecking || status === "downloading"}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[0.85rem] font-semibold border border-white/10 bg-white/5 text-zinc-100 cursor-pointer transition-all duration-200 hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label={t.updateCheckNow}
+          >
+            {isChecking ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <RefreshCw size={16} />
+            )}
+            {t.updateCheckNow}
+          </button>
+          {feedbackText && (
+            <p
+              className={`m-0 text-[0.8rem] max-w-[360px] ${
+                lastManualResult === "error" || status === "error"
+                  ? "text-red-400"
+                  : status === "available" || status === "ready"
+                    ? "text-[var(--accent-color,#f97316)]"
+                    : "text-zinc-500"
+              }`}
+            >
+              {feedbackText}
+            </p>
+          )}
+          {(status === "available" || status === "ready" || status === "downloading") && (
+            <button
+              type="button"
+              className="text-[0.8rem] text-[var(--accent-color,#f97316)] bg-transparent border-0 underline cursor-pointer p-0"
+              onClick={() => updateManagerApi.openDialog()}
+            >
+              {t.updateOpenDialog}
+            </button>
+          )}
         </div>
       </div>
 

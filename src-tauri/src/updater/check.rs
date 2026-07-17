@@ -5,12 +5,15 @@ use super::version::{is_newer_than, parse_release_tag};
 use super::current_app_version;
 use crate::config::types::Proxy;
 use crate::http::resolve_proxy_by_id;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 /// Minimum interval between automatic (non-force) network checks.
-pub const AUTO_CHECK_MIN_INTERVAL_SECS: u64 = 60 * 60; // 1 hour floor; UI uses 6h schedule
+/// Floor is 6 hours so resume/visibility catch-ups cannot densify traffic.
+pub const AUTO_CHECK_MIN_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
 #[derive(Debug, Clone)]
 pub struct CheckForUpdateOptions {
@@ -36,6 +39,8 @@ struct UpdaterRuntime {
     cache: Mutex<GithubFetchCache>,
     /// Shared in-flight check so concurrent callers await one request.
     in_flight: Mutex<Option<tokio::sync::watch::Receiver<Option<CheckUpdateResult>>>>,
+    /// Trusted updates discovered by check; download accepts only these ids.
+    available: Mutex<HashMap<String, UpdateInfo>>,
 }
 
 impl UpdaterRuntime {
@@ -43,6 +48,7 @@ impl UpdaterRuntime {
         Self {
             cache: Mutex::new(GithubFetchCache::default()),
             in_flight: Mutex::new(None),
+            available: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -50,6 +56,23 @@ impl UpdaterRuntime {
 fn runtime() -> &'static UpdaterRuntime {
     static RUNTIME: OnceLock<UpdaterRuntime> = OnceLock::new();
     RUNTIME.get_or_init(UpdaterRuntime::new)
+}
+
+/// Look up a check-discovered update by opaque id (for trusted download).
+pub async fn get_discovered_update(id: &str) -> Option<UpdateInfo> {
+    let map = runtime().available.lock().await;
+    map.get(id).cloned()
+}
+
+/// Register a backend-selected update and return it with a fresh opaque id.
+async fn register_discovered_update(mut info: UpdateInfo) -> UpdateInfo {
+    let id = Uuid::new_v4().to_string();
+    info.id = id.clone();
+    let mut map = runtime().available.lock().await;
+    // Keep at most one entry per tag/platform asset name to limit memory.
+    map.retain(|_, existing| existing.install_asset.name != info.install_asset.name);
+    map.insert(id, info.clone());
+    info
 }
 
 /// Check GitHub for the latest stable release and compare with the running version.
@@ -136,7 +159,10 @@ async fn run_check(
             && now.saturating_sub(cache.checked_at_unix) < AUTO_CHECK_MIN_INTERVAL_SECS as i64
         {
             if let Some(ref release) = cache.body {
-                return evaluate_release(release, &current_version, platform, true);
+                return finalize_check_result(
+                    evaluate_release(release, &current_version, platform, true),
+                )
+                .await;
             }
         }
     }
@@ -156,7 +182,7 @@ async fn run_check(
         }
     };
 
-    match outcome {
+    let result = match outcome {
         GithubFetchOutcome::RateLimited { retry_after_secs } => CheckUpdateResult::RateLimited {
             message: "GitHub API rate limit exceeded. Try again later.".to_string(),
             retry_after_secs,
@@ -192,6 +218,21 @@ async fn run_check(
 
             evaluate_release(&release, &current_version, platform, false)
         }
+    };
+
+    finalize_check_result(result).await
+}
+
+async fn finalize_check_result(result: CheckUpdateResult) -> CheckUpdateResult {
+    match result {
+        CheckUpdateResult::UpdateAvailable { update, from_cache } => {
+            let registered = register_discovered_update(update).await;
+            CheckUpdateResult::UpdateAvailable {
+                update: registered,
+                from_cache,
+            }
+        }
+        other => other,
     }
 }
 
@@ -255,6 +296,8 @@ fn evaluate_release(
 
     CheckUpdateResult::UpdateAvailable {
         update: UpdateInfo {
+            // Placeholder; finalize_check_result assigns a real opaque id.
+            id: String::new(),
             tag_name: release.tag_name.clone(),
             version: latest_version,
             name: release.name.clone(),
@@ -354,9 +397,44 @@ mod tests {
                 assert_eq!(update.version, "1.2.0");
                 assert_eq!(update.install_asset.name, "Resh-v1.2.0-macos-aarch64.dmg");
                 assert_eq!(update.checksums_asset.name, "SHA256SUMS.txt");
+                // Opaque id is assigned only when going through finalize_check_result.
+                assert!(update.id.is_empty());
             }
             other => panic!("expected updateAvailable, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn register_assigns_opaque_id() {
+        let info = UpdateInfo {
+            id: String::new(),
+            tag_name: "v1.2.0".to_string(),
+            version: "1.2.0".to_string(),
+            name: None,
+            body: None,
+            html_url: "https://github.com/fonlan/resh/releases/tag/v1.2.0".to_string(),
+            published_at: None,
+            install_asset: crate::updater::types::UpdateAssetInfo {
+                name: "Resh-v1.2.0-windows-x86_64.exe".to_string(),
+                browser_download_url: "https://github.com/fonlan/resh/releases/download/v1.2.0/Resh-v1.2.0-windows-x86_64.exe".to_string(),
+                size: 10,
+                digest: None,
+            },
+            checksums_asset: crate::updater::types::UpdateAssetInfo {
+                name: "SHA256SUMS.txt".to_string(),
+                browser_download_url: "https://github.com/fonlan/resh/releases/download/v1.2.0/SHA256SUMS.txt".to_string(),
+                size: 100,
+                digest: None,
+            },
+            current_version: "1.0.0".to_string(),
+        };
+        let registered = register_discovered_update(info).await;
+        assert!(!registered.id.is_empty());
+        let looked_up = get_discovered_update(&registered.id).await;
+        assert_eq!(
+            looked_up.as_ref().map(|u| u.id.as_str()),
+            Some(registered.id.as_str())
+        );
     }
 
     #[test]

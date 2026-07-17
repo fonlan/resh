@@ -13,9 +13,14 @@ pub struct UpdateAssetInfo {
 }
 
 /// Update metadata exposed to the frontend when a newer stable release is available.
+///
+/// `id` is an opaque backend-issued handle. Download only accepts this id and
+/// never trusts client-supplied URLs or asset digests.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateInfo {
+    /// Opaque id bound to the backend-selected Release assets (not a path).
+    pub id: String,
     pub tag_name: String,
     pub version: String,
     pub name: Option<String>,
@@ -53,6 +58,31 @@ pub enum CheckUpdateResult {
     },
     #[serde(rename = "error")]
     Error { message: String, code: String },
+}
+
+/// Immutable handle returned after a verified download. Install only accepts this id.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PreparedUpdate {
+    pub id: String,
+    pub version: String,
+    pub tag_name: String,
+    pub asset_name: String,
+    pub size: u64,
+    pub sha256: String,
+    pub current_version: String,
+}
+
+/// Progress payload emitted on `update-download-progress`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadProgressEvent {
+    pub download_id: String,
+    pub received: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    /// Phase: `checksums` | `asset` | `verifying` | `ready`
+    pub phase: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -64,6 +64,7 @@ pub fn expected_sha256sums_name() -> &'static str {
 }
 
 /// Select install + checksum assets from a release. Both must be present.
+/// Duplicate asset names are treated as a publishing error.
 pub fn select_release_assets(
     release: &GitHubReleaseDto,
     target: PlatformTarget,
@@ -71,13 +72,13 @@ pub fn select_release_assets(
     let install_name = expected_install_asset_name(&release.tag_name, target);
     let checksums_name = expected_sha256sums_name();
 
-    let install = find_asset(&release.assets, &install_name).ok_or_else(|| {
+    let install = find_unique_asset(&release.assets, &install_name)?.ok_or_else(|| {
         format!(
             "Release {} is missing required install asset '{}'",
             release.tag_name, install_name
         )
     })?;
-    let checksums = find_asset(&release.assets, checksums_name).ok_or_else(|| {
+    let checksums = find_unique_asset(&release.assets, checksums_name)?.ok_or_else(|| {
         format!(
             "Release {} is missing required checksums file '{}'",
             release.tag_name, checksums_name
@@ -87,8 +88,20 @@ pub fn select_release_assets(
     Ok((to_update_asset(install), to_update_asset(checksums)))
 }
 
-fn find_asset<'a>(assets: &'a [GitHubAssetDto], name: &str) -> Option<&'a GitHubAssetDto> {
-    assets.iter().find(|a| a.name == name)
+/// Find an asset by exact name. `Ok(None)` if missing; `Err` if duplicates or other issues.
+fn find_unique_asset<'a>(
+    assets: &'a [GitHubAssetDto],
+    name: &str,
+) -> Result<Option<&'a GitHubAssetDto>, String> {
+    let matches: Vec<_> = assets.iter().filter(|a| a.name == name).collect();
+    match matches.len() {
+        0 => Ok(None),
+        1 => Ok(Some(matches[0])),
+        _ => Err(format!(
+            "Release lists duplicate assets named '{}'; treating as a publishing error",
+            name
+        )),
+    }
 }
 
 fn to_update_asset(asset: &GitHubAssetDto) -> UpdateAssetInfo {
@@ -179,5 +192,19 @@ mod tests {
         );
         let err = select_release_assets(&rel, PlatformTarget::WindowsX86_64).unwrap_err();
         assert!(err.contains("SHA256SUMS.txt"));
+    }
+
+    #[test]
+    fn duplicate_assets_error() {
+        let rel = release(
+            "v2.0.0",
+            vec![
+                asset("Resh-v2.0.0-windows-x86_64.exe"),
+                asset("Resh-v2.0.0-windows-x86_64.exe"),
+                asset("SHA256SUMS.txt"),
+            ],
+        );
+        let err = select_release_assets(&rel, PlatformTarget::WindowsX86_64).unwrap_err();
+        assert!(err.contains("duplicate"));
     }
 }

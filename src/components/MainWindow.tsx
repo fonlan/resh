@@ -5,7 +5,18 @@ import React, {
   useMemo,
   Suspense,
 } from "react"
-import { Settings, X, Code, Circle, MessageSquare, Folder } from "lucide-react"
+import {
+  Settings,
+  X,
+  Code,
+  Circle,
+  MessageSquare,
+  Folder,
+  Download,
+  Loader2,
+  AlertCircle,
+  ArrowDownCircle,
+} from "lucide-react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 import { Config, EditorAIContext } from "../types"
@@ -48,6 +59,15 @@ import { useTranslation } from "../i18n"
 import { useTabDragDrop } from "../hooks/useTabDragDrop"
 import { EmojiText } from "./EmojiText"
 import { useTransferStore } from "../stores/transferStore"
+import {
+  useUpdateStore,
+  selectShowTitleUpdateButton,
+  selectUpdateStatus,
+  selectUpdateProgress,
+  selectUpdateDialogOpen,
+} from "../stores/useUpdateStore"
+import { UpdateDialog } from "./UpdateDialog"
+import { updateManagerApi } from "../hooks/useUpdateManager"
 import {
   isEditorTab,
   isTerminalTab,
@@ -125,6 +145,12 @@ export const MainWindow: React.FC = () => {
   const [hasLoadedAISidebar, setHasLoadedAISidebar] = useState(false)
 
   const initListener = useTransferStore((state) => state.initListener)
+
+  // Slice update store so download progress does not re-render the whole window.
+  const showUpdateButton = useUpdateStore(selectShowTitleUpdateButton)
+  const updateStatus = useUpdateStore(selectUpdateStatus)
+  const updateProgress = useUpdateStore(selectUpdateProgress)
+  const updateDialogOpen = useUpdateStore(selectUpdateDialogOpen)
 
   // Initialize transfer store listener
   useEffect(() => {
@@ -1490,6 +1516,64 @@ export const MainWindow: React.FC = () => {
 
         {/* Right side: Settings button + Window controls */}
         <div ref={rightControlsRef} className="flex items-center shrink-0">
+          {showUpdateButton && (
+            <button
+              type="button"
+              className={`flex items-center justify-center w-10 h-10 border-none cursor-pointer transition-all relative ${
+                updateStatus === "error"
+                  ? "bg-transparent text-red-400 hover:bg-[var(--bg-tertiary)]"
+                  : updateStatus === "ready"
+                    ? "bg-transparent text-emerald-400 hover:bg-[var(--bg-tertiary)]"
+                    : "bg-transparent text-[var(--accent-primary)] hover:bg-[var(--bg-tertiary)]"
+              }`}
+              onMouseDown={(e) => {
+                // Prevent title-bar drag from stealing the interaction.
+                e.stopPropagation()
+              }}
+              onClick={() => {
+                updateManagerApi.openDialog()
+              }}
+              aria-label={
+                updateStatus === "downloading"
+                  ? t.updateTitleDownloading
+                  : updateStatus === "ready"
+                    ? t.updateTitleReady
+                    : updateStatus === "error"
+                      ? t.updateTitleError
+                      : t.updateTitleButton
+              }
+              title={
+                updateStatus === "downloading"
+                  ? `${t.updateTitleDownloading}${
+                      updateProgress?.percent != null
+                        ? ` ${updateProgress.percent}%`
+                        : ""
+                    }`
+                  : updateStatus === "ready"
+                    ? t.updateTitleReady
+                    : updateStatus === "error"
+                      ? t.updateTitleError
+                      : t.updateTitleButton
+              }
+            >
+              {updateStatus === "downloading" ? (
+                <span className="relative flex items-center justify-center">
+                  <Loader2 size={18} className="animate-spin" />
+                  {updateProgress?.percent != null && (
+                    <span className="absolute -bottom-1 text-[9px] font-mono leading-none">
+                      {updateProgress.percent}
+                    </span>
+                  )}
+                </span>
+              ) : updateStatus === "error" ? (
+                <AlertCircle size={18} />
+              ) : updateStatus === "ready" ? (
+                <ArrowDownCircle size={18} />
+              ) : (
+                <Download size={18} />
+              )}
+            </button>
+          )}
           <button
             type="button"
             className={`flex items-center justify-center w-10 h-10 border-none text-[var(--text-secondary)] cursor-pointer transition-all ${isSFTPOpen && shouldRenderSFTPSidebar ? "bg-[var(--bg-tertiary)] text-[var(--accent-primary)]" : "bg-transparent hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"}`}
@@ -1841,6 +1925,11 @@ export const MainWindow: React.FC = () => {
 
       {/* Toast Notifications */}
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+
+      <UpdateDialog
+        isOpen={updateDialogOpen}
+        onClose={() => updateManagerApi.closeDialog()}
+      />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect } from "react"
 import { emit } from "@tauri-apps/api/event"
 import { useConfig } from "./hooks/useConfig"
 import { useTheme } from "./hooks/useTheme"
+import { useUpdateManager } from "./hooks/useUpdateManager"
 
 const MainWindow = lazy(() =>
   import("./components/MainWindow").then((module) => ({
@@ -47,6 +48,8 @@ function App() {
   const theme = config?.general.theme
 
   useTheme(theme)
+  // Global update check / download lifecycle (after config is ready).
+  useUpdateManager()
 
   useEffect(() => {
     void emit("resh-app-ready").catch(() => {})
