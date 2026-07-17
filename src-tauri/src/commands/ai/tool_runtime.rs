@@ -193,7 +193,7 @@ pub(super) async fn execute_command_in_exec_channel(
             .map(|token| token.is_cancelled())
             .unwrap_or(false)
         {
-            return Err("CANCELLED".to_string());
+            return Err(super::AI_CANCELLED.to_string());
         }
 
         tokio::select! {

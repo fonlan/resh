@@ -162,7 +162,7 @@ async fn main() {
                 config_manager: config_manager.clone(),
                 db_manager,
                 config: Mutex::new(local_config.clone()),
-                ai_cancellation_tokens: dashmap::DashMap::new(),
+                ai_cancellation_tokens: commands::AiRunRegistry::new(),
                 ai_manager: resh::ai::manager::AiManager::new(),
                 sftp_edit_manager: SftpEditManager::new(app.handle().clone()),
             });

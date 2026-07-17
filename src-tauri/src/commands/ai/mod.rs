@@ -70,7 +70,7 @@ fn latest_assistant_tool_calls_with_pending_ids(
     None
 }
 
-use crate::commands::AppState;
+use crate::commands::{AiRunGuard, AppState};
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent};
@@ -79,10 +79,107 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager, State, Window};
-use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub(super) const AI_STREAM_IDLE_TIMEOUT_SECS: u64 = 45;
+
+/// User-cancelled AI run; treat as a normal terminal outcome, not a provider error.
+pub const AI_CANCELLED: &str = "CANCELLED";
+
+pub fn is_ai_cancelled(err: &str) -> bool {
+    err == AI_CANCELLED
+}
+
+/// Dispatch run result: done / cancelled / error. Cancel returns Ok and emits `ai-cancelled-*`.
+fn finish_ai_run(
+    window: &Window,
+    session_id: &str,
+    request_id: &str,
+    result: Result<Option<Vec<ToolCall>>, String>,
+) -> Result<(), String> {
+    match result {
+        Ok(tool_calls) => {
+            if let Some(calls) = tool_calls {
+                if !calls.is_empty() {
+                    // Pending tool confirmation; frontend keeps generating until user acts.
+                    return Ok(());
+                }
+            }
+            window
+                .emit(&format!("ai-done-{}", session_id), request_id)
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) if is_ai_cancelled(&e) => {
+            tracing::info!(
+                "[AI] run cancelled session_id={} request_id={}",
+                session_id,
+                request_id
+            );
+            window
+                .emit(&format!("ai-cancelled-{}", session_id), request_id)
+                .ok();
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(
+                "[AI] run error session_id={} request_id={}: {}",
+                session_id,
+                request_id,
+                e
+            );
+            window
+                .emit(&format!("ai-error-{}", session_id), e.clone())
+                .ok();
+            Err(e)
+        }
+    }
+}
+
+/// Pure outcome classification for tests and future listeners (phase 2+).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiRunOutcome {
+    Completed,
+    PendingTools,
+    Cancelled,
+    Failed(String),
+}
+
+pub fn classify_ai_run_result(
+    result: &Result<Option<Vec<ToolCall>>, String>,
+) -> AiRunOutcome {
+    match result {
+        Ok(Some(calls)) if !calls.is_empty() => AiRunOutcome::PendingTools,
+        Ok(_) => AiRunOutcome::Completed,
+        Err(e) if is_ai_cancelled(e) => AiRunOutcome::Cancelled,
+        Err(e) => AiRunOutcome::Failed(e.clone()),
+    }
+}
+
+#[cfg(test)]
+mod ai_run_outcome_tests {
+    use super::{classify_ai_run_result, AiRunOutcome, AI_CANCELLED};
+
+    #[test]
+    fn classify_distinguishes_cancel_error_and_complete() {
+        assert_eq!(
+            classify_ai_run_result(&Ok(None)),
+            AiRunOutcome::Completed
+        );
+        assert_eq!(
+            classify_ai_run_result(&Ok(Some(vec![]))),
+            AiRunOutcome::Completed
+        );
+        assert_eq!(
+            classify_ai_run_result(&Err(AI_CANCELLED.to_string())),
+            AiRunOutcome::Cancelled
+        );
+        assert_eq!(
+            classify_ai_run_result(&Err("provider down".to_string())),
+            AiRunOutcome::Failed("provider down".to_string())
+        );
+    }
+}
 
 #[cfg(test)]
 mod history_window_tests {
@@ -509,9 +606,24 @@ mod tool_timeout_requirement_tests {
 pub async fn cancel_ai_chat(
     state: State<'_, Arc<AppState>>,
     session_id: String,
+    request_id: String,
 ) -> Result<(), String> {
-    if let Some(token) = state.ai_cancellation_tokens.get(&session_id) {
-        token.cancel();
+    if request_id.is_empty() {
+        return Err("request_id is required".to_string());
+    }
+    let cancelled = state.cancel_ai_run(&session_id, &request_id);
+    if cancelled {
+        tracing::info!(
+            "[AI] cancel requested session_id={} request_id={}",
+            session_id,
+            request_id
+        );
+    } else {
+        tracing::debug!(
+            "[AI] cancel ignored (no matching run) session_id={} request_id={}",
+            session_id,
+            request_id
+        );
     }
     Ok(())
 }
@@ -680,8 +792,25 @@ pub async fn send_chat_message(
     mode: Option<String>,
     ssh_session_id: Option<String>,
     thinking_level: Option<String>,
+    request_id: String,
 ) -> Result<(), String> {
-    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
+    if request_id.is_empty() {
+        return Err("request_id is required".to_string());
+    }
+
+    // Register before any await so cancel can interrupt prep / DB / stream setup.
+    let token = state.register_ai_run(&session_id, &request_id);
+    let _run_guard = AiRunGuard::new(
+        state.inner().clone(),
+        session_id.clone(),
+        request_id.clone(),
+    );
+
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
+    let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
     let bound_ssh_session_id: Option<String> = {
         let session_id_owned = session_id.clone();
@@ -725,8 +854,16 @@ pub async fn send_chat_message(
             .await?
     };
 
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
     let content =
         enrich_user_message_with_tagged_files(&content, bound_ssh_session_id.as_deref()).await;
+
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
 
     let user_msg_id = Uuid::new_v4().to_string();
     {
@@ -746,6 +883,10 @@ pub async fn send_chat_message(
             .await?;
     }
 
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
     let is_agent_mode = mode.as_deref() == Some("agent");
     let is_ask_mode = mode.as_deref() == Some("ask");
 
@@ -754,11 +895,6 @@ pub async fn send_chat_message(
     } else {
         None
     };
-
-    let token = CancellationToken::new();
-    state
-        .ai_cancellation_tokens
-        .insert(session_id.clone(), token.clone());
 
     let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
         window.clone(),
@@ -771,31 +907,11 @@ pub async fn send_chat_message(
         token,
         bound_ssh_session_id,
         thinking_level,
+        request_id.clone(),
     )
     .await;
 
-    state.ai_cancellation_tokens.remove(&session_id);
-
-    match result {
-        Ok(tool_calls) => {
-            if let Some(calls) = tool_calls {
-                if !calls.is_empty() {
-                    return Ok(());
-                }
-            }
-            window
-                .emit(&format!("ai-done-{}", session_id), "DONE")
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("[AI] send_chat_message error: {}", e);
-            window
-                .emit(&format!("ai-error-{}", session_id), e.clone())
-                .ok();
-            Err(e)
-        }
-    }
+    finish_ai_run(&window, &session_id, &request_id, result)
 }
 
 #[tauri::command]
@@ -808,8 +924,24 @@ pub async fn regenerate_ai_response(
     mode: Option<String>,
     ssh_session_id: Option<String>,
     thinking_level: Option<String>,
+    request_id: String,
 ) -> Result<(), String> {
-    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
+    if request_id.is_empty() {
+        return Err("request_id is required".to_string());
+    }
+
+    let token = state.register_ai_run(&session_id, &request_id);
+    let _run_guard = AiRunGuard::new(
+        state.inner().clone(),
+        session_id.clone(),
+        request_id.clone(),
+    );
+
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
+    let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
     let bound_ssh_session_id: Option<String> = {
         let session_id_owned = session_id.clone();
@@ -839,6 +971,10 @@ pub async fn regenerate_ai_response(
             .await?
     };
 
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
     {
         let session_id_owned = session_id.clone();
         state
@@ -866,6 +1002,10 @@ pub async fn regenerate_ai_response(
             .await?;
     }
 
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
     let is_agent_mode = mode.as_deref() == Some("agent");
     let is_ask_mode = mode.as_deref() == Some("ask");
 
@@ -874,11 +1014,6 @@ pub async fn regenerate_ai_response(
     } else {
         None
     };
-
-    let token = CancellationToken::new();
-    state
-        .ai_cancellation_tokens
-        .insert(session_id.clone(), token.clone());
 
     let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
         window.clone(),
@@ -891,31 +1026,11 @@ pub async fn regenerate_ai_response(
         token,
         bound_ssh_session_id,
         thinking_level,
+        request_id.clone(),
     )
     .await;
 
-    state.ai_cancellation_tokens.remove(&session_id);
-
-    match result {
-        Ok(tool_calls) => {
-            if let Some(calls) = tool_calls {
-                if !calls.is_empty() {
-                    return Ok(());
-                }
-            }
-            window
-                .emit(&format!("ai-done-{}", session_id), "DONE")
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("[AI] regenerate_ai_response error: {}", e);
-            window
-                .emit(&format!("ai-error-{}", session_id), e.clone())
-                .ok();
-            Err(e)
-        }
-    }
+    finish_ai_run(&window, &session_id, &request_id, result)
 }
 
 #[tauri::command]
@@ -929,8 +1044,24 @@ pub async fn execute_agent_tools(
     ssh_session_id: Option<String>,
     tool_call_ids: Vec<String>,
     thinking_level: Option<String>,
+    request_id: String,
 ) -> Result<(), String> {
-    let _ = window.emit(&format!("ai-started-{}", session_id), "started");
+    if request_id.is_empty() {
+        return Err("request_id is required".to_string());
+    }
+
+    let token = state.register_ai_run(&session_id, &request_id);
+    let _run_guard = AiRunGuard::new(
+        state.inner().clone(),
+        session_id.clone(),
+        request_id.clone(),
+    );
+
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
+    let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
     let bound_ssh_session_id: Option<String> = {
         let session_id_owned = session_id.clone();
@@ -961,6 +1092,10 @@ pub async fn execute_agent_tools(
             .await?
     };
 
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
+
     let is_agent_mode = mode.as_deref() == Some("agent");
 
     let history: Vec<ChatMessage> = load_history(
@@ -975,14 +1110,14 @@ pub async fn execute_agent_tools(
         latest_assistant_tool_calls_with_pending_ids(&history, &tool_call_ids)
     else {
         window
-            .emit(&format!("ai-done-{}", session_id), "DONE")
+            .emit(&format!("ai-done-{}", session_id), &request_id)
             .map_err(|e| e.to_string())?;
         return Ok(());
     };
 
     if tools_filtered.is_empty() {
         window
-            .emit(&format!("ai-done-{}", session_id), "DONE")
+            .emit(&format!("ai-done-{}", session_id), &request_id)
             .map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -998,10 +1133,9 @@ pub async fn execute_agent_tools(
         }
     }
 
-    let token = CancellationToken::new();
-    state
-        .ai_cancellation_tokens
-        .insert(session_id.clone(), token.clone());
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
 
     let exec_res = execute_tools_and_save(
         window.app_handle().clone(),
@@ -1014,8 +1148,11 @@ pub async fn execute_agent_tools(
     .await;
 
     if let Err(e) = exec_res {
-        state.ai_cancellation_tokens.remove(&session_id);
-        return Err(e);
+        return finish_ai_run(&window, &session_id, &request_id, Err(e));
+    }
+
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
     }
 
     let tools = Some(create_tools(is_agent_mode));
@@ -1031,31 +1168,11 @@ pub async fn execute_agent_tools(
         token,
         bound_ssh_session_id,
         thinking_level,
+        request_id.clone(),
     )
     .await;
 
-    state.ai_cancellation_tokens.remove(&session_id);
-
-    match result {
-        Ok(next_tool_calls) => {
-            if let Some(calls) = next_tool_calls {
-                if !calls.is_empty() {
-                    return Ok(());
-                }
-            }
-            window
-                .emit(&format!("ai-done-{}", session_id), "DONE")
-                .map_err(|e| e.to_string())?;
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!("[AI] execute_agent_tools error: {}", e);
-            window
-                .emit(&format!("ai-error-{}", session_id), e.clone())
-                .ok();
-            Err(e)
-        }
-    }
+    finish_ai_run(&window, &session_id, &request_id, result)
 }
 
 #[tauri::command]

@@ -29,6 +29,7 @@ import {
   Square,
 } from "lucide-react"
 import { listen } from "@tauri-apps/api/event"
+import { v4 as uuidv4 } from "uuid"
 import { ToolCall, ChatMessage } from "../types/ai"
 import { AIThinkingLevel, EditorAIContext } from "../types"
 import { ConfirmationModal } from "./ConfirmationModal"
@@ -212,6 +213,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastErrorToastRef = useRef<{ message: string; at: number } | null>(null)
   const scrollPositionsRef = useRef<Record<string, number>>({})
+  /** sessionId -> active AI requestId for cancel matching (phase 1; store moves in phase 2). */
+  const activeRequestIdBySessionRef = useRef<Record<string, string>>({})
   const pendingScrollRestoreRef = useRef<{
     key: string
     scrollTop: number
@@ -695,6 +698,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       setGenerating(activeSessionId, true)
       clearSessionStopped(activeSessionId)
 
+      const requestId = uuidv4()
+      activeRequestIdBySessionRef.current[activeSessionId] = requestId
+
       try {
         const model = config?.aiModels.find((m) => m.id === selectedModelId)
         const channelId = model?.channelId || ""
@@ -707,11 +713,16 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           boundSshSessionId,
           calls.map((c) => c.id),
           thinkingLevel,
+          requestId,
         )
         await selectSession(activeSessionId)
       } catch (err) {
         setGenerating(activeSessionId, false)
         showAiError(err)
+      } finally {
+        if (activeRequestIdBySessionRef.current[activeSessionId] === requestId) {
+          delete activeRequestIdBySessionRef.current[activeSessionId]
+        }
       }
     },
     [
@@ -1012,6 +1023,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     removeLatestAssistantMessage(activeSessionId)
     setGenerating(activeSessionId, true)
 
+    const requestId = uuidv4()
+    activeRequestIdBySessionRef.current[activeSessionId] = requestId
+
     try {
       const model = config?.aiModels.find((m) => m.id === selectedModelId)
       const channelId = model?.channelId || ""
@@ -1023,6 +1037,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         mode,
         boundSshSessionId,
         thinkingLevel,
+        requestId,
       )
 
       if (currentServerId) {
@@ -1038,6 +1053,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           await selectSession(activeSessionId, currentServerId)
         }
       } catch {}
+    } finally {
+      if (activeRequestIdBySessionRef.current[activeSessionId] === requestId) {
+        delete activeRequestIdBySessionRef.current[activeSessionId]
+      }
     }
   }, [
     activeSessionId,
@@ -1119,6 +1138,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     addMessage(sessionId, optimisticUserMessage)
     setGenerating(sessionId, true)
 
+    const requestId = uuidv4()
+    activeRequestIdBySessionRef.current[sessionId] = requestId
+
     try {
       const model = config?.aiModels.find((m) => m.id === selectedModelId)
       const channelId = model?.channelId || ""
@@ -1131,6 +1153,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         mode,
         boundSshSessionId,
         thinkingLevel,
+        requestId,
       )
 
       if (currentServerId) {
@@ -1139,6 +1162,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     } catch (err) {
       setGenerating(sessionId, false)
       showAiError(err)
+    } finally {
+      if (activeRequestIdBySessionRef.current[sessionId] === requestId) {
+        delete activeRequestIdBySessionRef.current[sessionId]
+      }
     }
   }, [
     inputValue,
@@ -1199,12 +1226,15 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       storeSetPendingToolCalls(activeSessionId, null)
     }
 
-    // 2. Cancel backend processing if active
+    // 2. Cancel backend processing if active (match requestId)
     if (activeSessionId && isLoading) {
-      try {
-        await aiService.cancelMessage(activeSessionId)
-      } catch (err) {
-        // Failed to cancel message
+      const requestId = activeRequestIdBySessionRef.current[activeSessionId]
+      if (requestId) {
+        try {
+          await aiService.cancelMessage(activeSessionId, requestId)
+        } catch (err) {
+          // Failed to cancel message
+        }
       }
     }
 

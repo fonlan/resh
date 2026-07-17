@@ -24,3 +24,7 @@ export interface AISession {
   modelId: string | null
   sshSessionId?: string | null
 }
+
+/** Identifies one AI run for a session (send / regenerate / tool continue). */
+export type AiRequestId = string
+

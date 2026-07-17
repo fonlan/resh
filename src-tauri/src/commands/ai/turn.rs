@@ -24,7 +24,7 @@ use super::tool_runtime::{
     try_recover_terminal_after_timeout, START_MARKER_EXPECT_MS, TIMEOUT_RECOVERY_GRACE_MS,
 };
 use super::types::{ChatMessage, FunctionCall, ToolCall, ToolDefinition};
-use super::{is_read_only_tool, AI_STREAM_IDLE_TIMEOUT_SECS};
+use super::{is_read_only_tool, AI_CANCELLED, AI_STREAM_IDLE_TIMEOUT_SECS};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 
@@ -38,7 +38,7 @@ pub(super) async fn execute_tools_and_save(
 ) -> Result<(), String> {
     for call in tools {
         if cancellation_token.is_cancelled() {
-            return Err("CANCELLED".to_string());
+            return Err(AI_CANCELLED.to_string());
         }
 
         let result = match call.function.name.as_str() {
@@ -189,7 +189,7 @@ pub(super) async fn execute_tools_and_save(
                                                 SSHClient::stop_command_recording(ssh_id)
                                                     .await
                                                     .ok();
-                                                return Err("CANCELLED".to_string());
+                                                return Err(AI_CANCELLED.to_string());
                                             }
                                             interval.tick().await;
                                             elapsed += 100;
@@ -361,7 +361,7 @@ pub(super) async fn execute_tools_and_save(
                                             }
                                         }
                                         Err(e) => {
-                                            if e == "CANCELLED" {
+                                            if e == AI_CANCELLED {
                                                 return Err(e);
                                             }
                                             format!("Error: {}", e)
@@ -639,8 +639,13 @@ pub fn run_ai_turn(
     cancellation_token: CancellationToken,
     ssh_session_id: Option<String>,
     thinking_level: Option<String>,
+    request_id: String,
 ) -> futures::future::BoxFuture<'static, Result<Option<Vec<ToolCall>>, String>> {
     Box::pin(async move {
+        if cancellation_token.is_cancelled() {
+            return Err(AI_CANCELLED.to_string());
+        }
+
         let (channel, model, proxy) = {
             let config = state.config.lock().await;
             let model = config
@@ -662,13 +667,21 @@ pub fn run_ai_turn(
             (channel, model, proxy)
         };
 
-        let history: Vec<ChatMessage> = load_history(
-            &state,
-            &session_id,
-            is_agent_mode,
-            ssh_session_id.as_deref(),
-        )
-        .await?;
+        if cancellation_token.is_cancelled() {
+            return Err(AI_CANCELLED.to_string());
+        }
+
+        let history: Vec<ChatMessage> = tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                return Err(AI_CANCELLED.to_string());
+            }
+            history = load_history(
+                &state,
+                &session_id,
+                is_agent_mode,
+                ssh_session_id.as_deref(),
+            ) => history?,
+        };
         let genai_history = to_genai_messages(history);
 
         let genai_tools: Option<Vec<Tool>> = tools.as_ref().map(|ts| {
@@ -681,17 +694,24 @@ pub fn run_ai_turn(
                 .collect()
         });
 
-        let mut stream = state
-            .ai_manager
-            .stream_chat(
+        if cancellation_token.is_cancelled() {
+            return Err(AI_CANCELLED.to_string());
+        }
+
+        // Interruptible stream open: cancel must not wait for provider connect.
+        let mut stream = tokio::select! {
+            _ = cancellation_token.cancelled() => {
+                return Err(AI_CANCELLED.to_string());
+            }
+            stream_result = state.ai_manager.stream_chat(
                 &channel,
                 &model,
                 genai_history,
                 genai_tools,
                 proxy,
                 thinking_level.as_deref(),
-            )
-            .await?;
+            ) => stream_result?,
+        };
 
         let mut full_content = String::new();
         let mut full_reasoning = String::new();
@@ -711,30 +731,17 @@ pub fn run_ai_turn(
         let error_event = format!("ai-error-{}", session_id);
 
         loop {
+            // Cancellation-first: when both ready, prefer cancel over chunk delivery.
             let next_event = tokio::select! {
+                biased;
                 _ = cancellation_token.cancelled() => {
-                    flush_think_parser_remainder(
-                        &window,
-                        &response_event,
-                        &reasoning_event,
-                        &reasoning_end_event,
-                        &mut think_parser_buffer,
-                        in_think_block,
-                        &mut full_content,
-                        &mut full_reasoning,
-                        &mut response_emit_buffer,
-                        &mut reasoning_emit_buffer,
-                        &mut has_pending_reasoning,
-                        &mut last_emit_at,
-                    )?;
-                    flush_response_buffer(&window, &response_event, &mut response_emit_buffer)?;
-                    flush_reasoning_buffer(&window, &reasoning_event, &mut reasoning_emit_buffer)?;
+                    // Do not flush undelivered response/reasoning/tool-call tails on cancel.
                     if has_pending_reasoning {
                         window
                             .emit(&reasoning_end_event, "end")
                             .map_err(|e| e.to_string())?;
                     }
-                    return Err("CANCELLED".to_string());
+                    return Err(AI_CANCELLED.to_string());
                 }
                 maybe_event = tokio::time::timeout(
                     Duration::from_secs(AI_STREAM_IDLE_TIMEOUT_SECS),
@@ -770,9 +777,10 @@ pub fn run_ai_turn(
                                 AI_STREAM_IDLE_TIMEOUT_SECS
                             );
                             tracing::warn!(
-                                "[AI] {} session_id={}, pending_tool_fragments={}",
+                                "[AI] {} session_id={}, request_id={}, pending_tool_fragments={}",
                                 err_msg,
                                 session_id,
+                                request_id,
                                 accumulated_tool_calls.len()
                             );
                             window
@@ -1161,6 +1169,7 @@ pub fn run_ai_turn(
                     cancellation_token,
                     ssh_session_id,
                     thinking_level,
+                    request_id,
                 )
                 .await;
             }

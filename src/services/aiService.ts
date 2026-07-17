@@ -16,9 +16,10 @@ export const aiService = {
     content: string,
     modelId: string,
     channelId: string,
-    mode?: string,
-    sshSessionId?: string,
-    thinkingLevel?: string,
+    mode: string | undefined,
+    sshSessionId: string | undefined,
+    thinkingLevel: string | undefined,
+    requestId: string,
   ) =>
     invoke("send_chat_message", {
       sessionId,
@@ -28,15 +29,17 @@ export const aiService = {
       mode,
       sshSessionId,
       thinkingLevel,
+      requestId,
     }),
 
   regenerateResponse: (
     sessionId: string,
     modelId: string,
     channelId: string,
-    mode?: string,
-    sshSessionId?: string,
-    thinkingLevel?: string,
+    mode: string | undefined,
+    sshSessionId: string | undefined,
+    thinkingLevel: string | undefined,
+    requestId: string,
   ) =>
     invoke("regenerate_ai_response", {
       sessionId,
@@ -45,18 +48,21 @@ export const aiService = {
       mode,
       sshSessionId,
       thinkingLevel,
+      requestId,
     }),
 
-  cancelMessage: (sessionId: string) => invoke("cancel_ai_chat", { sessionId }),
+  cancelMessage: (sessionId: string, requestId: string) =>
+    invoke("cancel_ai_chat", { sessionId, requestId }),
 
   executeAgentTools: (
-    sessionId: String,
-    modelId: String,
-    channelId: String,
+    sessionId: string,
+    modelId: string,
+    channelId: string,
     mode: string | undefined,
     sshSessionId: string | undefined,
     toolCallIds: string[],
-    thinkingLevel?: string,
+    thinkingLevel: string | undefined,
+    requestId: string,
   ) =>
     invoke("execute_agent_tools", {
       sessionId,
@@ -66,6 +72,7 @@ export const aiService = {
       sshSessionId,
       toolCallIds,
       thinkingLevel,
+      requestId,
     }),
 
   generateTitle: (sessionId: string, modelId: string, channelId: string) =>

@@ -13,13 +13,113 @@ use tokio::sync::Mutex;
 use dashmap::DashMap;
 use tokio_util::sync::CancellationToken;
 
+/// Active AI run for a session: one current request + its cancellation token.
+#[derive(Clone, Debug)]
+pub struct AiRunEntry {
+    pub request_id: String,
+    pub token: CancellationToken,
+}
+
+/// Minimal registry surface shared by AppState and unit tests.
+#[derive(Default)]
+pub struct AiRunRegistry {
+    entries: DashMap<String, AiRunEntry>,
+}
+
+impl AiRunRegistry {
+    pub fn new() -> Self {
+        Self {
+            entries: DashMap::new(),
+        }
+    }
+
+    /// Register a new AI run. Cancels any previous run for the same session first.
+    pub fn register(&self, session_id: &str, request_id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        if let Some((_, previous)) = self.entries.remove(session_id) {
+            previous.token.cancel();
+        }
+        self.entries.insert(
+            session_id.to_string(),
+            AiRunEntry {
+                request_id: request_id.to_string(),
+                token: token.clone(),
+            },
+        );
+        token
+    }
+
+    /// Cancel only when the session's current run matches `request_id`.
+    pub fn cancel(&self, session_id: &str, request_id: &str) -> bool {
+        if let Some(entry) = self.entries.get(session_id) {
+            if entry.request_id == request_id {
+                entry.token.cancel();
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Remove the registry entry only if it still belongs to this request.
+    pub fn clear_if_matches(&self, session_id: &str, request_id: &str) {
+        self.entries
+            .remove_if(session_id, |_, entry| entry.request_id == request_id);
+    }
+
+    pub fn current_request_id(&self, session_id: &str) -> Option<String> {
+        self.entries
+            .get(session_id)
+            .map(|entry| entry.request_id.clone())
+    }
+}
+
 pub struct AppState {
     pub config_manager: ConfigManager,
     pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
-    pub ai_cancellation_tokens: DashMap<String, CancellationToken>,
+    /// session_id -> current AI run (request_id + token). At most one run per session.
+    pub ai_cancellation_tokens: AiRunRegistry,
     pub ai_manager: AiManager,
     pub sftp_edit_manager: SftpEditManager,
+}
+
+impl AppState {
+    pub fn register_ai_run(&self, session_id: &str, request_id: &str) -> CancellationToken {
+        self.ai_cancellation_tokens.register(session_id, request_id)
+    }
+
+    pub fn cancel_ai_run(&self, session_id: &str, request_id: &str) -> bool {
+        self.ai_cancellation_tokens.cancel(session_id, request_id)
+    }
+
+    pub fn clear_ai_run_if_matches(&self, session_id: &str, request_id: &str) {
+        self.ai_cancellation_tokens
+            .clear_if_matches(session_id, request_id);
+    }
+}
+
+/// Drops by clearing only this request's registry entry (safe under request replacement).
+pub struct AiRunGuard {
+    state: Arc<AppState>,
+    session_id: String,
+    request_id: String,
+}
+
+impl AiRunGuard {
+    pub fn new(state: Arc<AppState>, session_id: String, request_id: String) -> Self {
+        Self {
+            state,
+            session_id,
+            request_id,
+        }
+    }
+}
+
+impl Drop for AiRunGuard {
+    fn drop(&mut self) {
+        self.state
+            .clear_ai_run_if_matches(&self.session_id, &self.request_id);
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -348,5 +448,48 @@ mod tests {
         assert!(apply_server_connection(&mut config, "missing").is_err());
         assert!(config.general.recent_server_ids.is_empty());
         assert!(config.general.server_connection_counts.is_empty());
+    }
+
+    #[test]
+    fn register_replaces_and_cancels_previous_run() {
+        let registry = AiRunRegistry::new();
+        let token_a = registry.register("sess-1", "req-a");
+        let token_b = registry.register("sess-1", "req-b");
+
+        assert!(token_a.is_cancelled());
+        assert!(!token_b.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-1").as_deref(),
+            Some("req-b")
+        );
+    }
+
+    #[test]
+    fn cancel_only_matches_current_request_id() {
+        let registry = AiRunRegistry::new();
+        let token = registry.register("sess-1", "req-b");
+
+        assert!(!registry.cancel("sess-1", "req-a"));
+        assert!(!token.is_cancelled());
+
+        assert!(registry.cancel("sess-1", "req-b"));
+        assert!(token.is_cancelled());
+    }
+
+    #[test]
+    fn clear_if_matches_does_not_remove_newer_request() {
+        let registry = AiRunRegistry::new();
+        let _token_a = registry.register("sess-1", "req-a");
+        let token_b = registry.register("sess-1", "req-b");
+
+        registry.clear_if_matches("sess-1", "req-a");
+        assert_eq!(
+            registry.current_request_id("sess-1").as_deref(),
+            Some("req-b")
+        );
+        assert!(!token_b.is_cancelled());
+
+        registry.clear_if_matches("sess-1", "req-b");
+        assert!(registry.current_request_id("sess-1").is_none());
     }
 }
