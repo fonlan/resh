@@ -315,6 +315,8 @@ async fn main() {
             commands::sftp_edit::open_local_editor,
             commands::sftp_edit::pick_folder,
             commands::sftp_edit::pick_file,
+            commands::updater::check_for_update_cmd,
+            commands::updater::get_app_version_cmd,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

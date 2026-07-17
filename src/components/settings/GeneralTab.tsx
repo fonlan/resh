@@ -1,6 +1,7 @@
 import React from "react"
 import { GeneralSettings, NewTabServerSort } from "../../types"
 import { useTranslation } from "../../i18n"
+import { useConfig } from "../../hooks/useConfig"
 import { CustomSelect } from "../CustomSelect"
 
 const MIN_FIXED_TAB_WIDTH = 120
@@ -17,6 +18,15 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
   onGeneralUpdate,
 }) => {
   const { t } = useTranslation()
+  const { config } = useConfig()
+
+  const updateSettings = general.update ?? { autoCheck: true, proxyId: null }
+  const proxyOptions = config?.proxies ?? []
+  const selectedProxyId = updateSettings.proxyId || ""
+  const selectedProxyExists =
+    !selectedProxyId ||
+    proxyOptions.some((proxy) => proxy.id === selectedProxyId)
+  const effectiveProxyId = selectedProxyExists ? selectedProxyId : ""
 
   const handleThemeChange = (
     theme: "light" | "dark" | "orange" | "green" | "system",
@@ -73,6 +83,22 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
     value: boolean | number,
   ) => {
     onGeneralUpdate({ ...general, [field]: value })
+  }
+
+  const handleUpdateSettingsChange = (patch: {
+    autoCheck?: boolean
+    proxyId?: string | null
+  }) => {
+    onGeneralUpdate({
+      ...general,
+      update: {
+        autoCheck: patch.autoCheck ?? updateSettings.autoCheck ?? true,
+        proxyId:
+          patch.proxyId !== undefined
+            ? patch.proxyId
+            : (updateSettings.proxyId ?? null),
+      },
+    })
   }
 
   return (
@@ -279,6 +305,63 @@ export const GeneralTab: React.FC<GeneralTabProps> = ({
                 { value: "updatedAt", label: t.tabNewServerSorts.updatedAt },
               ]}
             />
+          </div>
+        </div>
+      </div>
+
+      {/* Software Update Section */}
+      <div>
+        <h3 className="text-base font-semibold  mb-4">{t.softwareUpdate}</h3>
+        <div className="space-y-4">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={updateSettings.autoCheck ?? true}
+              onChange={(e) =>
+                handleUpdateSettingsChange({ autoCheck: e.target.checked })
+              }
+              className="appearance-none -webkit-appearance-none w-[18px] h-[18px] border-[1.5px] border-zinc-700/50 rounded bg-[var(--bg-primary)] cursor-pointer relative transition-all flex-shrink-0 inline-flex items-center justify-center vertical-middle checked:bg-blue-500 checked:border-blue-500 checked:shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:border-blue-500 focus:outline-none focus:shadow-[0_0_0_3px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            <span className="block text-sm font-medium text-zinc-400 mb-0 ">
+              {t.updateAutoCheck}
+            </span>
+          </label>
+          <p className="text-xs text-[var(--text-muted)] -mt-2 ml-7">
+            {t.updateAutoCheckHint}
+          </p>
+
+          <div className="flex flex-col gap-1.5 mb-1">
+            <label
+              htmlFor="update-proxy-select"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.updateProxy}
+            </label>
+            <CustomSelect
+              id="update-proxy-select"
+              value={effectiveProxyId}
+              onChange={(val) =>
+                handleUpdateSettingsChange({
+                  proxyId: val ? val : null,
+                })
+              }
+              options={[
+                { value: "", label: t.common.noProxy },
+                ...proxyOptions.map((proxy) => ({
+                  value: proxy.id,
+                  label: proxy.name,
+                })),
+              ]}
+            />
+            {!selectedProxyExists && selectedProxyId ? (
+              <span className="text-xs text-amber-400">
+                {t.updateProxyMissing}
+              </span>
+            ) : (
+              <span className="text-xs text-[var(--text-muted)]">
+                {t.updateProxyHint}
+              </span>
+            )}
           </div>
         </div>
       </div>

@@ -56,6 +56,13 @@ export type NewTabServerSort =
   | "createdAt"
   | "updatedAt"
 
+export interface UpdateSettings {
+  /** Automatically check GitHub for stable releases (local only). */
+  autoCheck: boolean
+  /** Proxy id from existing proxies; null/undefined means direct connection. */
+  proxyId?: string | null
+}
+
 export interface GeneralSettings {
   theme: Theme
   language: Language
@@ -83,4 +90,6 @@ export interface GeneralSettings {
   serverConnectionCounts: Record<string, number>
   aiModelId?: string
   aiThinkingLevel?: AIThinkingLevel
+  /** Local-only update settings; not synced via WebDAV. */
+  update?: UpdateSettings
 }

@@ -171,4 +171,43 @@ mod tests {
             serde_json::json!(30)
         );
     }
+
+    #[test]
+    fn update_settings_default_when_missing_and_local_only() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manager = ConfigManager::new(temp_dir.path().join("Resh"));
+
+        let mut missing_field = serde_json::to_value(Config::empty()).unwrap();
+        missing_field["general"]
+            .as_object_mut()
+            .unwrap()
+            .remove("update");
+        std::fs::write(
+            manager.local_config_path(),
+            serde_json::to_vec_pretty(&missing_field).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = manager.load_local_config().unwrap();
+        assert!(loaded.general.update.auto_check);
+        assert!(loaded.general.update.proxy_id.is_none());
+
+        // SyncConfig must not carry general/update settings.
+        let sync_json = serde_json::to_value(crate::config::types::SyncConfig {
+            version: "1.0".to_string(),
+            servers: vec![],
+            authentications: vec![],
+            proxies: vec![],
+            snippets: vec![],
+            ai_channels: vec![],
+            ai_models: vec![],
+            sftp_custom_commands: vec![],
+            additional_prompt: None,
+            additional_prompt_updated_at: None,
+            removed_ids: vec![],
+        })
+        .unwrap();
+        assert!(sync_json.get("general").is_none());
+        assert!(sync_json.get("update").is_none());
+    }
 }

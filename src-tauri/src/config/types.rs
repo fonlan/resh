@@ -383,6 +383,32 @@ pub struct GeneralSettings {
     #[serde(default)]
     #[serde(alias = "aiThinkingLevel", alias = "ai_thinking_level")]
     pub ai_thinking_level: Option<String>,
+    /// Local-only software update preferences (not part of SyncConfig / WebDAV).
+    #[serde(default)]
+    pub update: UpdateSettings,
+}
+
+/// Software update preferences stored only in `local.json`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    /// Automatically check GitHub for stable releases.
+    #[serde(default = "default_true")]
+    #[serde(alias = "auto_check")]
+    pub auto_check: bool,
+    /// Optional proxy id from the existing proxy list; `None` means direct.
+    #[serde(default)]
+    #[serde(alias = "proxy_id")]
+    pub proxy_id: Option<String>,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            auto_check: true,
+            proxy_id: None,
+        }
+    }
 }
 
 const MAX_AI_TOOL_CONFIRMATION_COUNTDOWN: u32 = 30;
@@ -395,7 +421,16 @@ impl GeneralSettings {
             .min(MAX_AI_TOOL_CONFIRMATION_COUNTDOWN);
         let countdown_changed = countdown != self.ai_tool_confirmation_countdown;
         self.ai_tool_confirmation_countdown = countdown;
-        sftp_changed || countdown_changed
+
+        let mut update_changed = false;
+        if let Some(ref id) = self.update.proxy_id {
+            if id.trim().is_empty() {
+                self.update.proxy_id = None;
+                update_changed = true;
+            }
+        }
+
+        sftp_changed || countdown_changed || update_changed
     }
 }
 
@@ -588,6 +623,7 @@ impl Config {
                 server_connection_counts: HashMap::new(),
                 ai_model_id: None,
                 ai_thinking_level: None,
+                update: UpdateSettings::default(),
             },
         }
     }
