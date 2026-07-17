@@ -49,9 +49,11 @@ import {
   clampAiToolConfirmationCountdown,
   collectAssistantToolOutputs,
   HIDDEN_TOOL_CALL_NAMES,
+  isMatchingAiRequest,
   MAX_EDITOR_CONTEXT_CHARS,
   normalizeAiErrorMessage,
   shouldExecuteToolCallsWithoutConfirmation,
+  shouldGenerateTitleAfterRun,
   SFTP_ENTRY_MIME_TYPE,
   SFTP_PATH_MIME_TYPE,
   type SftpDragEntry,
@@ -794,8 +796,10 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     const sessionId = activeSessionId
 
-    const isCurrentRequest = (requestId: string | undefined | null) =>
-      useAIStore.getState().isActiveRequest(sessionId, requestId)
+    const isCurrentRequest = (requestId: string | undefined | null) => {
+      const active = useAIStore.getState().activeRequestId[sessionId]
+      return isMatchingAiRequest(active, requestId)
+    }
 
     const clearStreamBuffers = () => {
       if (streamFlushTimerRef.current) {
@@ -984,9 +988,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         flushStreamBuffers(requestId)
         finishRun(sessionId, requestId)
 
-        // Auto-generate title only after a normal completion.
+        // Auto-generate title only after a normal completion on "New Chat".
         const currentSession = sessionsRef.current.find((s) => s.id === sessionId)
-        if (currentSession && currentSession.title === "New Chat") {
+        if (
+          shouldGenerateTitleAfterRun("done", currentSession?.title) &&
+          currentSession
+        ) {
           try {
             const modelId = selectedModelIdRef.current
             const model = configRef.current?.aiModels.find((m) => m.id === modelId)

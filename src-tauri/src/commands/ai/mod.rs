@@ -80,6 +80,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{Emitter, Manager, State, Window};
 use uuid::Uuid;
+use tokio_util::sync::CancellationToken;
 
 pub(super) const AI_STREAM_IDLE_TIMEOUT_SECS: u64 = 45;
 
@@ -90,27 +91,94 @@ pub fn is_ai_cancelled(err: &str) -> bool {
     err == AI_CANCELLED
 }
 
+/// Pure outcome classification for tests and terminal event dispatch (no Tauri).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiRunOutcome {
+    Completed,
+    PendingTools,
+    Cancelled,
+    Failed(String),
+}
+
+/// Terminal event kind planned for a finished AI run (provider-agnostic).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiRunFinishEvent {
+    /// Pending tool confirmation: no done/cancelled/error event.
+    None,
+    /// Emit `ai-done-{session}` with request_id.
+    Done,
+    /// Emit `ai-cancelled-{session}` with request_id (normal terminal).
+    Cancelled,
+    /// Emit `ai-error-{session}` with structured payload; command returns Err.
+    Error(String),
+}
+
+pub fn classify_ai_run_result(
+    result: &Result<Option<Vec<ToolCall>>, String>,
+) -> AiRunOutcome {
+    match result {
+        Ok(Some(calls)) if !calls.is_empty() => AiRunOutcome::PendingTools,
+        Ok(_) => AiRunOutcome::Completed,
+        Err(e) if is_ai_cancelled(e) => AiRunOutcome::Cancelled,
+        Err(e) => AiRunOutcome::Failed(e.clone()),
+    }
+}
+
+/// Map a run result to the event + command return value without touching Tauri.
+/// Cancel is a successful terminal outcome (`Ok(())`), never an error emit.
+pub fn plan_ai_run_finish(
+    result: &Result<Option<Vec<ToolCall>>, String>,
+) -> (AiRunFinishEvent, Result<(), String>) {
+    match classify_ai_run_result(result) {
+        AiRunOutcome::PendingTools => (AiRunFinishEvent::None, Ok(())),
+        AiRunOutcome::Completed => (AiRunFinishEvent::Done, Ok(())),
+        AiRunOutcome::Cancelled => (AiRunFinishEvent::Cancelled, Ok(())),
+        AiRunOutcome::Failed(e) => (AiRunFinishEvent::Error(e.clone()), Err(e)),
+    }
+}
+
+/// Prefer cancelled over done/pending when the run token is already cancelled.
+/// Closes the race between a successful empty-tools path and a late cancel.
+pub fn plan_ai_run_finish_with_token(
+    token: &CancellationToken,
+    result: &Result<Option<Vec<ToolCall>>, String>,
+) -> (AiRunFinishEvent, Result<(), String>) {
+    if token.is_cancelled() {
+        return plan_ai_run_finish(&Err(AI_CANCELLED.to_string()));
+    }
+    plan_ai_run_finish(result)
+}
+
 /// Dispatch run result: done / cancelled / error. Cancel returns Ok and emits `ai-cancelled-*`.
+/// If `token` is already cancelled, always emit cancelled (never done/error for success paths).
 fn finish_ai_run(
     window: &Window,
     session_id: &str,
     request_id: &str,
     result: Result<Option<Vec<ToolCall>>, String>,
 ) -> Result<(), String> {
-    match result {
-        Ok(tool_calls) => {
-            if let Some(calls) = tool_calls {
-                if !calls.is_empty() {
-                    // Pending tool confirmation; frontend keeps generating until user acts.
-                    return Ok(());
-                }
-            }
+    finish_ai_run_with_token(window, session_id, request_id, None, result)
+}
+
+fn finish_ai_run_with_token(
+    window: &Window,
+    session_id: &str,
+    request_id: &str,
+    token: Option<&CancellationToken>,
+    result: Result<Option<Vec<ToolCall>>, String>,
+) -> Result<(), String> {
+    let (event, command_result) = match token {
+        Some(token) => plan_ai_run_finish_with_token(token, &result),
+        None => plan_ai_run_finish(&result),
+    };
+    match event {
+        AiRunFinishEvent::None => {}
+        AiRunFinishEvent::Done => {
             window
                 .emit(&format!("ai-done-{}", session_id), request_id)
                 .map_err(|e| e.to_string())?;
-            Ok(())
         }
-        Err(e) if is_ai_cancelled(&e) => {
+        AiRunFinishEvent::Cancelled => {
             tracing::info!(
                 "[AI] run cancelled session_id={} request_id={}",
                 session_id,
@@ -119,9 +187,8 @@ fn finish_ai_run(
             window
                 .emit(&format!("ai-cancelled-{}", session_id), request_id)
                 .ok();
-            Ok(())
         }
-        Err(e) => {
+        AiRunFinishEvent::Error(ref e) => {
             tracing::error!(
                 "[AI] run error session_id={} request_id={}: {}",
                 session_id,
@@ -137,34 +204,28 @@ fn finish_ai_run(
                     },
                 )
                 .ok();
-            Err(e)
         }
     }
-}
-
-/// Pure outcome classification for tests and future listeners (phase 2+).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AiRunOutcome {
-    Completed,
-    PendingTools,
-    Cancelled,
-    Failed(String),
-}
-
-pub fn classify_ai_run_result(
-    result: &Result<Option<Vec<ToolCall>>, String>,
-) -> AiRunOutcome {
-    match result {
-        Ok(Some(calls)) if !calls.is_empty() => AiRunOutcome::PendingTools,
-        Ok(_) => AiRunOutcome::Completed,
-        Err(e) if is_ai_cancelled(e) => AiRunOutcome::Cancelled,
-        Err(e) => AiRunOutcome::Failed(e.clone()),
-    }
+    command_result
 }
 
 #[cfg(test)]
 mod ai_run_outcome_tests {
-    use super::{classify_ai_run_result, AiRunOutcome, AI_CANCELLED};
+    use super::{
+        classify_ai_run_result, plan_ai_run_finish, AiRunFinishEvent, AiRunOutcome,
+        FunctionCall, ToolCall, AI_CANCELLED,
+    };
+
+    fn sample_tool_call() -> ToolCall {
+        ToolCall {
+            id: "call-1".to_string(),
+            tool_type: "function".to_string(),
+            function: FunctionCall {
+                name: "read_file".to_string(),
+                arguments: "{}".to_string(),
+            },
+        }
+    }
 
     #[test]
     fn classify_distinguishes_cancel_error_and_complete() {
@@ -177,6 +238,10 @@ mod ai_run_outcome_tests {
             AiRunOutcome::Completed
         );
         assert_eq!(
+            classify_ai_run_result(&Ok(Some(vec![sample_tool_call()]))),
+            AiRunOutcome::PendingTools
+        );
+        assert_eq!(
             classify_ai_run_result(&Err(AI_CANCELLED.to_string())),
             AiRunOutcome::Cancelled
         );
@@ -184,6 +249,396 @@ mod ai_run_outcome_tests {
             classify_ai_run_result(&Err("provider down".to_string())),
             AiRunOutcome::Failed("provider down".to_string())
         );
+    }
+
+    #[test]
+    fn plan_finish_cancel_is_ok_and_never_error_event() {
+        let (event, result) = plan_ai_run_finish(&Err(AI_CANCELLED.to_string()));
+        assert_eq!(event, AiRunFinishEvent::Cancelled);
+        assert!(result.is_ok());
+
+        // Cancel must not share the error-dispatch path used by provider failures.
+        let (err_event, err_result) =
+            plan_ai_run_finish(&Err("provider down".to_string()));
+        assert_eq!(
+            err_event,
+            AiRunFinishEvent::Error("provider down".to_string())
+        );
+        assert_eq!(err_result, Err("provider down".to_string()));
+        assert_ne!(err_event, AiRunFinishEvent::Cancelled);
+    }
+
+    #[test]
+    fn plan_finish_done_pending_and_failed_paths() {
+        let (done_event, done_ok) = plan_ai_run_finish(&Ok(None));
+        assert_eq!(done_event, AiRunFinishEvent::Done);
+        assert!(done_ok.is_ok());
+
+        let (pending_event, pending_ok) =
+            plan_ai_run_finish(&Ok(Some(vec![sample_tool_call()])));
+        assert_eq!(pending_event, AiRunFinishEvent::None);
+        assert!(pending_ok.is_ok());
+
+        let (empty_tools_event, empty_tools_ok) =
+            plan_ai_run_finish(&Ok(Some(vec![])));
+        assert_eq!(empty_tools_event, AiRunFinishEvent::Done);
+        assert!(empty_tools_ok.is_ok());
+    }
+
+    #[test]
+    fn plan_finish_with_token_prefers_cancel_over_done() {
+        use super::plan_ai_run_finish_with_token;
+        use tokio_util::sync::CancellationToken;
+
+        let live = CancellationToken::new();
+        let (event, result) = plan_ai_run_finish_with_token(&live, &Ok(None));
+        assert_eq!(event, AiRunFinishEvent::Done);
+        assert!(result.is_ok());
+
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        let (event, result) = plan_ai_run_finish_with_token(&cancelled, &Ok(None));
+        assert_eq!(event, AiRunFinishEvent::Cancelled);
+        assert!(result.is_ok());
+
+        let (event, result) =
+            plan_ai_run_finish_with_token(&cancelled, &Ok(Some(vec![sample_tool_call()])));
+        assert_eq!(event, AiRunFinishEvent::Cancelled);
+        assert!(result.is_ok());
+
+        // Provider failure still surfaces as error when not cancelled.
+        let (event, result) =
+            plan_ai_run_finish_with_token(&live, &Err("provider down".to_string()));
+        assert_eq!(event, AiRunFinishEvent::Error("provider down".to_string()));
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod ai_cancel_race_async_tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio_util::sync::CancellationToken;
+
+    use crate::commands::AiRunRegistry;
+
+    /// Stream event kinds observed by a turn-like consumer (provider-agnostic).
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum MockStreamEvent {
+        Response(String),
+        Reasoning(String),
+        ToolCall(String),
+    }
+
+    /// Mirrors the stream loop shape in `turn.rs`:
+    /// biased cancel-first select over a blocking `stream.next()`, and **no**
+    /// flush of undelivered tails when cancelled.
+    async fn drain_mock_stream_until_cancelled(
+        token: CancellationToken,
+        mut rx: tokio::sync::mpsc::Receiver<MockStreamEvent>,
+    ) -> Vec<MockStreamEvent> {
+        let mut accepted = Vec::new();
+        loop {
+            let next = tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    // Intentionally do not drain remaining rx items (no tail flush).
+                    break;
+                }
+                item = rx.recv() => item,
+            };
+            match next {
+                Some(chunk) => accepted.push(chunk),
+                None => break,
+            }
+        }
+        accepted
+    }
+
+    /// Slow producer that does **not** observe the cancel token (like a remote
+    /// SSE body still enqueued while the consumer already cancelled).
+    async fn produce_slow_chunks(
+        tx: tokio::sync::mpsc::Sender<MockStreamEvent>,
+        n: usize,
+        delay: Duration,
+    ) {
+        for i in 0..n {
+            let event = if i % 5 == 4 {
+                MockStreamEvent::ToolCall(format!("tool-{i}"))
+            } else if i % 3 == 0 {
+                MockStreamEvent::Reasoning(format!("think-{i}"))
+            } else {
+                MockStreamEvent::Response(format!("chunk-{i}"))
+            };
+            if tx.send(event).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(delay).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn slow_stream_stops_accepting_after_cancel_without_tail_flush() {
+        let token = CancellationToken::new();
+        let (tx, rx) = tokio::sync::mpsc::channel::<MockStreamEvent>(64);
+
+        // Producer ignores cancel (real providers keep delivering until dropped).
+        let producer = tokio::spawn(async move {
+            produce_slow_chunks(tx, 40, Duration::from_millis(10)).await;
+        });
+
+        let consumer_token = token.clone();
+        let consumer = tokio::spawn(async move {
+            drain_mock_stream_until_cancelled(consumer_token, rx).await
+        });
+
+        // Mid-stream cancel after some chunks arrive.
+        tokio::time::sleep(Duration::from_millis(55)).await;
+        token.cancel();
+
+        let accepted = tokio::time::timeout(Duration::from_secs(2), consumer)
+            .await
+            .expect("consumer should exit after cancel")
+            .expect("consumer task");
+
+        // Producer may still finish; accepted must stop at cancel boundary.
+        let _ = tokio::time::timeout(Duration::from_secs(2), producer).await;
+
+        assert!(
+            !accepted.is_empty(),
+            "should have accepted some chunks before cancel"
+        );
+        assert!(
+            accepted.len() < 40,
+            "cancel must stop accepting before the full sequence; got {}",
+            accepted.len()
+        );
+        assert!(token.is_cancelled());
+        // Mixed kinds prove response/reasoning/tool paths share the same gate.
+        assert!(
+            accepted
+                .iter()
+                .any(|e| matches!(e, MockStreamEvent::Response(_))),
+            "expected at least one response chunk"
+        );
+    }
+
+    #[tokio::test]
+    async fn first_chunk_wait_can_cancel_before_any_accept() {
+        let token = CancellationToken::new();
+        let (tx, rx) = tokio::sync::mpsc::channel::<MockStreamEvent>(4);
+
+        // Hold the first chunk until after cancel (first-token wait).
+        let producer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let _ = tx
+                .send(MockStreamEvent::Response("late-first".into()))
+                .await;
+        });
+
+        let consumer_token = token.clone();
+        let consumer = tokio::spawn(async move {
+            drain_mock_stream_until_cancelled(consumer_token, rx).await
+        });
+
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        token.cancel();
+
+        let accepted = tokio::time::timeout(Duration::from_secs(2), consumer)
+            .await
+            .expect("consumer exits on cancel while blocked on next()")
+            .expect("consumer task");
+        let _ = tokio::time::timeout(Duration::from_secs(2), producer).await;
+
+        assert!(
+            accepted.is_empty(),
+            "cancel during first-chunk wait must accept no events; got {:?}",
+            accepted
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_matching_request_wakes_token_mismatched_does_not() {
+        let registry = AiRunRegistry::new();
+        let token_a = registry.register("sess-1", "req-a");
+        assert!(!registry.cancel("sess-1", "req-other"));
+        assert!(!token_a.is_cancelled());
+
+        let wake = tokio::spawn({
+            let token_a = token_a.clone();
+            async move {
+                token_a.cancelled().await;
+            }
+        });
+
+        assert!(registry.cancel("sess-1", "req-a"));
+        tokio::time::timeout(Duration::from_secs(1), wake)
+            .await
+            .expect("matching cancel should wake waiters")
+            .expect("wake task");
+        assert!(token_a.is_cancelled());
+    }
+
+    #[tokio::test]
+    async fn replaced_request_a_finish_does_not_clear_b_and_cancel_b_wakes() {
+        let registry = AiRunRegistry::new();
+        let token_a = registry.register("sess-1", "req-a");
+        let token_b = registry.register("sess-1", "req-b");
+
+        assert!(token_a.is_cancelled());
+        assert!(!token_b.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-1").as_deref(),
+            Some("req-b")
+        );
+
+        // Old request A ends (AiRunGuard Drop / clear_if_matches).
+        registry.clear_if_matches("sess-1", "req-a");
+        assert_eq!(
+            registry.current_request_id("sess-1").as_deref(),
+            Some("req-b")
+        );
+        assert!(!token_b.is_cancelled());
+        assert!(!registry.cancel("sess-1", "req-a"));
+        assert!(!token_b.is_cancelled());
+
+        let wake_b = tokio::spawn({
+            let token_b = token_b.clone();
+            async move {
+                token_b.cancelled().await;
+            }
+        });
+        assert!(registry.cancel("sess-1", "req-b"));
+        tokio::time::timeout(Duration::from_secs(1), wake_b)
+            .await
+            .expect("cancel B should wake B token")
+            .expect("wake task");
+        assert!(token_b.is_cancelled());
+
+        registry.clear_if_matches("sess-1", "req-b");
+        assert!(registry.current_request_id("sess-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn immediate_resend_old_stream_cannot_pollute_new_request() {
+        let registry = Arc::new(AiRunRegistry::new());
+        let (tx_a, rx_a) = tokio::sync::mpsc::channel::<MockStreamEvent>(32);
+        let (tx_b, rx_b) = tokio::sync::mpsc::channel::<MockStreamEvent>(32);
+
+        let token_a = registry.register("sess-resend", "req-a");
+        let consumer_a = tokio::spawn({
+            let token_a = token_a.clone();
+            async move { drain_mock_stream_until_cancelled(token_a, rx_a).await }
+        });
+
+        // Slow A stream still producing after UI stop + immediate resend.
+        let producer_a = tokio::spawn(async move {
+            produce_slow_chunks(tx_a, 30, Duration::from_millis(8)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(30)).await;
+
+        // User stops A (registry cancel) then immediately starts B.
+        assert!(registry.cancel("sess-resend", "req-a"));
+        let token_b = registry.register("sess-resend", "req-b");
+        // register B also cancels A if cancel already did; either way A is cancelled.
+        assert!(token_a.is_cancelled());
+        assert!(!token_b.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-resend").as_deref(),
+            Some("req-b")
+        );
+
+        let consumer_b = tokio::spawn({
+            let token_b = token_b.clone();
+            async move { drain_mock_stream_until_cancelled(token_b, rx_b).await }
+        });
+        let producer_b = tokio::spawn(async move {
+            produce_slow_chunks(tx_b, 6, Duration::from_millis(5)).await;
+        });
+
+        // Stale cancel/clear for A must not kill B.
+        registry.clear_if_matches("sess-resend", "req-a");
+        assert!(!registry.cancel("sess-resend", "req-a"));
+        assert!(!token_b.is_cancelled());
+
+        let accepted_a = tokio::time::timeout(Duration::from_secs(2), consumer_a)
+            .await
+            .expect("A consumer exits")
+            .expect("A task");
+        let accepted_b = tokio::time::timeout(Duration::from_secs(2), consumer_b)
+            .await
+            .expect("B consumer finishes")
+            .expect("B task");
+        let _ = tokio::time::timeout(Duration::from_secs(2), producer_a).await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), producer_b).await;
+
+        assert!(accepted_a.len() < 30, "A stopped early: {}", accepted_a.len());
+        assert_eq!(
+            accepted_b.len(),
+            6,
+            "B should fully accept its own stream; got {:?}",
+            accepted_b
+        );
+        assert!(!token_b.is_cancelled());
+
+        // Finish B cleanly.
+        registry.clear_if_matches("sess-resend", "req-b");
+        assert!(registry.current_request_id("sess-resend").is_none());
+    }
+
+    #[tokio::test]
+    async fn concurrent_register_stress_single_current_and_cancelled_losers() {
+        let registry = Arc::new(AiRunRegistry::new());
+        let mut handles = Vec::new();
+        let tokens = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        for t in 0..12 {
+            let registry = Arc::clone(&registry);
+            let tokens = Arc::clone(&tokens);
+            handles.push(tokio::spawn(async move {
+                for r in 0..40 {
+                    let id = format!("req-{t}-{r}");
+                    let token = registry.register("sess-stress", &id);
+                    tokens.lock().expect("tokens lock").push((id, token));
+                    // Yield so other tasks interleave register calls.
+                    tokio::task::yield_now().await;
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.await.expect("stress task");
+        }
+
+        let current = registry
+            .current_request_id("sess-stress")
+            .expect("final current");
+
+        let snapshot = tokens.lock().expect("tokens lock");
+        let mut live_for_current = 0usize;
+        let mut live_for_others = 0usize;
+        for (id, token) in snapshot.iter() {
+            if !token.is_cancelled() {
+                if id == &current {
+                    live_for_current += 1;
+                } else {
+                    live_for_others += 1;
+                }
+            }
+        }
+        assert_eq!(
+            live_for_others, 0,
+            "every non-current request token must be cancelled"
+        );
+        assert_eq!(
+            live_for_current, 1,
+            "current request must keep exactly one live token"
+        );
+        assert!(registry.cancel("sess-stress", &current));
+        registry.clear_if_matches("sess-stress", &current);
+        assert!(registry.current_request_id("sess-stress").is_none());
     }
 }
 
@@ -910,14 +1365,14 @@ pub async fn send_chat_message(
         channel_id,
         is_agent_mode,
         tools,
-        token,
+        token.clone(),
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
     )
     .await;
 
-    finish_ai_run(&window, &session_id, &request_id, result)
+    finish_ai_run_with_token(&window, &session_id, &request_id, Some(&token), result)
 }
 
 #[tauri::command]
@@ -1029,14 +1484,14 @@ pub async fn regenerate_ai_response(
         channel_id,
         is_agent_mode,
         tools,
-        token,
+        token.clone(),
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
     )
     .await;
 
-    finish_ai_run(&window, &session_id, &request_id, result)
+    finish_ai_run_with_token(&window, &session_id, &request_id, Some(&token), result)
 }
 
 #[tauri::command]
@@ -1069,12 +1524,21 @@ pub async fn execute_agent_tools(
 
     let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
+    // Interruptible DB bind: cancel must not wait for SQLite lock / run_blocking.
     let bound_ssh_session_id: Option<String> = {
         let session_id_owned = session_id.clone();
         let ssh_session_id_clone = ssh_session_id.clone();
-        state
-            .db_manager
-            .run_blocking(move |conn| {
+        let db = state.db_manager.clone();
+        tokio::select! {
+            _ = token.cancelled() => {
+                return finish_ai_run(
+                    &window,
+                    &session_id,
+                    &request_id,
+                    Err(AI_CANCELLED.to_string()),
+                );
+            }
+            bound = db.run_blocking(move |conn| {
                 let existing_ssh_id: Option<String> = conn
                     .query_row(
                         "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
@@ -1094,8 +1558,8 @@ pub async fn execute_agent_tools(
                     existing_ssh_id
                 };
                 Ok(result)
-            })
-            .await?
+            }) => bound?,
+        }
     };
 
     if token.is_cancelled() {
@@ -1104,28 +1568,54 @@ pub async fn execute_agent_tools(
 
     let is_agent_mode = mode.as_deref() == Some("agent");
 
-    let history: Vec<ChatMessage> = load_history(
-        &state,
-        &session_id,
-        is_agent_mode,
-        bound_ssh_session_id.as_deref(),
-    )
-    .await?;
+    // Interruptible history load: cancel must not wait for SQLite / system_info.
+    let history: Vec<ChatMessage> = tokio::select! {
+        _ = token.cancelled() => {
+            return finish_ai_run(
+                &window,
+                &session_id,
+                &request_id,
+                Err(AI_CANCELLED.to_string()),
+            );
+        }
+        history = load_history(
+            &state,
+            &session_id,
+            is_agent_mode,
+            bound_ssh_session_id.as_deref(),
+        ) => match history {
+            Ok(h) => h,
+            Err(e) => {
+                return finish_ai_run(&window, &session_id, &request_id, Err(e));
+            }
+        },
+    };
+
+    // Cancel between history load and pending-tool dispatch must not emit done.
+    if token.is_cancelled() {
+        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+    }
 
     let Some(tools_filtered) =
         latest_assistant_tool_calls_with_pending_ids(&history, &tool_call_ids)
     else {
-        window
-            .emit(&format!("ai-done-{}", session_id), &request_id)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+        return finish_ai_run_with_token(
+            &window,
+            &session_id,
+            &request_id,
+            Some(&token),
+            Ok(None),
+        );
     };
 
     if tools_filtered.is_empty() {
-        window
-            .emit(&format!("ai-done-{}", session_id), &request_id)
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+        return finish_ai_run_with_token(
+            &window,
+            &session_id,
+            &request_id,
+            Some(&token),
+            Ok(None),
+        );
     }
 
     if !is_agent_mode {
@@ -1172,14 +1662,14 @@ pub async fn execute_agent_tools(
         channel_id,
         is_agent_mode,
         tools,
-        token,
+        token.clone(),
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
     )
     .await;
 
-    finish_ai_run(&window, &session_id, &request_id, result)
+    finish_ai_run_with_token(&window, &session_id, &request_id, Some(&token), result)
 }
 
 #[tauri::command]

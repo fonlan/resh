@@ -34,18 +34,30 @@ impl AiRunRegistry {
     }
 
     /// Register a new AI run. Cancels any previous run for the same session first.
+    ///
+    /// Same-session replace holds the DashMap entry lock for the whole
+    /// read-old/write-new step so concurrent register(A)/register(B) cannot
+    /// interleave remove→insert races that leave both tokens live or overwrite
+    /// the newer current without cancelling it.
     pub fn register(&self, session_id: &str, request_id: &str) -> CancellationToken {
         let token = CancellationToken::new();
-        if let Some((_, previous)) = self.entries.remove(session_id) {
-            previous.token.cancel();
+        match self.entries.entry(session_id.to_string()) {
+            dashmap::mapref::entry::Entry::Occupied(mut occupied) => {
+                let previous = occupied.get().token.clone();
+                occupied.insert(AiRunEntry {
+                    request_id: request_id.to_string(),
+                    token: token.clone(),
+                });
+                // Cancel after swap so the map always points at the new token first.
+                previous.cancel();
+            }
+            dashmap::mapref::entry::Entry::Vacant(vacant) => {
+                vacant.insert(AiRunEntry {
+                    request_id: request_id.to_string(),
+                    token: token.clone(),
+                });
+            }
         }
-        self.entries.insert(
-            session_id.to_string(),
-            AiRunEntry {
-                request_id: request_id.to_string(),
-                token: token.clone(),
-            },
-        );
         token
     }
 
@@ -491,5 +503,115 @@ mod tests {
 
         registry.clear_if_matches("sess-1", "req-b");
         assert!(registry.current_request_id("sess-1").is_none());
+    }
+
+    #[test]
+    fn request_a_replaced_by_b_then_a_clear_and_cancel_leave_b() {
+        // Full A→B race: A is replaced, then A finishes cleanup + stale cancel.
+        let registry = AiRunRegistry::new();
+        let token_a = registry.register("sess-race", "req-a");
+        let token_b = registry.register("sess-race", "req-b");
+
+        assert!(token_a.is_cancelled(), "register B must cancel A");
+        assert!(!token_b.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-race").as_deref(),
+            Some("req-b")
+        );
+
+        // Guard Drop for A must not remove B.
+        registry.clear_if_matches("sess-race", "req-a");
+        assert_eq!(
+            registry.current_request_id("sess-race").as_deref(),
+            Some("req-b")
+        );
+        assert!(!token_b.is_cancelled());
+
+        // Stale cancel for A is rejected.
+        assert!(!registry.cancel("sess-race", "req-a"));
+        assert!(!token_b.is_cancelled());
+
+        // Cancel B succeeds.
+        assert!(registry.cancel("sess-race", "req-b"));
+        assert!(token_b.is_cancelled());
+
+        registry.clear_if_matches("sess-race", "req-b");
+        assert!(registry.current_request_id("sess-race").is_none());
+    }
+
+    #[test]
+    fn cancel_unknown_session_is_false() {
+        let registry = AiRunRegistry::new();
+        assert!(!registry.cancel("missing", "req-x"));
+        assert!(registry.current_request_id("missing").is_none());
+    }
+
+    #[test]
+    fn sessions_are_isolated() {
+        let registry = AiRunRegistry::new();
+        let token_s1 = registry.register("sess-1", "req-1");
+        let token_s2 = registry.register("sess-2", "req-2");
+
+        assert!(registry.cancel("sess-1", "req-1"));
+        assert!(token_s1.is_cancelled());
+        assert!(!token_s2.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-2").as_deref(),
+            Some("req-2")
+        );
+    }
+
+    #[test]
+    fn concurrent_register_on_same_session_keeps_single_live_current() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let registry = Arc::new(AiRunRegistry::new());
+        let session = "sess-concurrent";
+        let threads = 16;
+        let rounds = 50;
+
+        let mut handles = Vec::with_capacity(threads);
+        for t in 0..threads {
+            let registry = Arc::clone(&registry);
+            handles.push(thread::spawn(move || {
+                let mut last_token = None;
+                for r in 0..rounds {
+                    let request_id = format!("req-t{t}-r{r}");
+                    last_token = Some(registry.register(session, &request_id));
+                }
+                last_token
+            }));
+        }
+
+        let mut last_tokens = Vec::with_capacity(threads);
+        for handle in handles {
+            last_tokens.push(handle.join().expect("register stress thread"));
+        }
+
+        let current = registry
+            .current_request_id(session)
+            .expect("one current request must remain after concurrent register");
+        assert!(current.starts_with("req-t"));
+
+        // Among each thread's final token: exactly the current id's token (if any)
+        // may still be live; every other returned token must already be cancelled
+        // because a later register on the same session replaced it.
+        let mut live_count = 0usize;
+        for token in last_tokens.into_iter().flatten() {
+            if token.is_cancelled() {
+                continue;
+            }
+            live_count += 1;
+        }
+        // At most one of the per-thread final tokens can still be current/live.
+        assert!(
+            live_count <= 1,
+            "at most one live final token expected, got {live_count}"
+        );
+
+        assert!(registry.cancel(session, &current));
+        registry.clear_if_matches(session, &current);
+        assert!(registry.current_request_id(session).is_none());
     }
 }

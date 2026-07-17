@@ -235,3 +235,29 @@ export const collectAssistantToolOutputs = (
     consumedToolMessageIndexes,
   }
 }
+
+/**
+ * Whether an event's requestId should be applied to the UI run state.
+ * Matches Zustand `isActiveRequest`: empty/undefined never matches.
+ * Production listeners in AISidebar gate every event through this helper.
+ */
+export const isMatchingAiRequest = (
+  activeRequestId: string | null | undefined,
+  eventRequestId: string | null | undefined,
+): boolean => {
+  if (eventRequestId == null || eventRequestId === "") {
+    return false
+  }
+  return activeRequestId === eventRequestId
+}
+
+/** Title generation is only for normal completion, never cancel/stop. */
+export const shouldGenerateTitleAfterRun = (
+  outcome: "done" | "cancelled" | "error" | "pending_tools",
+  sessionTitle: string | null | undefined,
+): boolean => {
+  if (outcome !== "done") {
+    return false
+  }
+  return sessionTitle === "New Chat"
+}

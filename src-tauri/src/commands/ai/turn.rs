@@ -31,6 +31,28 @@ use super::{is_read_only_tool, AI_CANCELLED, AI_STREAM_IDLE_TIMEOUT_SECS};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 
+/// Race a future against cancellation. Used for tool awaits that do not natively
+/// observe the token (SFTP read, terminal buffer fetch, etc.).
+async fn await_or_cancel<T, F>(token: &CancellationToken, fut: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = T>,
+{
+    tokio::select! {
+        biased;
+        _ = token.cancelled() => Err(AI_CANCELLED.to_string()),
+        value = fut => Ok(value),
+    }
+}
+
+/// Stop command recording without blocking the AI cancel path.
+/// SSH cleanup can hang; cancelled runs must still exit at the next scheduling point.
+fn spawn_stop_command_recording(ssh_id: &str) {
+    let ssh_id = ssh_id.to_string();
+    tokio::spawn(async move {
+        let _ = SSHClient::stop_command_recording(&ssh_id).await;
+    });
+}
+
 pub(super) async fn execute_tools_and_save(
     app_handle: tauri::AppHandle,
     state: &Arc<AppState>,
@@ -48,10 +70,16 @@ pub(super) async fn execute_tools_and_save(
         let result = match call.function.name.as_str() {
             "get_terminal_output" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    match SSHClient::get_terminal_output(ssh_id).await {
-                        Ok(text) => {
-                            String::from_utf8_lossy(&strip_ansi_escapes::strip(&text)).to_string()
-                        }
+                    let ssh_id = ssh_id.to_string();
+                    match await_or_cancel(&cancellation_token, async move {
+                        SSHClient::get_terminal_output(&ssh_id).await
+                    })
+                    .await
+                    {
+                        Err(e) if e == AI_CANCELLED => return Err(AI_CANCELLED.to_string()),
+                        Ok(Ok(text)) => String::from_utf8_lossy(&strip_ansi_escapes::strip(&text))
+                            .to_string(),
+                        Ok(Err(e)) => format!("Error: {}", e),
                         Err(e) => format!("Error: {}", e),
                     }
                 } else {
@@ -60,8 +88,14 @@ pub(super) async fn execute_tools_and_save(
             }
             "get_selected_terminal_output" => {
                 if let Some(ssh_id) = ssh_session_id {
-                    match SSHClient::get_selected_terminal_output(ssh_id).await {
-                        Ok(text) => {
+                    let ssh_id = ssh_id.to_string();
+                    match await_or_cancel(&cancellation_token, async move {
+                        SSHClient::get_selected_terminal_output(&ssh_id).await
+                    })
+                    .await
+                    {
+                        Err(e) if e == AI_CANCELLED => return Err(AI_CANCELLED.to_string()),
+                        Ok(Ok(text)) => {
                             if text.is_empty() {
                                 "Error: No text is currently selected in the terminal.".to_string()
                             } else {
@@ -69,6 +103,7 @@ pub(super) async fn execute_tools_and_save(
                                     .to_string()
                             }
                         }
+                        Ok(Err(e)) => format!("Error: {}", e),
                         Err(e) => format!("Error: {}", e),
                     }
                 } else {
@@ -90,16 +125,24 @@ pub(super) async fn execute_tools_and_save(
                         if remote_path.is_empty() {
                             "Error: Missing 'remote_path' argument".to_string()
                         } else {
-                            match read_remote_file_via_sftp(
-                                ssh_id,
-                                &remote_path,
-                                READ_FILE_MAX_BYTES,
-                            )
+                            let ssh_id = ssh_id.to_string();
+                            let path_for_err = remote_path.clone();
+                            match await_or_cancel(&cancellation_token, async move {
+                                read_remote_file_via_sftp(
+                                    &ssh_id,
+                                    &remote_path,
+                                    READ_FILE_MAX_BYTES,
+                                )
+                                .await
+                            })
                             .await
                             {
-                                Ok((file_content, truncated)) => {
+                                Err(e) if e == AI_CANCELLED => {
+                                    return Err(AI_CANCELLED.to_string());
+                                }
+                                Ok(Ok((file_content, truncated))) => {
                                     let mut response =
-                                        format!("[File: {}]\n{}", remote_path, file_content);
+                                        format!("[File: {}]\n{}", path_for_err, file_content);
                                     if truncated {
                                         response.push_str(&format!(
                                             "\n[Truncated to first {} bytes]",
@@ -108,7 +151,10 @@ pub(super) async fn execute_tools_and_save(
                                     }
                                     response
                                 }
-                                Err(e) => format!("Error reading file '{}': {}", remote_path, e),
+                                Ok(Err(e)) => {
+                                    format!("Error reading file '{}': {}", path_for_err, e)
+                                }
+                                Err(e) => format!("Error reading file '{}': {}", path_for_err, e),
                             }
                         }
                     } else {
@@ -140,41 +186,117 @@ pub(super) async fn execute_tools_and_save(
                                         let command_block_event =
                                             format!("terminal-command-block:{}", ssh_id);
                                         let _ = app_handle.emit(&command_block_event, "start");
-                                        match SSHClient::send_input(ssh_id, cmd_nl.as_bytes()).await {
-                                            Ok(_) => {
+                                        let ssh_id_owned = ssh_id.to_string();
+                                        match await_or_cancel(&cancellation_token, async move {
+                                            SSHClient::send_input(&ssh_id_owned, cmd_nl.as_bytes())
+                                                .await
+                                        })
+                                        .await
+                                        {
+                                            Err(e) if e == AI_CANCELLED => {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
+                                                return Err(AI_CANCELLED.to_string());
+                                            }
+                                            Ok(Ok(_)) => {
                                                 "Command sent to terminal without waiting for completion (wait_finish=false).".to_string()
                                             }
+                                            Ok(Err(e)) => {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
+                                                format!("Failed to send command: {}", e)
+                                            }
                                             Err(e) => {
-                                                let _ = app_handle.emit(&command_block_event, "end");
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
                                                 format!("Failed to send command: {}", e)
                                             }
                                         }
                                     } else {
-                                        SSHClient::start_command_recording(ssh_id).await?;
+                                        let ssh_id_for_start = ssh_id.to_string();
+                                        match await_or_cancel(&cancellation_token, async move {
+                                            SSHClient::start_command_recording(&ssh_id_for_start)
+                                                .await
+                                        })
+                                        .await
+                                        {
+                                            Err(e) if e == AI_CANCELLED => {
+                                                return Err(AI_CANCELLED.to_string());
+                                            }
+                                            Ok(Err(e)) => return Err(e),
+                                            Err(e) => return Err(e),
+                                            Ok(Ok(())) => {}
+                                        }
                                         tracing::debug!(
                                             "[execute_tools] Command '{}' sent, timeout={}s",
                                             cmd,
                                             timeout
                                         );
 
-                                        let input_payload = build_recording_input_payload(
-                                            ssh_id,
-                                            cmd,
-                                            "execute_tools",
+                                        let input_payload = match await_or_cancel(
+                                            &cancellation_token,
+                                            async {
+                                                build_recording_input_payload(
+                                                    ssh_id,
+                                                    cmd,
+                                                    "execute_tools",
+                                                )
+                                                .await
+                                            },
                                         )
-                                        .await;
+                                        .await
+                                        {
+                                            Err(e) if e == AI_CANCELLED => {
+                                                spawn_stop_command_recording(ssh_id);
+                                                return Err(AI_CANCELLED.to_string());
+                                            }
+                                            Ok(payload) => payload,
+                                            Err(e) => {
+                                                let _ =
+                                                    SSHClient::stop_command_recording(ssh_id).await;
+                                                return Err(e);
+                                            }
+                                        };
 
                                         let command_block_event =
                                             format!("terminal-command-block:{}", ssh_id);
                                         let _ = app_handle.emit(&command_block_event, "start");
 
-                                        if let Err(e) =
-                                            SSHClient::send_input(ssh_id, input_payload.as_bytes())
+                                        let ssh_id_for_send = ssh_id.to_string();
+                                        let input_bytes = input_payload.into_bytes();
+                                        match await_or_cancel(&cancellation_token, async move {
+                                            SSHClient::send_input(&ssh_id_for_send, &input_bytes)
                                                 .await
+                                        })
+                                        .await
                                         {
-                                            let _ = app_handle.emit(&command_block_event, "end");
-                                            let _ = SSHClient::stop_command_recording(ssh_id).await;
-                                            return Err(format!("Failed to send command: {}", e));
+                                            Err(e) if e == AI_CANCELLED => {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
+                                                spawn_stop_command_recording(ssh_id);
+                                                return Err(AI_CANCELLED.to_string());
+                                            }
+                                            Ok(Ok(())) => {}
+                                            Ok(Err(e)) => {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
+                                                let _ =
+                                                    SSHClient::stop_command_recording(ssh_id).await;
+                                                return Err(format!(
+                                                    "Failed to send command: {}",
+                                                    e
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                let _ =
+                                                    app_handle.emit(&command_block_event, "end");
+                                                let _ =
+                                                    SSHClient::stop_command_recording(ssh_id).await;
+                                                return Err(format!(
+                                                    "Failed to send command: {}",
+                                                    e
+                                                ));
+                                            }
                                         }
 
                                         let mut interval = tokio::time::interval(
@@ -187,37 +309,74 @@ pub(super) async fn execute_tools_and_save(
                                         let mut start_marker_seen = false;
 
                                         loop {
-                                            if cancellation_token.is_cancelled() {
-                                                let _ =
-                                                    app_handle.emit(&command_block_event, "end");
-                                                SSHClient::stop_command_recording(ssh_id)
-                                                    .await
-                                                    .ok();
-                                                return Err(AI_CANCELLED.to_string());
+                                            tokio::select! {
+                                                biased;
+                                                _ = cancellation_token.cancelled() => {
+                                                    let _ =
+                                                        app_handle.emit(&command_block_event, "end");
+                                                    spawn_stop_command_recording(ssh_id);
+                                                    return Err(AI_CANCELLED.to_string());
+                                                }
+                                                _ = interval.tick() => {}
                                             }
-                                            interval.tick().await;
                                             elapsed += 100;
 
                                             if !start_marker_seen {
-                                                start_marker_seen =
-                                                    SSHClient::is_recording_start_marker_seen(
-                                                        ssh_id,
-                                                    )
-                                                    .await
-                                                    .unwrap_or(false);
+                                                let ssh_id_marker = ssh_id.to_string();
+                                                match await_or_cancel(
+                                                    &cancellation_token,
+                                                    async move {
+                                                        SSHClient::is_recording_start_marker_seen(
+                                                            &ssh_id_marker,
+                                                        )
+                                                        .await
+                                                    },
+                                                )
+                                                .await
+                                                {
+                                                    Err(e) if e == AI_CANCELLED => {
+                                                        let _ = app_handle
+                                                            .emit(&command_block_event, "end");
+                                                        spawn_stop_command_recording(ssh_id);
+                                                        return Err(AI_CANCELLED.to_string());
+                                                    }
+                                                    Ok(Ok(seen)) => start_marker_seen = seen,
+                                                    Ok(Err(_)) | Err(_) => start_marker_seen = false,
+                                                }
                                             }
 
-                                            let is_completed =
-                                                match SSHClient::check_command_completed(ssh_id)
-                                                    .await
+                                            let is_completed = {
+                                                let ssh_id_check = ssh_id.to_string();
+                                                match await_or_cancel(
+                                                    &cancellation_token,
+                                                    async move {
+                                                        SSHClient::check_command_completed(
+                                                            &ssh_id_check,
+                                                        )
+                                                        .await
+                                                    },
+                                                )
+                                                .await
                                                 {
-                                                    Ok(is_completed) => is_completed,
+                                                    Err(e) if e == AI_CANCELLED => {
+                                                        let _ = app_handle
+                                                            .emit(&command_block_event, "end");
+                                                        spawn_stop_command_recording(ssh_id);
+                                                        return Err(AI_CANCELLED.to_string());
+                                                    }
+                                                    Ok(Ok(is_completed)) => is_completed,
+                                                    Ok(Err(e)) => {
+                                                        let _ = app_handle
+                                                            .emit(&command_block_event, "end");
+                                                        return Err(e);
+                                                    }
                                                     Err(e) => {
                                                         let _ = app_handle
                                                             .emit(&command_block_event, "end");
                                                         return Err(e);
                                                     }
-                                                };
+                                                }
+                                            };
                                             if is_completed {
                                                 completion_detected = true;
                                                 tracing::debug!(
@@ -1239,4 +1398,47 @@ pub fn run_ai_turn(
 
         Ok(final_tool_calls)
     })
+}
+
+#[cfg(test)]
+mod await_or_cancel_tests {
+    use super::{await_or_cancel, AI_CANCELLED};
+    use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
+
+    #[tokio::test]
+    async fn cancels_blocked_future_without_waiting_for_it() {
+        let token = CancellationToken::new();
+        let token_cancel = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            token_cancel.cancel();
+        });
+
+        let started = std::time::Instant::now();
+        let result = await_or_cancel(&token, async {
+            // Simulates a slow SFTP / history await that does not observe the token.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            "done"
+        })
+        .await;
+        assert_eq!(result, Err(AI_CANCELLED.to_string()));
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "cancel must not wait for the blocked future; elapsed {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_ok_when_future_finishes_first() {
+        let token = CancellationToken::new();
+        let result = await_or_cancel(&token, async {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            42
+        })
+        .await;
+        assert_eq!(result, Ok(42));
+        assert!(!token.is_cancelled());
+    }
 }
