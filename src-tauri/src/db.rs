@@ -50,28 +50,87 @@ impl DatabaseManager {
                 reasoning_content TEXT,
                 tool_calls TEXT,
                 tool_call_id TEXT,
+                run_id TEXT,
+                turn_index INTEGER,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES ai_runs(id) ON DELETE SET NULL
+            )",
+            [],
+        )?;
+
+        // Migration: Ensure columns added after the original history-only schema exist.
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN tool_call_id TEXT", []);
+        let _ = conn.execute(
+            "ALTER TABLE ai_messages ADD COLUMN reasoning_content TEXT",
+            [],
+        );
+        let _ = conn.execute("ALTER TABLE ai_sessions ADD COLUMN ssh_session_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN model_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN run_id TEXT", []);
+        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN turn_index INTEGER", []);
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_runs (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                request_id TEXT NOT NULL UNIQUE,
+                active_request_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                stop_reason TEXT,
+                model_turn_count INTEGER NOT NULL DEFAULT 0,
+                total_tool_call_count INTEGER NOT NULL DEFAULT 0,
+                started_at_ms INTEGER NOT NULL,
+                completed_at_ms INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
             )",
             [],
         )?;
 
-        // Migration: Ensure tool_call_id column exists for existing tables
-        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN tool_call_id TEXT", []);
-        // Migration: Ensure reasoning_content column exists
-        let _ = conn.execute(
-            "ALTER TABLE ai_messages ADD COLUMN reasoning_content TEXT",
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_tool_invocations (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                tool_call_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                arguments_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                turn_index INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(run_id, tool_call_id),
+                FOREIGN KEY(run_id) REFERENCES ai_runs(id) ON DELETE CASCADE
+            )",
             [],
-        );
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_runs_session_status ON ai_runs(session_id, status)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_tool_invocations_run_status ON ai_tool_invocations(run_id, status)",
+            [],
+        )?;
 
-        // Migration: Ensure ssh_session_id column exists for ai_sessions
-        let _ = conn.execute("ALTER TABLE ai_sessions ADD COLUMN ssh_session_id TEXT", []);
-
-        // Migration: Ensure model_id column exists for ai_messages
-        let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN model_id TEXT", []);
+        // A process restart never replays a side-effecting invocation. Approval waits are
+        // durable; active work is explicitly marked interrupted for recovery/UI inspection.
+        conn.execute(
+            "UPDATE ai_tool_invocations SET status = 'interrupted', updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'executing'",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE ai_runs SET status = 'interrupted', stop_reason = 'app_restarted',
+                 completed_at_ms = CAST(strftime('%s', 'now') AS INTEGER) * 1000,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'running'",
+            [],
+        )?;
 
         let _ = conn.execute(
-            "DELETE FROM ai_sessions 
+            "DELETE FROM ai_sessions
              WHERE NOT EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ai_sessions.id)",
             [],
         );

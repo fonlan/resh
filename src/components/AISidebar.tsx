@@ -1378,17 +1378,27 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   ])
 
   const handleCancelTools = useCallback(() => {
-    if (activeSessionId) {
-      storeSetPendingToolCalls(activeSessionId, null)
-      setGenerating(activeSessionId, false)
-      markSessionStopped(activeSessionId) // Mark as stopped when tools are cancelled
+    if (!activeSessionId) return
+
+    const sessionId = activeSessionId
+    const requestId = useAIStore.getState().activeRequestId[sessionId] ?? null
+    storeSetPendingToolCalls(sessionId, null)
+    setGenerating(sessionId, false)
+    markSessionStopped(sessionId)
+
+    // Persist the decision so a reloaded UI cannot resume the same side-effecting calls.
+    if (requestId) {
+      void aiService.cancelMessage(sessionId, requestId).catch((err) => {
+        console.error("[AI] cancel pending tools failed", { sessionId, requestId, err })
+        showAiError(err)
+      })
     }
-    // Optionally insert a "Cancelled" system message
   }, [
     activeSessionId,
     storeSetPendingToolCalls,
     setGenerating,
     markSessionStopped,
+    showAiError,
   ])
 
   const handleStopGeneration = useCallback(() => {

@@ -12,13 +12,15 @@ pub use types::{
     FunctionDefinition, ToolCall, ToolDefinition,
 };
 
-use history::{enrich_user_message_with_tagged_files, load_history};
+use history::enrich_user_message_with_tagged_files;
 use tool_runtime::{
     build_recording_input_payload, build_run_in_terminal_timeout_failure_message,
     execute_command_in_exec_channel, try_reconnect_terminal_after_timeout,
     try_recover_terminal_after_timeout, START_MARKER_EXPECT_MS, TIMEOUT_RECOVERY_GRACE_MS,
 };
-use turn::{execute_tools_and_save, run_ai_turn};
+use turn::{
+    cancel_persisted_agent_run, create_agent_run, fail_agent_run, resume_agent_run, run_agent_loop,
+};
 
 fn is_read_only_tool(name: &str) -> bool {
     matches!(
@@ -27,8 +29,10 @@ fn is_read_only_tool(name: &str) -> bool {
     )
 }
 
+#[cfg(test)]
 const DUMMY_TOOL_RESPONSE: &str = "Interrupted or skipped by user";
 
+#[cfg(test)]
 fn latest_assistant_tool_calls_with_pending_ids(
     history: &[ChatMessage],
     requested_ids: &[String],
@@ -75,12 +79,13 @@ use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent};
 use rusqlite::params;
+#[cfg(test)]
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{Emitter, Manager, State, Window};
-use uuid::Uuid;
+use tauri::{Emitter, State, Window};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 pub(super) const AI_STREAM_IDLE_TIMEOUT_SECS: u64 = 45;
 
@@ -113,9 +118,7 @@ pub enum AiRunFinishEvent {
     Error(String),
 }
 
-pub fn classify_ai_run_result(
-    result: &Result<Option<Vec<ToolCall>>, String>,
-) -> AiRunOutcome {
+pub fn classify_ai_run_result(result: &Result<Option<Vec<ToolCall>>, String>) -> AiRunOutcome {
     match result {
         Ok(Some(calls)) if !calls.is_empty() => AiRunOutcome::PendingTools,
         Ok(_) => AiRunOutcome::Completed,
@@ -212,8 +215,8 @@ fn finish_ai_run_with_token(
 #[cfg(test)]
 mod ai_run_outcome_tests {
     use super::{
-        classify_ai_run_result, plan_ai_run_finish, AiRunFinishEvent, AiRunOutcome,
-        FunctionCall, ToolCall, AI_CANCELLED,
+        classify_ai_run_result, plan_ai_run_finish, AiRunFinishEvent, AiRunOutcome, FunctionCall,
+        ToolCall, AI_CANCELLED,
     };
 
     fn sample_tool_call() -> ToolCall {
@@ -229,10 +232,7 @@ mod ai_run_outcome_tests {
 
     #[test]
     fn classify_distinguishes_cancel_error_and_complete() {
-        assert_eq!(
-            classify_ai_run_result(&Ok(None)),
-            AiRunOutcome::Completed
-        );
+        assert_eq!(classify_ai_run_result(&Ok(None)), AiRunOutcome::Completed);
         assert_eq!(
             classify_ai_run_result(&Ok(Some(vec![]))),
             AiRunOutcome::Completed
@@ -258,8 +258,7 @@ mod ai_run_outcome_tests {
         assert!(result.is_ok());
 
         // Cancel must not share the error-dispatch path used by provider failures.
-        let (err_event, err_result) =
-            plan_ai_run_finish(&Err("provider down".to_string()));
+        let (err_event, err_result) = plan_ai_run_finish(&Err("provider down".to_string()));
         assert_eq!(
             err_event,
             AiRunFinishEvent::Error("provider down".to_string())
@@ -274,13 +273,11 @@ mod ai_run_outcome_tests {
         assert_eq!(done_event, AiRunFinishEvent::Done);
         assert!(done_ok.is_ok());
 
-        let (pending_event, pending_ok) =
-            plan_ai_run_finish(&Ok(Some(vec![sample_tool_call()])));
+        let (pending_event, pending_ok) = plan_ai_run_finish(&Ok(Some(vec![sample_tool_call()])));
         assert_eq!(pending_event, AiRunFinishEvent::None);
         assert!(pending_ok.is_ok());
 
-        let (empty_tools_event, empty_tools_ok) =
-            plan_ai_run_finish(&Ok(Some(vec![])));
+        let (empty_tools_event, empty_tools_ok) = plan_ai_run_finish(&Ok(Some(vec![])));
         assert_eq!(empty_tools_event, AiRunFinishEvent::Done);
         assert!(empty_tools_ok.is_ok());
     }
@@ -389,9 +386,10 @@ mod ai_cancel_race_async_tests {
         });
 
         let consumer_token = token.clone();
-        let consumer = tokio::spawn(async move {
-            drain_mock_stream_until_cancelled(consumer_token, rx).await
-        });
+        let consumer =
+            tokio::spawn(
+                async move { drain_mock_stream_until_cancelled(consumer_token, rx).await },
+            );
 
         // Mid-stream cancel after some chunks arrive.
         tokio::time::sleep(Duration::from_millis(55)).await;
@@ -438,9 +436,10 @@ mod ai_cancel_race_async_tests {
         });
 
         let consumer_token = token.clone();
-        let consumer = tokio::spawn(async move {
-            drain_mock_stream_until_cancelled(consumer_token, rx).await
-        });
+        let consumer =
+            tokio::spawn(
+                async move { drain_mock_stream_until_cancelled(consumer_token, rx).await },
+            );
 
         tokio::time::sleep(Duration::from_millis(20)).await;
         token.cancel();
@@ -574,7 +573,11 @@ mod ai_cancel_race_async_tests {
         let _ = tokio::time::timeout(Duration::from_secs(2), producer_a).await;
         let _ = tokio::time::timeout(Duration::from_secs(2), producer_b).await;
 
-        assert!(accepted_a.len() < 30, "A stopped early: {}", accepted_a.len());
+        assert!(
+            accepted_a.len() < 30,
+            "A stopped early: {}",
+            accepted_a.len()
+        );
         assert_eq!(
             accepted_b.len(),
             6,
@@ -1072,12 +1075,15 @@ pub async fn cancel_ai_chat(
     if request_id.is_empty() {
         return Err("request_id is required".to_string());
     }
-    let cancelled = state.cancel_ai_run(&session_id, &request_id);
-    if cancelled {
+    let cancelled_in_memory = state.cancel_ai_run(&session_id, &request_id);
+    let cancelled_persisted =
+        cancel_persisted_agent_run(state.inner(), &session_id, &request_id).await?;
+    if cancelled_in_memory || cancelled_persisted {
         tracing::info!(
-            "[AI] cancel requested session_id={} request_id={}",
+            "[AI] cancel requested session_id={} request_id={} persisted={}",
             session_id,
-            request_id
+            request_id,
+            cancelled_persisted
         );
     } else {
         tracing::debug!(
@@ -1268,12 +1274,17 @@ pub async fn send_chat_message(
     );
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
     let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
-    let bound_ssh_session_id: Option<String> = {
+    let bound_ssh_session_id: Option<String> = match {
         let session_id_owned = session_id.clone();
         let ssh_session_id_clone = ssh_session_id.clone();
         state
@@ -1312,55 +1323,72 @@ pub async fn send_chat_message(
                 };
                 Ok(result)
             })
-            .await?
+            .await
+    } {
+        Ok(value) => value,
+        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
     };
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
     let content =
         enrich_user_message_with_tagged_files(&content, bound_ssh_session_id.as_deref()).await;
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
+    let run_context = match create_agent_run(state.inner(), &session_id, &request_id).await {
+        Ok(context) => context,
+        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
+    };
+
     let user_msg_id = Uuid::new_v4().to_string();
-    {
+    let user_message_result = {
         let user_msg_id_owned = user_msg_id.clone();
         let session_id_owned = session_id.clone();
         let content_owned = content.clone();
+        let run_id = run_context.run_id.clone();
         state
             .db_manager
             .run_blocking(move |conn| {
                 conn.execute(
-                    "INSERT INTO ai_messages (id, session_id, role, content) VALUES (?1, ?2, ?3, ?4)",
-                    params![user_msg_id_owned, session_id_owned, "user", content_owned],
+                    "INSERT INTO ai_messages (id, session_id, role, content, run_id, turn_index) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+                    params![user_msg_id_owned, session_id_owned, "user", content_owned, run_id],
                 )
-                .map_err(|e| e.to_string())?;
+                .map_err(|error| error.to_string())?;
                 Ok(())
             })
-            .await?;
-    }
-
-    if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+            .await
+    };
+    if let Err(error) = user_message_result {
+        fail_agent_run(state.inner(), &run_context, error.clone()).await;
+        return finish_ai_run(&window, &session_id, &request_id, Err(error));
     }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
     let is_ask_mode = mode.as_deref() == Some("ask");
-
     let tools = if is_agent_mode || is_ask_mode {
         Some(create_tools(is_agent_mode))
     } else {
         None
     };
-
-    let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
+    let result = run_agent_loop(
         window.clone(),
         state.inner().clone(),
-        session_id.clone(),
+        run_context,
         model_id,
         channel_id,
         is_agent_mode,
@@ -1369,6 +1397,7 @@ pub async fn send_chat_message(
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
+        None,
     )
     .await;
 
@@ -1399,7 +1428,12 @@ pub async fn regenerate_ai_response(
     );
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
     let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
@@ -1433,7 +1467,12 @@ pub async fn regenerate_ai_response(
     };
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
     {
@@ -1464,22 +1503,29 @@ pub async fn regenerate_ai_response(
     }
 
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
 
+    let run_context = match create_agent_run(state.inner(), &session_id, &request_id).await {
+        Ok(context) => context,
+        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
+    };
     let is_agent_mode = mode.as_deref() == Some("agent");
     let is_ask_mode = mode.as_deref() == Some("ask");
-
     let tools = if is_agent_mode || is_ask_mode {
         Some(create_tools(is_agent_mode))
     } else {
         None
     };
-
-    let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
+    let result = run_agent_loop(
         window.clone(),
         state.inner().clone(),
-        session_id.clone(),
+        run_context,
         model_id,
         channel_id,
         is_agent_mode,
@@ -1488,6 +1534,7 @@ pub async fn regenerate_ai_response(
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
+        None,
     )
     .await;
 
@@ -1510,154 +1557,60 @@ pub async fn execute_agent_tools(
     if request_id.is_empty() {
         return Err("request_id is required".to_string());
     }
-
     let token = state.register_ai_run(&session_id, &request_id);
     let _run_guard = AiRunGuard::new(
         state.inner().clone(),
         session_id.clone(),
         request_id.clone(),
     );
-
     if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
     }
-
     let _ = window.emit(&format!("ai-started-{}", session_id), &request_id);
 
-    // Interruptible DB bind: cancel must not wait for SQLite lock / run_blocking.
-    let bound_ssh_session_id: Option<String> = {
-        let session_id_owned = session_id.clone();
-        let ssh_session_id_clone = ssh_session_id.clone();
-        let db = state.db_manager.clone();
-        tokio::select! {
-            _ = token.cancelled() => {
-                return finish_ai_run(
-                    &window,
-                    &session_id,
-                    &request_id,
-                    Err(AI_CANCELLED.to_string()),
-                );
-            }
-            bound = db.run_blocking(move |conn| {
-                let existing_ssh_id: Option<String> = conn
-                    .query_row(
-                        "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1",
-                        params![session_id_owned],
-                        |row| row.get(0),
-                    )
-                    .ok();
-
-                let result = if existing_ssh_id.is_none()
-                    || existing_ssh_id
-                        .as_ref()
-                        .map(|s| s.is_empty())
-                        .unwrap_or(true)
-                {
-                    ssh_session_id_clone.clone()
-                } else {
-                    existing_ssh_id
-                };
-                Ok(result)
-            }) => bound?,
-        }
+    let db = state.db_manager.clone();
+    let session_for_binding = session_id.clone();
+    let requested_ssh = ssh_session_id.clone();
+    let bound_ssh_session_id = match tokio::select! {
+        biased;
+        _ = token.cancelled() => return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string())),
+        value = db.run_blocking(move |conn| {
+            let bound: Option<String> = conn.query_row(
+                "SELECT ssh_session_id FROM ai_sessions WHERE id = ?1", params![session_for_binding], |row| row.get(0),
+            ).ok();
+            Ok(bound.filter(|id| !id.is_empty()).or(requested_ssh))
+        }) => value,
+    } {
+        Ok(value) => value,
+        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
     };
-
-    if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
-    }
 
     let is_agent_mode = mode.as_deref() == Some("agent");
-
-    // Interruptible history load: cancel must not wait for SQLite / system_info.
-    let history: Vec<ChatMessage> = tokio::select! {
-        _ = token.cancelled() => {
-            return finish_ai_run(
-                &window,
-                &session_id,
-                &request_id,
-                Err(AI_CANCELLED.to_string()),
-            );
-        }
-        history = load_history(
-            &state,
+    let resumed = match tokio::select! {
+        biased;
+        _ = token.cancelled() => return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string())),
+        value = resume_agent_run(
+            state.inner(),
             &session_id,
+            &request_id,
             is_agent_mode,
-            bound_ssh_session_id.as_deref(),
-        ) => match history {
-            Ok(h) => h,
-            Err(e) => {
-                return finish_ai_run(&window, &session_id, &request_id, Err(e));
-            }
-        },
+            &tool_call_ids,
+        ) => value,
+    } {
+        Ok(value) => value,
+        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
     };
-
-    // Cancel between history load and pending-tool dispatch must not emit done.
-    if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
-    }
-
-    let Some(tools_filtered) =
-        latest_assistant_tool_calls_with_pending_ids(&history, &tool_call_ids)
-    else {
-        return finish_ai_run_with_token(
-            &window,
-            &session_id,
-            &request_id,
-            Some(&token),
-            Ok(None),
-        );
-    };
-
-    if tools_filtered.is_empty() {
-        return finish_ai_run_with_token(
-            &window,
-            &session_id,
-            &request_id,
-            Some(&token),
-            Ok(None),
-        );
-    }
-
-    if !is_agent_mode {
-        for call in &tools_filtered {
-            if call.function.name == "run_in_terminal" || call.function.name == "run_in_background"
-            {
-                return Err(
-                    "Execution denied: run_in_terminal/run_in_background are only allowed in Agent mode.".to_string(),
-                );
-            }
-        }
-    }
-
-    if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
-    }
-
-    let exec_res = execute_tools_and_save(
-        window.app_handle().clone(),
-        &state,
-        &session_id,
-        bound_ssh_session_id.as_deref(),
-        tools_filtered,
-        token.clone(),
-        &request_id,
-    )
-    .await;
-
-    if let Err(e) = exec_res {
-        return finish_ai_run(&window, &session_id, &request_id, Err(e));
-    }
-
-    if token.is_cancelled() {
-        return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string()));
-    }
-
+    let (run_context, approved_calls, turn_index) = resumed;
     let tools = Some(create_tools(is_agent_mode));
-
-    let result: Result<Option<Vec<ToolCall>>, String> = run_ai_turn(
+    let result = run_agent_loop(
         window.clone(),
         state.inner().clone(),
-        session_id.clone(),
+        run_context,
         model_id,
         channel_id,
         is_agent_mode,
@@ -1666,9 +1619,9 @@ pub async fn execute_agent_tools(
         bound_ssh_session_id,
         thinking_level,
         request_id.clone(),
+        Some((approved_calls, turn_index)),
     )
     .await;
-
     finish_ai_run_with_token(&window, &session_id, &request_id, Some(&token), result)
 }
 
