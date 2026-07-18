@@ -6,7 +6,10 @@ use crate::config::{Config, ConfigManager, SyncManager};
 use crate::db::DatabaseManager;
 use crate::sftp_manager::edit::SftpEditManager;
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tokio::sync::Mutex;
 
@@ -20,68 +23,105 @@ pub struct AiRunEntry {
     pub token: CancellationToken,
 }
 
+#[derive(Debug, Default)]
+struct AiRunSlot {
+    latest_generation: u64,
+    active: Option<AiRunEntry>,
+}
+
 /// Minimal registry surface shared by AppState and unit tests.
 #[derive(Default)]
 pub struct AiRunRegistry {
-    entries: DashMap<String, AiRunEntry>,
+    slots: DashMap<String, AiRunSlot>,
+    next_generation: AtomicU64,
 }
 
 impl AiRunRegistry {
     pub fn new() -> Self {
-        Self {
-            entries: DashMap::new(),
-        }
+        Self::default()
+    }
+
+    /// Reserves a stable start order for an AI request without changing the active token.
+    /// The reservation is only committed when its run successfully attaches a token.
+    pub fn reserve_generation(&self) -> u64 {
+        self.next_generation.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     /// Register a new AI run. Cancels any previous run for the same session first.
-    ///
-    /// Same-session replace holds the DashMap entry lock for the whole
-    /// read-old/write-new step so concurrent register(A)/register(B) cannot
-    /// interleave remove→insert races that leave both tokens live or overwrite
-    /// the newer current without cancelling it.
     pub fn register(&self, session_id: &str, request_id: &str) -> CancellationToken {
-        let token = CancellationToken::new();
-        match self.entries.entry(session_id.to_string()) {
-            dashmap::mapref::entry::Entry::Occupied(mut occupied) => {
-                let previous = occupied.get().token.clone();
-                occupied.insert(AiRunEntry {
-                    request_id: request_id.to_string(),
-                    token: token.clone(),
-                });
-                // Cancel after swap so the map always points at the new token first.
-                previous.cancel();
-            }
-            dashmap::mapref::entry::Entry::Vacant(vacant) => {
-                vacant.insert(AiRunEntry {
-                    request_id: request_id.to_string(),
-                    token: token.clone(),
-                });
-            }
+        let generation = self.reserve_generation();
+        if let Some(token) = self.register_if_not_superseded(session_id, request_id, generation) {
+            return token;
         }
+
+        // A later request attached first while this caller was waiting for the
+        // per-session lock. Preserve that newer owner and make this stale start
+        // follow the ordinary cancellation path.
+        let token = CancellationToken::new();
+        token.cancel();
         token
+    }
+
+    /// Attach a delayed run only when no later same-session run has attached.
+    /// This prevents an approval that completed persistence work late from replacing
+    /// or cancelling a newer user request.
+    pub fn register_if_not_superseded(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        generation: u64,
+    ) -> Option<CancellationToken> {
+        let token = CancellationToken::new();
+        let mut slot = self.slots.entry(session_id.to_string()).or_default();
+        if slot.latest_generation > generation {
+            return None;
+        }
+        slot.latest_generation = generation;
+
+        let previous = slot.active.replace(AiRunEntry {
+            request_id: request_id.to_string(),
+            token: token.clone(),
+        });
+        if let Some(previous) = previous {
+            // Swap before cancellation so the registry always points at the new token.
+            previous.token.cancel();
+        }
+        Some(token)
     }
 
     /// Cancel only when the session's current run matches `request_id`.
     pub fn cancel(&self, session_id: &str, request_id: &str) -> bool {
-        if let Some(entry) = self.entries.get(session_id) {
-            if entry.request_id == request_id {
-                entry.token.cancel();
-                return true;
-            }
+        let Some(slot) = self.slots.get(session_id) else {
+            return false;
+        };
+        let Some(entry) = slot.active.as_ref() else {
+            return false;
+        };
+        if entry.request_id != request_id {
+            return false;
         }
-        false
+        entry.token.cancel();
+        true
     }
 
-    /// Remove the registry entry only if it still belongs to this request.
+    /// Clear the active registry entry only if it still belongs to this request.
+    /// The generation watermark remains so an older delayed operation cannot revive.
     pub fn clear_if_matches(&self, session_id: &str, request_id: &str) {
-        self.entries
-            .remove_if(session_id, |_, entry| entry.request_id == request_id);
+        if let Some(mut slot) = self.slots.get_mut(session_id) {
+            if slot
+                .active
+                .as_ref()
+                .is_some_and(|entry| entry.request_id == request_id)
+            {
+                slot.active = None;
+            }
+        }
     }
 
     pub fn current_request_id(&self, session_id: &str) -> Option<String> {
-        self.entries
+        self.slots
             .get(session_id)
-            .map(|entry| entry.request_id.clone())
+            .and_then(|slot| slot.active.as_ref().map(|entry| entry.request_id.clone()))
     }
 }
 
@@ -98,8 +138,22 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn reserve_ai_run_generation(&self) -> u64 {
+        self.ai_cancellation_tokens.reserve_generation()
+    }
+
     pub fn register_ai_run(&self, session_id: &str, request_id: &str) -> CancellationToken {
         self.ai_cancellation_tokens.register(session_id, request_id)
+    }
+
+    pub fn register_ai_run_if_not_superseded(
+        &self,
+        session_id: &str,
+        request_id: &str,
+        generation: u64,
+    ) -> Option<CancellationToken> {
+        self.ai_cancellation_tokens
+            .register_if_not_superseded(session_id, request_id, generation)
     }
 
     pub fn cancel_ai_run(&self, session_id: &str, request_id: &str) -> bool {
@@ -657,5 +711,26 @@ mod tests {
         assert!(registry.cancel(session, &current));
         registry.clear_if_matches(session, &current);
         assert!(registry.current_request_id(session).is_none());
+    }
+
+    #[test]
+    fn delayed_registration_cannot_replace_a_newer_request() {
+        let registry = AiRunRegistry::new();
+        let delayed_generation = registry.reserve_generation();
+        let newer = registry.register("sess-delayed", "req-newer");
+
+        assert!(registry
+            .register_if_not_superseded("sess-delayed", "req-delayed", delayed_generation)
+            .is_none());
+        assert!(!newer.is_cancelled());
+        assert_eq!(
+            registry.current_request_id("sess-delayed").as_deref(),
+            Some("req-newer")
+        );
+
+        registry.clear_if_matches("sess-delayed", "req-newer");
+        assert!(registry
+            .register_if_not_superseded("sess-delayed", "req-delayed", delayed_generation)
+            .is_none());
     }
 }

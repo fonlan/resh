@@ -31,11 +31,49 @@ pub struct ChatMessage {
     pub model_id: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ToolRisk {
+    ReadOnly,
+    Mutating,
+    Dangerous,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ToolExecution {
+    Parallel,
+    Sequential,
+    Background,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ToolMode {
+    Ask,
+    Agent,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub enum ToolApproval {
+    Auto,
+    Countdown,
+    AlwaysAsk,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ToolPolicy {
+    pub risk: ToolRisk,
+    pub execution: ToolExecution,
+    pub allowed_modes: Vec<ToolMode>,
+    pub approval: ToolApproval,
+    pub idempotent: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ToolDefinition {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub function: FunctionDefinition,
+    #[serde(skip_serializing)]
+    pub policy: ToolPolicy,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -45,6 +83,45 @@ pub struct FunctionDefinition {
     pub parameters: serde_json::Value,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub enum ToolOutcomeStatus {
+    Completed,
+    Failed,
+    Declined,
+    Cancelled,
+}
+
+impl ToolOutcomeStatus {
+    pub fn as_db_status(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Declined => "declined",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolOutcome {
+    pub tool_call_id: String,
+    pub status: ToolOutcomeStatus,
+    pub content: String,
+}
+
+impl ToolOutcome {
+    pub fn observation(&self) -> String {
+        if self.status == ToolOutcomeStatus::Completed {
+            return self.content.clone();
+        }
+        serde_json::json!({
+            "status": self.status.as_db_status(),
+            "error": self.content,
+        })
+        .to_string()
+    }
+}
+
 /// Stream text chunk for `ai-response-*` / `ai-reasoning-*` (request-scoped).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiStreamTextPayload {
@@ -52,11 +129,16 @@ pub struct AiStreamTextPayload {
     pub content: String,
 }
 
-/// Tool confirmation / auto-exec signal for `ai-tool-call-*`.
+/// Tool confirmation signal for `ai-tool-call-*`. Approval policy is supplied by the
+/// backend so the UI can offer a countdown only for calls that are eligible for it.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiToolCallEventPayload {
     pub request_id: String,
+    pub run_id: String,
+    pub turn_index: i64,
     pub tool_calls: Vec<ToolCall>,
+    pub approval_ids: Vec<String>,
+    pub approval_policies: Vec<ToolApproval>,
 }
 
 /// Batch of complete messages for `ai-message-batch-*`.

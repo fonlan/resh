@@ -174,7 +174,8 @@ async fn main() {
             // Capture optional post-update restore token (validated later when loading snapshot).
             {
                 let args: Vec<String> = std::env::args().collect();
-                let token = resh::updater::capture_restore_token_from_args(args.iter().map(|s| s.as_str()));
+                let token =
+                    resh::updater::capture_restore_token_from_args(args.iter().map(|s| s.as_str()));
                 if let Some(ref t) = token {
                     // Signal the install helper ASAP that the new binary is alive
                     // with a valid restore token (before full UI restore completes).
@@ -298,6 +299,7 @@ async fn main() {
             commands::ai::send_interrupt,
             commands::ai::send_terminal_input,
             commands::ai::execute_agent_tools,
+            commands::ai::get_pending_tool_approvals,
             commands::ai::generate_session_title,
             commands::ai::delete_ai_session,
             commands::ai::delete_all_ai_sessions,

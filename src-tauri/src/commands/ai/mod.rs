@@ -8,8 +8,8 @@ mod types;
 
 pub use tool_registry::create_tools;
 pub use types::{
-    AccessTokenResponse, AiErrorEventPayload, ChatMessage, DeviceCodeResponse, FunctionCall,
-    FunctionDefinition, ToolCall, ToolDefinition,
+    AccessTokenResponse, AiErrorEventPayload, AiToolCallEventPayload, ChatMessage,
+    DeviceCodeResponse, FunctionCall, FunctionDefinition, ToolCall, ToolDefinition,
 };
 
 use history::enrich_user_message_with_tagged_files;
@@ -20,14 +20,8 @@ use tool_runtime::{
 };
 use turn::{
     cancel_persisted_agent_run, create_agent_run, fail_agent_run, resume_agent_run, run_agent_loop,
+    AgentRunResume, ToolApprovalAction,
 };
-
-fn is_read_only_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "get_terminal_output" | "get_selected_terminal_output" | "read_file"
-    )
-}
 
 #[cfg(test)]
 const DUMMY_TOOL_RESPONSE: &str = "Interrupted or skipped by user";
@@ -78,7 +72,7 @@ use crate::commands::{AiRunGuard, AppState};
 use crate::ssh_manager::ssh::SSHClient;
 use futures::StreamExt;
 use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 #[cfg(test)]
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -1550,14 +1544,57 @@ pub async fn execute_agent_tools(
     channel_id: String,
     mode: Option<String>,
     ssh_session_id: Option<String>,
+    run_id: String,
+    turn_index: i64,
     tool_call_ids: Vec<String>,
+    approval_ids: Vec<String>,
+    approval_action: String,
     thinking_level: Option<String>,
     request_id: String,
 ) -> Result<(), String> {
-    if request_id.is_empty() {
-        return Err("request_id is required".to_string());
+    if request_id.is_empty() || run_id.is_empty() {
+        return Err("request_id and run_id are required".to_string());
     }
-    let token = state.register_ai_run(&session_id, &request_id);
+    let approval_action = ToolApprovalAction::parse(&approval_action)?;
+    let is_agent_mode = mode.as_deref() == Some("agent");
+    let registration_generation = state.reserve_ai_run_generation();
+
+    // Claim the persisted approval before touching the per-session cancellation
+    // registry. Duplicate delivery must not replace and cancel the live executor.
+    let resumed = resume_agent_run(
+        state.inner(),
+        &session_id,
+        &request_id,
+        is_agent_mode,
+        &run_id,
+        turn_index,
+        &tool_call_ids,
+        &approval_ids,
+        approval_action,
+    )
+    .await?;
+    let AgentRunResume::Resumed {
+        context: run_context,
+        tools: approved_calls,
+        turn_index,
+    } = resumed
+    else {
+        return Ok(());
+    };
+
+    let Some(token) =
+        state.register_ai_run_if_not_superseded(&session_id, &request_id, registration_generation)
+    else {
+        // The approval was claimed before a newer request attached its token. Do
+        // not let the stale approval execute side effects or replace that request.
+        let _ = cancel_persisted_agent_run(state.inner(), &session_id, &request_id).await?;
+        return finish_ai_run(
+            &window,
+            &session_id,
+            &request_id,
+            Err(AI_CANCELLED.to_string()),
+        );
+    };
     let _run_guard = AiRunGuard::new(
         state.inner().clone(),
         session_id.clone(),
@@ -1590,22 +1627,6 @@ pub async fn execute_agent_tools(
         Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
     };
 
-    let is_agent_mode = mode.as_deref() == Some("agent");
-    let resumed = match tokio::select! {
-        biased;
-        _ = token.cancelled() => return finish_ai_run(&window, &session_id, &request_id, Err(AI_CANCELLED.to_string())),
-        value = resume_agent_run(
-            state.inner(),
-            &session_id,
-            &request_id,
-            is_agent_mode,
-            &tool_call_ids,
-        ) => value,
-    } {
-        Ok(value) => value,
-        Err(error) => return finish_ai_run(&window, &session_id, &request_id, Err(error)),
-    };
-    let (run_context, approved_calls, turn_index) = resumed;
     let tools = Some(create_tools(is_agent_mode));
     let result = run_agent_loop(
         window.clone(),
@@ -1623,6 +1644,87 @@ pub async fn execute_agent_tools(
     )
     .await;
     finish_ai_run_with_token(&window, &session_id, &request_id, Some(&token), result)
+}
+
+/// Returns durable approval state for the currently selected session. The UI restores
+/// this directly instead of inferring pending calls from the last assistant message.
+#[tauri::command]
+pub async fn get_pending_tool_approvals(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<Option<AiToolCallEventPayload>, String> {
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            let pending: Option<(String, String, i64)> = conn
+                .query_row(
+                    "SELECT r.id, r.active_request_id, i.turn_index
+                     FROM ai_runs r JOIN ai_tool_invocations i ON i.run_id = r.id
+                     WHERE r.session_id = ?1 AND r.status = 'awaitingApproval'
+                       AND i.status = 'awaitingApproval'
+                     ORDER BY r.updated_at DESC, i.rowid ASC LIMIT 1",
+                    params![session_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            let Some((run_id, request_id, turn_index)) = pending else {
+                return Ok(None);
+            };
+            let mut statement = conn
+                .prepare(
+                    "SELECT tool_call_id, tool_name, arguments_json, approval_id
+                     FROM ai_tool_invocations
+                     WHERE run_id = ?1 AND turn_index = ?2 AND status = 'awaitingApproval'
+                     ORDER BY rowid ASC",
+                )
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![run_id.clone(), turn_index], |row| {
+                    Ok((
+                        ToolCall {
+                            id: row.get(0)?,
+                            tool_type: "function".to_string(),
+                            function: FunctionCall {
+                                name: row.get(1)?,
+                                arguments: row.get(2)?,
+                            },
+                        },
+                        row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    ))
+                })
+                .map_err(|error| error.to_string())?;
+            let entries = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            if entries.is_empty()
+                || entries
+                    .iter()
+                    .any(|(_, approval_id)| approval_id.is_empty())
+            {
+                return Err("Persisted approval state is incomplete".to_string());
+            }
+            let approval_policies = entries
+                .iter()
+                .map(|(call, _)| {
+                    tool_registry::tool_policy(&call.function.name)
+                        .map(|policy| policy.approval)
+                        .ok_or_else(|| "Persisted approval references an unknown tool".to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Some(AiToolCallEventPayload {
+                request_id,
+                run_id,
+                turn_index,
+                tool_calls: entries.iter().map(|(call, _)| call.clone()).collect(),
+                approval_ids: entries
+                    .into_iter()
+                    .map(|(_, approval_id)| approval_id)
+                    .collect(),
+                approval_policies,
+            }))
+        })
+        .await
 }
 
 #[tauri::command]

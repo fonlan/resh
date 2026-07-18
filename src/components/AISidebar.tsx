@@ -162,11 +162,9 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const appendResponse = useAIStore((state) => state.appendResponse)
   const appendReasoning = useAIStore((state) => state.appendReasoning)
   const appendToolCalls = useAIStore((state) => state.appendToolCalls)
-  const setGenerating = useAIStore((state) => state.setGenerating)
   const storeSetPendingToolCalls = useAIStore(
     (state) => state.setPendingToolCalls,
   )
-  const markSessionStopped = useAIStore((state) => state.markSessionStopped)
   const startRun = useAIStore((state) => state.startRun)
   const finishRun = useAIStore((state) => state.finishRun)
   const cancelRunLocally = useAIStore((state) => state.cancelRunLocally)
@@ -226,6 +224,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const reasoningChunkBufferRef = useRef("")
   const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastErrorToastRef = useRef<{ message: string; at: number } | null>(null)
+  const restoredApprovalSessionRef = useRef<string | null>(null)
   const scrollPositionsRef = useRef<Record<string, number>>({})
   const pendingScrollRestoreRef = useRef<{
     key: string
@@ -265,6 +264,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const configRef = useRef(config)
   const currentServerIdRef = useRef(currentServerId)
   const autoConfirmDelaySecondsRef = useRef(autoConfirmDelaySeconds)
+  const inFlightApprovalKeysRef = useRef(new Set<string>())
 
   useEffect(() => {
     showAiErrorRef.current = showAiError
@@ -730,8 +730,21 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   }
 
   const executeToolCalls = useCallback(
-    async (calls: ToolCall[]) => {
-      if (!activeSessionId) return
+    async (
+      calls: ToolCall[],
+      approvalAction: "accept" | "acceptForSession" | "decline" | "cancel" = "accept",
+    ) => {
+      if (!activeSessionId || calls.length === 0) return
+
+      const approvalKey = calls
+        .map(
+          (call) =>
+            `${call.approval_run_id ?? ""}:${call.approval_turn_index ?? ""}:${call.id}:${call.approval_id ?? ""}`,
+        )
+        .sort()
+        .join("|")
+      if (inFlightApprovalKeysRef.current.has(approvalKey)) return
+      inFlightApprovalKeysRef.current.add(approvalKey)
 
       isAtBottomRef.current = true
       // Drop any in-flight 33ms stream buffer from the previous run before
@@ -757,7 +770,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           channelId,
           mode,
           boundSshSessionId,
-          calls.map((c) => c.id),
+          calls,
+          approvalAction,
           thinkingLevel,
           requestId,
         )
@@ -769,6 +783,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
         if (finishRun(activeSessionId, requestId)) {
           showAiError(err)
         }
+      } finally {
+        inFlightApprovalKeysRef.current.delete(approvalKey)
       }
     },
     [
@@ -789,6 +805,44 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   useEffect(() => {
     executeToolCallsRef.current = executeToolCalls
   }, [executeToolCalls])
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      restoredApprovalSessionRef.current = null
+      return
+    }
+    if (pendingToolCalls || restoredApprovalSessionRef.current === activeSessionId) return
+
+    const sessionId = activeSessionId
+    let disposed = false
+    restoredApprovalSessionRef.current = sessionId
+    void aiService
+      .getPendingToolApprovals(sessionId)
+      .then((payload) => {
+        if (
+          disposed ||
+          !payload ||
+          payload.approval_ids.length !== payload.tool_calls.length ||
+          payload.approval_policies.length !== payload.tool_calls.length
+        ) {
+          return
+        }
+        storeSetPendingToolCalls(
+          sessionId,
+          payload.tool_calls.map((call, index) => ({
+            ...call,
+            approval_policy: payload.approval_policies[index],
+            approval_id: payload.approval_ids[index],
+            approval_run_id: payload.run_id,
+            approval_turn_index: payload.turn_index,
+          })),
+        )
+      })
+      .catch((error) => console.error("[AI] restore pending approvals failed", error))
+    return () => {
+      disposed = true
+    }
+  }, [activeSessionId, pendingToolCalls, storeSetPendingToolCalls])
 
   // Listen for streaming responses & tool calls (session-scoped; requestId-gated)
   useEffect(() => {
@@ -942,8 +996,27 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     const toolCallListener = listen<AiToolCallEventPayload>(
       `ai-tool-call-${sessionId}`,
       (event) => {
-        const { request_id: requestId, tool_calls: calls } = event.payload
-        if (!isCurrentRequest(requestId)) return
+        const {
+          request_id: requestId,
+          run_id: runId,
+          turn_index: turnIndex,
+          tool_calls: calls,
+          approval_ids: approvalIds,
+        } = event.payload
+        if (
+          !isCurrentRequest(requestId) ||
+          approvalIds.length !== calls.length ||
+          event.payload.approval_policies.length !== calls.length
+        ) {
+          return
+        }
+        const approvalCalls = calls.map((call, index) => ({
+          ...call,
+          approval_policy: event.payload.approval_policies[index],
+          approval_id: approvalIds[index],
+          approval_run_id: runId,
+          approval_turn_index: turnIndex,
+        }))
 
         // Commit any remaining stream text for this run before tool handling.
         flushStreamBuffers(requestId)
@@ -956,12 +1029,12 @@ export const AISidebar: React.FC<AISidebarProps> = ({
           )
 
         if (shouldExecuteWithoutConfirmation) {
-          // Auto-exec starts a new requestId via executeToolCalls (which clears buffers).
-          void executeToolCallsRef.current(calls)
+          // Countdown only resolves a backend-created approval; it cannot promote a denied call.
+          void executeToolCallsRef.current(approvalCalls, "accept")
         } else {
           // Pending confirmation: end generating for this run; keep request cleared for next action.
           finishRun(sessionId, requestId)
-          storeSetPendingToolCalls(sessionId, calls)
+          storeSetPendingToolCalls(sessionId, approvalCalls)
         }
       },
     )
@@ -1369,7 +1442,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
 
     const callsToExecute = pendingToolCalls
     storeSetPendingToolCalls(activeSessionId, null) // Hide confirmation
-    await executeToolCalls(callsToExecute)
+    await executeToolCalls(callsToExecute, "accept")
   }, [
     activeSessionId,
     executeToolCalls,
@@ -1377,28 +1450,17 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     storeSetPendingToolCalls,
   ])
 
-  const handleCancelTools = useCallback(() => {
-    if (!activeSessionId) return
+  const handleCancelTools = useCallback(async () => {
+    if (!activeSessionId || !pendingToolCalls) return
 
-    const sessionId = activeSessionId
-    const requestId = useAIStore.getState().activeRequestId[sessionId] ?? null
-    storeSetPendingToolCalls(sessionId, null)
-    setGenerating(sessionId, false)
-    markSessionStopped(sessionId)
-
-    // Persist the decision so a reloaded UI cannot resume the same side-effecting calls.
-    if (requestId) {
-      void aiService.cancelMessage(sessionId, requestId).catch((err) => {
-        console.error("[AI] cancel pending tools failed", { sessionId, requestId, err })
-        showAiError(err)
-      })
-    }
+    const callsToCancel = pendingToolCalls
+    storeSetPendingToolCalls(activeSessionId, null)
+    await executeToolCalls(callsToCancel, "cancel")
   }, [
     activeSessionId,
+    executeToolCalls,
+    pendingToolCalls,
     storeSetPendingToolCalls,
-    setGenerating,
-    markSessionStopped,
-    showAiError,
   ])
 
   const handleStopGeneration = useCallback(() => {

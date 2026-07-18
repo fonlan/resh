@@ -28,16 +28,17 @@ export const ToolConfirmation = ({
   const confirmedRef = useRef(false)
 
   useEffect(() => {
-    const sensitive = hasSensitiveToolCall(toolCalls)
+    const requiresExplicitApproval = toolCalls.some(
+      (call) => call.approval_policy === "AlwaysAsk",
+    )
+    const sensitive = requiresExplicitApproval || hasSensitiveToolCall(toolCalls)
+    const allowsCountdown = toolCalls.every(
+      (call) => call.approval_policy === "Countdown",
+    )
 
     setIsSensitive(sensitive)
     confirmedRef.current = false
-
-    if (!sensitive) {
-      setCountdown(autoConfirmDelaySeconds)
-    } else {
-      setCountdown(null)
-    }
+    setCountdown(allowsCountdown ? autoConfirmDelaySeconds : null)
   }, [autoConfirmDelaySeconds, toolCalls])
 
   useEffect(() => {

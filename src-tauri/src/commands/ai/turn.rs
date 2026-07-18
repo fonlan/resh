@@ -18,6 +18,9 @@ use super::stream_parsing::{
     extract_wait_finish, flush_reasoning_buffer, flush_response_buffer,
     flush_think_parser_remainder, normalize_streamed_tool_calls,
 };
+use super::tool_registry::{
+    is_session_grant_eligible, tool_policy, PreparedToolCall, ToolPolicyEngine, ToolPreparation,
+};
 use super::tool_runtime::{
     build_recording_input_payload, build_run_in_terminal_timeout_failure_message,
     execute_command_in_exec_channel, try_reconnect_terminal_after_timeout,
@@ -25,9 +28,9 @@ use super::tool_runtime::{
 };
 use super::types::{
     AiMessageBatchPayload, AiReasoningEndPayload, AiToolCallEventPayload, ChatMessage,
-    FunctionCall, ToolCall, ToolDefinition,
+    FunctionCall, ToolCall, ToolDefinition, ToolExecution, ToolOutcome, ToolOutcomeStatus,
 };
-use super::{is_read_only_tool, AI_CANCELLED, AI_STREAM_IDLE_TIMEOUT_SECS};
+use super::{AI_CANCELLED, AI_STREAM_IDLE_TIMEOUT_SECS};
 use crate::commands::AppState;
 use crate::ssh_manager::ssh::SSHClient;
 
@@ -53,17 +56,68 @@ fn spawn_stop_command_recording(ssh_id: &str) {
     });
 }
 
-pub(super) async fn execute_tools_and_save(
+async fn persist_tool_outcome(
+    app_handle: &tauri::AppHandle,
+    state: &Arc<AppState>,
+    session_id: &str,
+    request_id: &str,
+    run_id: Option<&str>,
+    turn_index: Option<i64>,
+    outcome: &ToolOutcome,
+) -> Result<(), String> {
+    let tool_msg_id = Uuid::new_v4().to_string();
+    let tool_call_id = outcome.tool_call_id.clone();
+    let content = outcome.observation();
+    let session_id = session_id.to_string();
+    let session_id_for_db = session_id.clone();
+    let run_id = run_id.map(str::to_string);
+    let message_content = content.clone();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index)
+                 VALUES (?1, ?2, 'tool', ?3, ?4, ?5, ?6)",
+                params![
+                    tool_msg_id,
+                    session_id_for_db,
+                    message_content,
+                    tool_call_id,
+                    run_id,
+                    turn_index
+                ],
+            )
+            .map_err(|error| error.to_string())?;
+            Ok(())
+        })
+        .await?;
+    let _ = app_handle.emit(
+        &format!("ai-message-batch-{}", session_id),
+        AiMessageBatchPayload {
+            request_id: request_id.to_string(),
+            messages: vec![ChatMessage {
+                role: "tool".to_string(),
+                content: Some(content),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_call_id: Some(outcome.tool_call_id.clone()),
+                created_at: None,
+                model_id: None,
+            }],
+        },
+    );
+    Ok(())
+}
+
+async fn execute_tools(
     app_handle: tauri::AppHandle,
     state: &Arc<AppState>,
     session_id: &str,
     ssh_session_id: Option<&str>,
     tools: Vec<ToolCall>,
     cancellation_token: CancellationToken,
-    request_id: &str,
-    run_id: Option<&str>,
-    turn_index: Option<i64>,
-) -> Result<(), String> {
+) -> Result<Vec<ToolOutcome>, String> {
+    let mut outcomes = Vec::with_capacity(tools.len());
     for call in tools {
         if cancellation_token.is_cancelled() {
             return Err(AI_CANCELLED.to_string());
@@ -744,45 +798,19 @@ pub(super) async fn execute_tools_and_save(
             _ => format!("Error: Unknown tool {}", call.function.name),
         };
 
-        let tool_msg_id = Uuid::new_v4().to_string();
-        let tool_call_id = call.id.clone();
-        let tool_content = result.clone();
-        {
-            let session_id_owned = session_id.to_string();
-            let tool_msg_id_owned = tool_msg_id.clone();
-            let tool_call_id_owned = tool_call_id.clone();
-            let result_owned = result.clone();
-            let run_id_owned = run_id.map(str::to_string);
-            state
-                .db_manager
-                .run_blocking(move |conn| {
-                    conn.execute(
-                        "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        params![tool_msg_id_owned, session_id_owned, "tool", result_owned, tool_call_id_owned, run_id_owned, turn_index],
-                    )
-                    .map_err(|e| e.to_string())?;
-                    Ok(())
-                })
-                .await?;
-        }
-
-        let _ = app_handle.emit(
-            &format!("ai-message-batch-{}", session_id),
-            AiMessageBatchPayload {
-                request_id: request_id.to_string(),
-                messages: vec![ChatMessage {
-                    role: "tool".to_string(),
-                    content: Some(tool_content),
-                    reasoning_content: None,
-                    tool_calls: None,
-                    tool_call_id: Some(call.id.clone()),
-                    created_at: None,
-                    model_id: None,
-                }],
-            },
-        );
+        let status = if result.starts_with("Error:") || result.starts_with("Failed") {
+            ToolOutcomeStatus::Failed
+        } else {
+            ToolOutcomeStatus::Completed
+        };
+        let outcome = ToolOutcome {
+            tool_call_id: call.id.clone(),
+            status,
+            content: result,
+        };
+        outcomes.push(outcome);
     }
-    Ok(())
+    Ok(outcomes)
 }
 
 pub(super) fn apply_reasoning_fallback(
@@ -804,7 +832,6 @@ pub const MAX_TOTAL_TOOL_CALLS: u32 = 128;
 pub const MAX_IDENTICAL_TOOL_CALLS: u32 = 3;
 pub const MAX_RUN_DURATION: Duration = Duration::from_secs(60 * 60);
 const BUDGET_EXCEEDED_PREFIX: &str = "AGENT_BUDGET_EXCEEDED: ";
-const DECLINED_TOOL_RESPONSE: &str = "Interrupted or skipped by user";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentStopReason {
@@ -1102,6 +1129,206 @@ async fn mark_invocations(
         .await
 }
 
+#[derive(Default)]
+struct PreparedToolBatch {
+    execute: Vec<PreparedToolCall>,
+    awaiting_approval: Vec<PreparedToolCall>,
+    immediate: Vec<ToolOutcome>,
+}
+
+async fn load_session_grants(
+    state: &Arc<AppState>,
+    session_id: &str,
+) -> Result<HashSet<String>, String> {
+    let session_id = session_id.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            let mut statement = conn
+                .prepare("SELECT tool_name FROM ai_tool_approval_grants WHERE session_id = ?1")
+                .map_err(|error| error.to_string())?;
+            let rows = statement
+                .query_map(params![session_id], |row| row.get::<_, String>(0))
+                .map_err(|error| error.to_string())?;
+            rows.collect::<Result<HashSet<_>, _>>()
+                .map_err(|error| error.to_string())
+        })
+        .await
+}
+
+async fn prepare_tool_batch(
+    state: &Arc<AppState>,
+    session_id: &str,
+    calls: Vec<ToolCall>,
+    is_agent_mode: bool,
+) -> Result<PreparedToolBatch, String> {
+    let grants = load_session_grants(state, session_id).await?;
+    let mut batch = PreparedToolBatch::default();
+    for call in calls {
+        let has_session_grant = grants.contains(&call.function.name);
+        match ToolPolicyEngine::prepare(call, is_agent_mode, has_session_grant) {
+            ToolPreparation::Execute(call) => batch.execute.push(call),
+            ToolPreparation::AwaitApproval(call) => batch.awaiting_approval.push(call),
+            ToolPreparation::Immediate(outcome) => batch.immediate.push(outcome),
+        }
+    }
+    Ok(batch)
+}
+
+async fn persist_terminal_outcomes(
+    app_handle: &tauri::AppHandle,
+    state: &Arc<AppState>,
+    context: &AgentRunContext,
+    request_id: &str,
+    turn_index: i64,
+    outcomes: &[ToolOutcome],
+) -> Result<(), String> {
+    for outcome in outcomes {
+        persist_tool_outcome(
+            app_handle,
+            state,
+            &context.session_id,
+            request_id,
+            Some(&context.run_id),
+            Some(turn_index),
+            outcome,
+        )
+        .await?;
+        mark_invocations(
+            state,
+            &context.run_id,
+            std::slice::from_ref(&outcome.tool_call_id),
+            outcome.status.as_db_status(),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+async fn persist_approval_requests(
+    state: &Arc<AppState>,
+    context: &AgentRunContext,
+    calls: &[PreparedToolCall],
+) -> Result<Vec<String>, String> {
+    let run_id = context.run_id.clone();
+    let requests: Vec<(String, String)> = calls
+        .iter()
+        .map(|call| (call.call.id.clone(), Uuid::new_v4().to_string()))
+        .collect();
+    let updates = requests.clone();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            with_immediate_transaction(conn, |conn| {
+                for (tool_call_id, approval_id) in updates {
+                    let changed = conn
+                        .execute(
+                            "UPDATE ai_tool_invocations
+                             SET status = 'awaitingApproval', approval_id = ?1, updated_at = CURRENT_TIMESTAMP
+                             WHERE run_id = ?2 AND tool_call_id = ?3 AND status = 'proposed'",
+                            params![approval_id, run_id, tool_call_id],
+                        )
+                        .map_err(|error| error.to_string())?;
+                    if changed != 1 {
+                        return Err("Tool invocation is no longer available for approval".to_string());
+                    }
+                }
+                Ok(())
+            })
+        })
+        .await?;
+    Ok(requests
+        .into_iter()
+        .map(|(_, approval_id)| approval_id)
+        .collect())
+}
+
+async fn execute_prepared_tool(
+    app_handle: tauri::AppHandle,
+    state: Arc<AppState>,
+    session_id: String,
+    ssh_session_id: Option<String>,
+    prepared: PreparedToolCall,
+    cancellation_token: CancellationToken,
+) -> Result<ToolOutcome, String> {
+    let call = prepared.call;
+    match execute_tools(
+        app_handle,
+        &state,
+        &session_id,
+        ssh_session_id.as_deref(),
+        vec![call.clone()],
+        cancellation_token,
+    )
+    .await
+    {
+        Ok(mut outcomes) => outcomes
+            .pop()
+            .ok_or_else(|| "Tool executor returned no outcome".to_string()),
+        Err(error) if error == AI_CANCELLED => Err(error),
+        Err(error) => Ok(ToolOutcome {
+            tool_call_id: call.id,
+            status: ToolOutcomeStatus::Failed,
+            content: error,
+        }),
+    }
+}
+
+async fn execute_prepared_batch(
+    app_handle: tauri::AppHandle,
+    state: Arc<AppState>,
+    context: &AgentRunContext,
+    ssh_session_id: Option<String>,
+    calls: Vec<PreparedToolCall>,
+    cancellation_token: CancellationToken,
+) -> Result<Vec<ToolOutcome>, String> {
+    if calls.is_empty() {
+        return Ok(Vec::new());
+    }
+    let parallel = calls
+        .iter()
+        .all(|call| call.policy.execution == ToolExecution::Parallel);
+    if !parallel {
+        let mut outcomes = Vec::with_capacity(calls.len());
+        for call in calls {
+            outcomes.push(
+                execute_prepared_tool(
+                    app_handle.clone(),
+                    state.clone(),
+                    context.session_id.clone(),
+                    ssh_session_id.clone(),
+                    call,
+                    cancellation_token.clone(),
+                )
+                .await?,
+            );
+        }
+        return Ok(outcomes);
+    }
+
+    let mut indexed = futures::stream::iter(calls.into_iter().enumerate().map(|(index, call)| {
+        let app_handle = app_handle.clone();
+        let state = state.clone();
+        let session_id = context.session_id.clone();
+        let ssh_session_id = ssh_session_id.clone();
+        let token = cancellation_token.clone();
+        async move {
+            let outcome =
+                execute_prepared_tool(app_handle, state, session_id, ssh_session_id, call, token)
+                    .await;
+            (index, outcome)
+        }
+    }))
+    .buffer_unordered(3)
+    .collect::<Vec<_>>()
+    .await;
+    indexed.sort_by_key(|(index, _)| *index);
+    indexed
+        .into_iter()
+        .map(|(_, outcome)| outcome)
+        .collect::<Result<Vec<_>, _>>()
+}
+
 async fn persist_proposed_tools(
     state: &Arc<AppState>,
     context: &AgentRunContext,
@@ -1184,27 +1411,44 @@ async fn reserve_tool_batch(
     update_budget(state, context).await
 }
 
-async fn save_declined_tools(
-    state: &Arc<AppState>,
-    context: &AgentRunContext,
-    turn_index: i64,
-    calls: &[ToolCall],
-) -> Result<(), String> {
-    let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
-    mark_invocations(state, &context.run_id, &ids, "declined").await?;
-    let session_id = context.session_id.clone();
-    let run_id = context.run_id.clone();
-    let calls = calls.to_vec();
-    state.db_manager.run_blocking(move |conn| {
-        for call in calls {
-            conn.execute(
-                "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index)
-                 VALUES (?1, ?2, 'tool', ?3, ?4, ?5, ?6)",
-                params![Uuid::new_v4().to_string(), session_id, DECLINED_TOOL_RESPONSE, call.id, run_id, turn_index],
-            ).map_err(|e| e.to_string())?;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ToolApprovalAction {
+    Accept,
+    AcceptForSession,
+    Decline,
+    Cancel,
+}
+
+impl ToolApprovalAction {
+    pub(super) fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "accept" => Ok(Self::Accept),
+            "acceptForSession" => Ok(Self::AcceptForSession),
+            "decline" => Ok(Self::Decline),
+            "cancel" => Ok(Self::Cancel),
+            _ => Err(
+                "approval_action must be accept, acceptForSession, decline, or cancel".to_string(),
+            ),
         }
-        Ok(())
-    }).await
+    }
+
+    fn terminal_status(self) -> Option<ToolOutcomeStatus> {
+        match self {
+            Self::Accept | Self::AcceptForSession => None,
+            Self::Decline => Some(ToolOutcomeStatus::Declined),
+            Self::Cancel => Some(ToolOutcomeStatus::Cancelled),
+        }
+    }
+}
+
+pub(super) enum AgentRunResume {
+    Resumed {
+        context: AgentRunContext,
+        tools: Vec<ToolCall>,
+        turn_index: i64,
+    },
+    AlreadyResolved,
+    InProgress,
 }
 
 pub(super) async fn resume_agent_run(
@@ -1212,125 +1456,183 @@ pub(super) async fn resume_agent_run(
     session_id: &str,
     request_id: &str,
     is_agent_mode: bool,
-    approved_ids: &[String],
-) -> Result<(AgentRunContext, Vec<ToolCall>, i64), String> {
-    if approved_ids.is_empty() {
-        return Err("At least one tool call id is required to resume an agent run".to_string());
+    run_id: &str,
+    turn_index: i64,
+    tool_call_ids: &[String],
+    approval_ids: &[String],
+    approval_action: ToolApprovalAction,
+) -> Result<AgentRunResume, String> {
+    if tool_call_ids.is_empty() || tool_call_ids.len() != approval_ids.len() {
+        return Err(
+            "Every approval response must include matching tool_call_ids and approval_ids"
+                .to_string(),
+        );
     }
-    let approved: HashSet<String> = approved_ids.iter().cloned().collect();
-    if approved.len() != approved_ids.len() {
+    let response_ids: HashMap<String, String> = tool_call_ids
+        .iter()
+        .cloned()
+        .zip(approval_ids.iter().cloned())
+        .collect();
+    if response_ids.len() != tool_call_ids.len() {
         return Err("Tool call ids must not contain duplicates".to_string());
     }
 
     let session_id = session_id.to_string();
     let request_id = request_id.to_string();
-    let first_id = approved_ids[0].clone();
-    let context_and_calls = state
+    let run_id = run_id.to_string();
+    state
         .db_manager
         .run_blocking(move |conn| {
             with_immediate_transaction(conn, |conn| {
-                let row: Option<(String, String, i64, i64, i64)> = conn
+                let run: Option<(String, i64, i64, i64)> = conn
                     .query_row(
-                        "SELECT r.id, r.request_id, r.model_turn_count, r.total_tool_call_count, r.started_at_ms
-                         FROM ai_runs r JOIN ai_tool_invocations i ON i.run_id = r.id
-                         WHERE r.session_id = ?1 AND r.status = 'awaitingApproval'
-                           AND i.tool_call_id = ?2 AND i.status = 'awaitingApproval' LIMIT 1",
-                        params![session_id, first_id],
-                        |row| {
-                            Ok((
-                                row.get(0)?,
-                                row.get(1)?,
-                                row.get(2)?,
-                                row.get(3)?,
-                                row.get(4)?,
-                            ))
-                        },
+                        "SELECT request_id, model_turn_count, total_tool_call_count, started_at_ms
+                         FROM ai_runs WHERE id = ?1 AND session_id = ?2 AND status = 'awaitingApproval'",
+                        params![run_id, session_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                     )
                     .optional()
                     .map_err(|error| error.to_string())?;
-                let Some((run_id, original_request_id, model_turns, total_tool_calls, started_at_ms)) = row else {
-                    return Err("No awaiting approval run matches the requested tool calls".to_string());
+
+                let Some((original_request_id, model_turns, total_tool_calls, started_at_ms)) = run else {
+                    // Do not replace the in-memory run token for a duplicate approval.
+                    // A terminal result is idempotently resolved; an executing result is
+                    // already owned by the original approval request.
+                    let mut matched_count = 0usize;
+                    let mut terminal_count = 0usize;
+                    let mut has_executing = false;
+                    for (tool_call_id, approval_id) in &response_ids {
+                        let status: Option<String> = conn
+                            .query_row(
+                                "SELECT status FROM ai_tool_invocations
+                                 WHERE run_id = ?1 AND turn_index = ?2 AND tool_call_id = ?3 AND approval_id = ?4",
+                                params![run_id, turn_index, tool_call_id, approval_id],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                            .map_err(|error| error.to_string())?;
+                        if let Some(status) = status {
+                            matched_count += 1;
+                            if matches!(
+                                status.as_str(),
+                                "completed" | "failed" | "declined" | "cancelled" | "interrupted"
+                            ) {
+                                terminal_count += 1;
+                            }
+                            has_executing |= status == "executing";
+                        }
+                    }
+                    if terminal_count == response_ids.len() {
+                        return Ok(AgentRunResume::AlreadyResolved);
+                    }
+                    if matched_count == response_ids.len() && has_executing {
+                        return Ok(AgentRunResume::InProgress);
+                    }
+                    return Err("No awaiting approval run matches the supplied run identity".to_string());
                 };
 
-                let calls = {
-                    let mut statement = conn
-                        .prepare(
-                            "SELECT tool_call_id, tool_name, arguments_json, turn_index
-                             FROM ai_tool_invocations
-                             WHERE run_id = ?1 AND status = 'awaitingApproval' ORDER BY rowid ASC",
-                        )
-                        .map_err(|error| error.to_string())?;
-                    let rows = statement
-                        .query_map(params![run_id.clone()], |row| {
-                            Ok(ToolCall {
+                let mut statement = conn
+                    .prepare(
+                        "SELECT tool_call_id, tool_name, arguments_json, approval_id
+                         FROM ai_tool_invocations
+                         WHERE run_id = ?1 AND turn_index = ?2 AND status = 'awaitingApproval'
+                         ORDER BY rowid ASC",
+                    )
+                    .map_err(|error| error.to_string())?;
+                let rows = statement
+                    .query_map(params![run_id, turn_index], |row| {
+                        Ok((
+                            ToolCall {
                                 id: row.get(0)?,
                                 tool_type: "function".to_string(),
                                 function: FunctionCall {
                                     name: row.get(1)?,
                                     arguments: row.get(2)?,
                                 },
-                            })
-                        })
-                        .map_err(|error| error.to_string())?;
-                    rows.collect::<Result<Vec<_>, _>>()
-                        .map_err(|error| error.to_string())?
-                };
-
-                let mut approved_calls = Vec::new();
-                let mut declined_calls = Vec::new();
-                for call in calls {
-                    if approved.contains(&call.id) {
-                        approved_calls.push(call);
-                    } else {
-                        declined_calls.push(call);
-                    }
-                }
-                if approved_calls.len() != approved.len() {
-                    return Err("One or more tool calls are no longer awaiting approval".to_string());
-                }
-                if !is_agent_mode
-                    && approved_calls.iter().any(|call| {
-                        matches!(
-                            call.function.name.as_str(),
-                            "run_in_terminal" | "run_in_background"
-                        )
+                            },
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    })
+                    .map_err(|error| error.to_string())?;
+                let pending = rows
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?;
+                if pending.len() != response_ids.len()
+                    || pending.iter().any(|(call, approval_id)| {
+                        response_ids.get(&call.id) != approval_id.as_ref()
                     })
                 {
-                    return Err(
-                        "Execution denied: run_in_terminal/run_in_background are only allowed in Agent mode."
-                            .to_string(),
-                    );
+                    return Err("Approval response must match every pending tool in the run turn".to_string());
                 }
 
-                for call in &declined_calls {
-                    conn.execute(
-                        "UPDATE ai_tool_invocations SET status = 'declined', updated_at = CURRENT_TIMESTAMP
-                         WHERE run_id = ?1 AND tool_call_id = ?2 AND status = 'awaitingApproval'",
-                        params![run_id, call.id],
-                    )
-                    .map_err(|error| error.to_string())?;
-                    conn.execute(
-                        "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index)
-                         VALUES (?1, ?2, 'tool', ?3, ?4, ?5, ?6)",
-                        params![
-                            Uuid::new_v4().to_string(),
-                            session_id,
-                            DECLINED_TOOL_RESPONSE,
-                            call.id,
-                            run_id,
-                            model_turns
-                        ],
-                    )
-                    .map_err(|error| error.to_string())?;
+                let calls: Vec<ToolCall> = pending.into_iter().map(|(call, _)| call).collect();
+                if matches!(approval_action, ToolApprovalAction::Accept | ToolApprovalAction::AcceptForSession)
+                    && !is_agent_mode
+                    && calls.iter().any(|call| {
+                        tool_policy(&call.function.name)
+                            .map(|policy| !policy.allowed_modes.contains(&super::types::ToolMode::Ask))
+                            .unwrap_or(true)
+                    })
+                {
+                    return Err("Execution denied: the approval response is not allowed in Ask mode.".to_string());
                 }
-                for call in &approved_calls {
-                    conn.execute(
-                        "UPDATE ai_tool_invocations SET status = 'executing', updated_at = CURRENT_TIMESTAMP
-                         WHERE run_id = ?1 AND tool_call_id = ?2 AND status = 'awaitingApproval'",
-                        params![run_id, call.id],
-                    )
-                    .map_err(|error| error.to_string())?;
+
+                if approval_action == ToolApprovalAction::AcceptForSession {
+                    for call in &calls {
+                        if tool_policy(&call.function.name)
+                            .is_some_and(|policy| is_session_grant_eligible(&policy))
+                        {
+                            conn.execute(
+                                "INSERT OR IGNORE INTO ai_tool_approval_grants (session_id, tool_name) VALUES (?1, ?2)",
+                                params![session_id, call.function.name],
+                            )
+                            .map_err(|error| error.to_string())?;
+                        }
+                    }
                 }
+
+                if let Some(status) = approval_action.terminal_status() {
+                    let observation = serde_json::json!({
+                        "status": status.as_db_status(),
+                        "error": if status == ToolOutcomeStatus::Declined {
+                            "The user declined this tool call."
+                        } else {
+                            "The user cancelled this tool call before execution."
+                        },
+                    })
+                    .to_string();
+                    for call in &calls {
+                        conn.execute(
+                            "UPDATE ai_tool_invocations SET status = ?1, updated_at = CURRENT_TIMESTAMP
+                             WHERE run_id = ?2 AND tool_call_id = ?3 AND status = 'awaitingApproval'",
+                            params![status.as_db_status(), run_id, call.id],
+                        )
+                        .map_err(|error| error.to_string())?;
+                        conn.execute(
+                            "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index)
+                             VALUES (?1, ?2, 'tool', ?3, ?4, ?5, ?6)",
+                            params![
+                                Uuid::new_v4().to_string(),
+                                session_id,
+                                observation,
+                                call.id,
+                                run_id,
+                                turn_index
+                            ],
+                        )
+                        .map_err(|error| error.to_string())?;
+                    }
+                } else {
+                    for call in &calls {
+                        conn.execute(
+                            "UPDATE ai_tool_invocations SET status = 'executing', updated_at = CURRENT_TIMESTAMP
+                             WHERE run_id = ?1 AND tool_call_id = ?2 AND status = 'awaitingApproval'",
+                            params![run_id, call.id],
+                        )
+                        .map_err(|error| error.to_string())?;
+                    }
+                }
+
                 conn.execute(
                     "UPDATE ai_runs SET status = 'running', active_request_id = ?1, updated_at = CURRENT_TIMESTAMP
                      WHERE id = ?2 AND status = 'awaitingApproval'",
@@ -1338,8 +1640,8 @@ pub(super) async fn resume_agent_run(
                 )
                 .map_err(|error| error.to_string())?;
 
-                Ok((
-                    AgentRunContext {
+                Ok(AgentRunResume::Resumed {
+                    context: AgentRunContext {
                         run_id,
                         session_id,
                         request_id: original_request_id,
@@ -1349,13 +1651,16 @@ pub(super) async fn resume_agent_run(
                             started_at_ms,
                         },
                     },
-                    approved_calls,
-                    model_turns,
-                ))
+                    tools: if approval_action.terminal_status().is_none() {
+                        calls
+                    } else {
+                        Vec::new()
+                    },
+                    turn_index,
+                })
             })
         })
-        .await?;
-    Ok(context_and_calls)
+        .await
 }
 
 pub(super) async fn run_agent_loop(
@@ -1384,20 +1689,46 @@ pub(super) async fn run_agent_loop(
                 return Err(budget_error("maximum wall-clock run duration reached"));
             }
             if let Some((calls, turn_index)) = pending_execution.take() {
-                execute_tools_and_save(
-                    window.app_handle().clone(),
+                let mut prepared = Vec::with_capacity(calls.len());
+                let mut immediate = Vec::new();
+                for call in calls {
+                    match tool_policy(&call.function.name) {
+                        Some(policy) => prepared.push(PreparedToolCall { call, policy }),
+                        None => immediate.push(ToolOutcome {
+                            tool_call_id: call.id,
+                            status: ToolOutcomeStatus::Failed,
+                            content: "Tool is no longer registered and was not executed."
+                                .to_string(),
+                        }),
+                    }
+                }
+                persist_terminal_outcomes(
+                    &window.app_handle().clone(),
                     &state,
-                    &context.session_id,
-                    ssh_session_id.as_deref(),
-                    calls.clone(),
-                    cancellation_token.clone(),
+                    &context,
                     &request_id,
-                    Some(&context.run_id),
-                    Some(turn_index),
+                    turn_index,
+                    &immediate,
                 )
                 .await?;
-                let ids: Vec<String> = calls.iter().map(|call| call.id.clone()).collect();
-                mark_invocations(&state, &context.run_id, &ids, "completed").await?;
+                let outcomes = execute_prepared_batch(
+                    window.app_handle().clone(),
+                    state.clone(),
+                    &context,
+                    ssh_session_id.clone(),
+                    prepared,
+                    cancellation_token.clone(),
+                )
+                .await?;
+                persist_terminal_outcomes(
+                    &window.app_handle().clone(),
+                    &state,
+                    &context,
+                    &request_id,
+                    turn_index,
+                    &outcomes,
+                )
+                .await?;
                 continue;
             }
 
@@ -1425,58 +1756,80 @@ pub(super) async fn run_agent_loop(
             reserve_tool_batch(&state, &mut context, &calls).await?;
             persist_proposed_tools(&state, &context, turn_index, &calls).await?;
 
-            let auto_calls: Vec<ToolCall> = calls
-                .iter()
-                .filter(|call| is_read_only_tool(&call.function.name))
-                .cloned()
-                .collect();
-            let approval_calls: Vec<ToolCall> = calls
-                .iter()
-                .filter(|call| !is_read_only_tool(&call.function.name))
-                .cloned()
-                .collect();
-            if !auto_calls.is_empty() {
-                let ids: Vec<String> = auto_calls.iter().map(|call| call.id.clone()).collect();
+            let batch =
+                prepare_tool_batch(&state, &context.session_id, calls, is_agent_mode).await?;
+            persist_terminal_outcomes(
+                &window.app_handle().clone(),
+                &state,
+                &context,
+                &request_id,
+                turn_index,
+                &batch.immediate,
+            )
+            .await?;
+
+            if !batch.execute.is_empty() {
+                let ids: Vec<String> = batch
+                    .execute
+                    .iter()
+                    .map(|call| call.call.id.clone())
+                    .collect();
                 mark_invocations(&state, &context.run_id, &ids, "executing").await?;
-                execute_tools_and_save(
+                let outcomes = execute_prepared_batch(
                     window.app_handle().clone(),
-                    &state,
-                    &context.session_id,
-                    ssh_session_id.as_deref(),
-                    auto_calls,
+                    state.clone(),
+                    &context,
+                    ssh_session_id.clone(),
+                    batch.execute,
                     cancellation_token.clone(),
-                    &request_id,
-                    Some(&context.run_id),
-                    Some(turn_index),
                 )
                 .await?;
-                mark_invocations(&state, &context.run_id, &ids, "completed").await?;
+                persist_terminal_outcomes(
+                    &window.app_handle().clone(),
+                    &state,
+                    &context,
+                    &request_id,
+                    turn_index,
+                    &outcomes,
+                )
+                .await?;
             }
-            if !approval_calls.is_empty() {
-                if is_agent_mode {
-                    let ids: Vec<String> =
-                        approval_calls.iter().map(|call| call.id.clone()).collect();
-                    mark_invocations(&state, &context.run_id, &ids, "awaitingApproval").await?;
-                    set_run_state(
-                        &state,
-                        &context.run_id,
-                        "awaitingApproval",
-                        None,
-                        Some(&request_id),
+
+            if !batch.awaiting_approval.is_empty() {
+                let approval_ids =
+                    persist_approval_requests(&state, &context, &batch.awaiting_approval).await?;
+                set_run_state(
+                    &state,
+                    &context.run_id,
+                    "awaitingApproval",
+                    None,
+                    Some(&request_id),
+                )
+                .await;
+                let approval_calls: Vec<ToolCall> = batch
+                    .awaiting_approval
+                    .iter()
+                    .map(|call| call.call.clone())
+                    .collect();
+                let approval_policies = batch
+                    .awaiting_approval
+                    .iter()
+                    .map(|call| call.policy.approval)
+                    .collect();
+                window
+                    .emit(
+                        &format!("ai-tool-call-{}", context.session_id),
+                        AiToolCallEventPayload {
+                            request_id: request_id.clone(),
+                            run_id: context.run_id.clone(),
+                            turn_index,
+                            tool_calls: approval_calls.clone(),
+                            approval_ids,
+                            approval_policies,
+                        },
                     )
-                    .await;
-                    window
-                        .emit(
-                            &format!("ai-tool-call-{}", context.session_id),
-                            AiToolCallEventPayload {
-                                request_id: request_id.clone(),
-                                tool_calls: approval_calls.clone(),
-                            },
-                        )
-                        .map_err(|e| e.to_string())?;
-                    return Ok(Some(approval_calls));
-                }
-                save_declined_tools(&state, &context, turn_index, &approval_calls).await?;
+                    .map_err(|e| e.to_string())?;
+                return Ok(Some(approval_calls));
             }
         }
     }

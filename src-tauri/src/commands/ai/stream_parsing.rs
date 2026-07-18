@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tauri::{Emitter, Window};
 
-use super::types::{
-    AiReasoningEndPayload, AiStreamTextPayload, FunctionCall, ToolCall,
-};
+use super::types::{AiReasoningEndPayload, AiStreamTextPayload, FunctionCall, ToolCall};
 
 pub(super) const STREAM_EMIT_INTERVAL: Duration = Duration::from_millis(20);
 pub(super) const STREAM_EMIT_MAX_BUFFER_LEN: usize = 1024;

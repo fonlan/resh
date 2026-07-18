@@ -15,6 +15,11 @@ export interface ToolCall {
     name: string
     arguments: string
   }
+  /** Backend-authoritative approval policy attached only while the call awaits user action. */
+  approval_policy?: "Auto" | "Countdown" | "AlwaysAsk"
+  approval_id?: string
+  approval_run_id?: string
+  approval_turn_index?: number
 }
 
 export interface AISession {
@@ -34,9 +39,16 @@ export interface AiStreamTextPayload {
   content: string
 }
 
+export type ToolApprovalPolicy = "Auto" | "Countdown" | "AlwaysAsk"
+
 export interface AiToolCallEventPayload {
   request_id: string
+  run_id: string
+  turn_index: number
   tool_calls: ToolCall[]
+  approval_ids: string[]
+  /** Backend-authoritative policy for each pending approval, aligned with tool_calls. */
+  approval_policies: ToolApprovalPolicy[]
 }
 
 export interface AiMessageBatchPayload {

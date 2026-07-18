@@ -98,10 +98,25 @@ impl DatabaseManager {
                 arguments_json TEXT NOT NULL,
                 status TEXT NOT NULL,
                 turn_index INTEGER NOT NULL,
+                approval_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(run_id, tool_call_id),
                 FOREIGN KEY(run_id) REFERENCES ai_runs(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+        let _ = conn.execute(
+            "ALTER TABLE ai_tool_invocations ADD COLUMN approval_id TEXT",
+            [],
+        );
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_tool_approval_grants (
+                session_id TEXT NOT NULL,
+                tool_name TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(session_id, tool_name),
+                FOREIGN KEY(session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
             )",
             [],
         )?;
@@ -111,6 +126,10 @@ impl DatabaseManager {
         )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_ai_tool_invocations_run_status ON ai_tool_invocations(run_id, status)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_tool_invocations_approval ON ai_tool_invocations(run_id, turn_index, approval_id)",
             [],
         )?;
 

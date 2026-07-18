@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core"
-import { ChatMessage, AISession } from "../types/ai"
+import {
+  ChatMessage,
+  AISession,
+  AiToolCallEventPayload,
+  ToolCall,
+} from "../types/ai"
 
 export const aiService = {
   createSession: (serverId: string, modelId?: string, sshSessionId?: string) =>
@@ -60,20 +65,42 @@ export const aiService = {
     channelId: string,
     mode: string | undefined,
     sshSessionId: string | undefined,
-    toolCallIds: string[],
+    approvalCalls: ToolCall[],
+    approvalAction: "accept" | "acceptForSession" | "decline" | "cancel",
     thinkingLevel: string | undefined,
     requestId: string,
-  ) =>
-    invoke("execute_agent_tools", {
+  ) => {
+    const firstCall = approvalCalls[0]
+    if (
+      !firstCall?.approval_run_id ||
+      firstCall.approval_turn_index === undefined ||
+      approvalCalls.some(
+        (call) =>
+          !call.approval_id ||
+          call.approval_run_id !== firstCall.approval_run_id ||
+          call.approval_turn_index !== firstCall.approval_turn_index,
+      )
+    ) {
+      return Promise.reject(new Error("Missing durable tool approval identity"))
+    }
+    return invoke("execute_agent_tools", {
       sessionId,
       modelId,
       channelId,
       mode,
       sshSessionId,
-      toolCallIds,
+      runId: firstCall.approval_run_id,
+      turnIndex: firstCall.approval_turn_index,
+      toolCallIds: approvalCalls.map((call) => call.id),
+      approvalIds: approvalCalls.map((call) => call.approval_id),
+      approvalAction,
       thinkingLevel,
       requestId,
-    }),
+    })
+  },
+
+  getPendingToolApprovals: (sessionId: string) =>
+    invoke<AiToolCallEventPayload | null>("get_pending_tool_approvals", { sessionId }),
 
   generateTitle: (sessionId: string, modelId: string, channelId: string) =>
     invoke<string>("generate_session_title", {
