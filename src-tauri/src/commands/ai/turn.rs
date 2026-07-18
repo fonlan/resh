@@ -2048,6 +2048,184 @@ pub(super) async fn run_agent_loop(
     result
 }
 
+/// Short-lived rollout switch for the explicit ReAct loop.
+///
+/// `RESH_AI_AGENT_REACT_LOOP=legacy` (also `0`/`false`) intentionally disables tool
+/// declaration and runs one provider turn. It is a safe operational rollback: it preserves
+/// request cancellation and persisted run terminal states, but cannot execute a tool through
+/// a removed recursive path. Any other value, including an unset variable, uses ReAct.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum AgentLoopRollout {
+    React,
+    LegacySingleTurn,
+}
+
+pub(super) fn parse_agent_loop_rollout(value: Option<&str>) -> AgentLoopRollout {
+    match value.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
+        Some("legacy" | "0" | "false") => AgentLoopRollout::LegacySingleTurn,
+        _ => AgentLoopRollout::React,
+    }
+}
+
+pub(super) fn current_agent_loop_rollout() -> AgentLoopRollout {
+    parse_agent_loop_rollout(std::env::var("RESH_AI_AGENT_REACT_LOOP").ok().as_deref())
+}
+
+pub(super) fn legacy_rollout_blocks_approval_resume(
+    rollout: AgentLoopRollout,
+    approval_action: ToolApprovalAction,
+) -> bool {
+    rollout == AgentLoopRollout::LegacySingleTurn
+        && matches!(
+            approval_action,
+            ToolApprovalAction::Accept | ToolApprovalAction::AcceptForSession
+        )
+}
+
+pub(super) async fn run_configured_agent_loop(
+    window: Window,
+    state: Arc<AppState>,
+    context: AgentRunContext,
+    model_id: String,
+    channel_id: String,
+    is_agent_mode: bool,
+    tools: Option<Vec<ToolDefinition>>,
+    cancellation_token: CancellationToken,
+    ssh_session_id: Option<String>,
+    thinking_level: Option<String>,
+    request_id: String,
+    resumed_tools: Option<(Vec<ToolCall>, i64)>,
+) -> Result<Option<Vec<ToolCall>>, String> {
+    match current_agent_loop_rollout() {
+        AgentLoopRollout::React => {
+            run_agent_loop(
+                window,
+                state,
+                context,
+                model_id,
+                channel_id,
+                is_agent_mode,
+                tools,
+                cancellation_token,
+                ssh_session_id,
+                thinking_level,
+                request_id,
+                resumed_tools,
+            )
+            .await
+        }
+        AgentLoopRollout::LegacySingleTurn => {
+            tracing::warn!(
+                "[AI] RESH_AI_AGENT_REACT_LOOP selects legacy single-turn rollback mode; tools are disabled"
+            );
+            run_legacy_single_turn(
+                window,
+                state,
+                context,
+                model_id,
+                channel_id,
+                is_agent_mode,
+                cancellation_token,
+                ssh_session_id,
+                thinking_level,
+                request_id,
+                resumed_tools,
+            )
+            .await
+        }
+    }
+}
+
+async fn run_legacy_single_turn(
+    window: Window,
+    state: Arc<AppState>,
+    mut context: AgentRunContext,
+    model_id: String,
+    channel_id: String,
+    is_agent_mode: bool,
+    cancellation_token: CancellationToken,
+    ssh_session_id: Option<String>,
+    thinking_level: Option<String>,
+    request_id: String,
+    resumed_tools: Option<(Vec<ToolCall>, i64)>,
+) -> Result<Option<Vec<ToolCall>>, String> {
+    let mut legacy_turn_index = None;
+    let result = async {
+        if resumed_tools
+            .as_ref()
+            .is_some_and(|(calls, _)| !calls.is_empty())
+        {
+            return Err(
+                "The legacy single-turn rollback mode cannot resume a persisted tool approval. Re-enable the ReAct loop before approving tools."
+                    .to_string(),
+            );
+        }
+        reserve_model_turn(&state, &mut context).await?;
+        let turn_index = context.budget.model_turns as i64;
+        legacy_turn_index = Some(turn_index);
+        stream_model_turn(
+            window.clone(),
+            state.clone(),
+            context.session_id.clone(),
+            model_id,
+            channel_id,
+            is_agent_mode,
+            None,
+            cancellation_token.clone(),
+            ssh_session_id,
+            thinking_level,
+            request_id.clone(),
+            context.run_id.clone(),
+            turn_index,
+            context.budget.total_tool_calls,
+        )
+        .await
+    }
+    .await;
+    let result = async {
+        match result {
+            Ok(Some(calls)) if !calls.is_empty() => {
+                // A non-conforming provider can still return tool calls when the request did not
+                // declare tools. Persist a terminal observation for every call before failing the
+                // run so strict provider histories never retain an orphaned assistant tool-use item.
+                let turn_index = legacy_turn_index.expect("model turn was reserved before streaming");
+                persist_proposed_tools(&state, &context, turn_index, &calls).await?;
+                let outcomes = calls
+                    .into_iter()
+                    .map(|call| ToolOutcome {
+                        tool_call_id: call.id,
+                        status: ToolOutcomeStatus::Declined,
+                        content: "The legacy single-turn rollback mode disables tool execution. Re-enable the ReAct loop before retrying."
+                            .to_string(),
+                    })
+                    .collect::<Vec<_>>();
+                persist_terminal_outcomes(
+                    &window.app_handle().clone(),
+                    &state,
+                    &context,
+                    &request_id,
+                    turn_index,
+                    &outcomes,
+                )
+                .await?;
+                Err(
+                    "The legacy single-turn rollback mode received tool calls even though tools are disabled. Re-enable the ReAct loop before retrying."
+                        .to_string(),
+                )
+            }
+            other => other,
+        }
+    }
+    .await;
+    let result = if cancellation_token.is_cancelled() {
+        Err(AI_CANCELLED.to_string())
+    } else {
+        result
+    };
+    finish_persisted_run(&state, &context, &result).await;
+    result
+}
+
 pub fn stream_model_turn(
     window: Window,
     state: Arc<AppState>,
@@ -2592,8 +2770,9 @@ pub fn stream_model_turn(
 #[cfg(test)]
 mod await_or_cancel_tests {
     use super::{
-        await_or_cancel, budget_error, is_budget_error, AI_CANCELLED, MAX_IDENTICAL_TOOL_CALLS,
-        MAX_MODEL_TURNS, MAX_RUN_DURATION, MAX_TOTAL_TOOL_CALLS,
+        await_or_cancel, budget_error, is_budget_error, legacy_rollout_blocks_approval_resume,
+        parse_agent_loop_rollout, AgentLoopRollout, ToolApprovalAction, AI_CANCELLED,
+        MAX_IDENTICAL_TOOL_CALLS, MAX_MODEL_TURNS, MAX_RUN_DURATION, MAX_TOTAL_TOOL_CALLS,
     };
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
@@ -2639,6 +2818,47 @@ mod await_or_cancel_tests {
         assert_eq!(MAX_TOTAL_TOOL_CALLS, 128);
         assert_eq!(MAX_IDENTICAL_TOOL_CALLS, 3);
         assert_eq!(MAX_RUN_DURATION, Duration::from_secs(60 * 60));
+    }
+
+    #[test]
+    fn rollout_switch_defaults_to_react_and_accepts_explicit_legacy_values() {
+        assert_eq!(parse_agent_loop_rollout(None), AgentLoopRollout::React);
+        assert_eq!(
+            parse_agent_loop_rollout(Some("react")),
+            AgentLoopRollout::React
+        );
+        assert_eq!(
+            parse_agent_loop_rollout(Some("legacy")),
+            AgentLoopRollout::LegacySingleTurn
+        );
+        assert_eq!(
+            parse_agent_loop_rollout(Some(" FALSE ")),
+            AgentLoopRollout::LegacySingleTurn
+        );
+        assert_eq!(
+            parse_agent_loop_rollout(Some("0")),
+            AgentLoopRollout::LegacySingleTurn
+        );
+    }
+
+    #[test]
+    fn legacy_rollout_leaves_acceptance_approvals_unclaimed() {
+        assert!(legacy_rollout_blocks_approval_resume(
+            AgentLoopRollout::LegacySingleTurn,
+            ToolApprovalAction::Accept
+        ));
+        assert!(legacy_rollout_blocks_approval_resume(
+            AgentLoopRollout::LegacySingleTurn,
+            ToolApprovalAction::AcceptForSession
+        ));
+        assert!(!legacy_rollout_blocks_approval_resume(
+            AgentLoopRollout::LegacySingleTurn,
+            ToolApprovalAction::Decline
+        ));
+        assert!(!legacy_rollout_blocks_approval_resume(
+            AgentLoopRollout::React,
+            ToolApprovalAction::Accept
+        ));
     }
 
     #[test]

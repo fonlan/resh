@@ -1,3 +1,5 @@
+#[cfg(test)]
+mod agent_loop_state;
 pub mod copilot;
 mod history;
 mod stream_parsing;
@@ -19,7 +21,8 @@ use tool_runtime::{
     try_recover_terminal_after_timeout, START_MARKER_EXPECT_MS, TIMEOUT_RECOVERY_GRACE_MS,
 };
 use turn::{
-    cancel_persisted_agent_run, create_agent_run, fail_agent_run, resume_agent_run, run_agent_loop,
+    cancel_persisted_agent_run, create_agent_run, current_agent_loop_rollout, fail_agent_run,
+    legacy_rollout_blocks_approval_resume, resume_agent_run, run_configured_agent_loop,
     AgentRunResume, ToolApprovalAction,
 };
 
@@ -1331,7 +1334,7 @@ pub async fn send_chat_message(
     } else {
         None
     };
-    let result = run_agent_loop(
+    let result = run_configured_agent_loop(
         window.clone(),
         state.inner().clone(),
         run_context,
@@ -1468,7 +1471,7 @@ pub async fn regenerate_ai_response(
     } else {
         None
     };
-    let result = run_agent_loop(
+    let result = run_configured_agent_loop(
         window.clone(),
         state.inner().clone(),
         run_context,
@@ -1508,6 +1511,14 @@ pub async fn execute_agent_tools(
         return Err("request_id and run_id are required".to_string());
     }
     let approval_action = ToolApprovalAction::parse(&approval_action)?;
+    if legacy_rollout_blocks_approval_resume(current_agent_loop_rollout(), approval_action) {
+        // Keep the persisted item untouched: operators can re-enable ReAct and resume the
+        // original approval without having to reconstruct a tool call that legacy mode refuses.
+        return Err(
+            "The legacy single-turn rollback mode cannot accept persisted tool approvals. Re-enable the ReAct loop before approving tools."
+                .to_string(),
+        );
+    }
     let is_agent_mode = mode.as_deref() == Some("agent");
     let registration_generation = state.reserve_ai_run_generation();
 
@@ -1580,7 +1591,7 @@ pub async fn execute_agent_tools(
     };
 
     let tools = Some(create_tools(is_agent_mode));
-    let result = run_agent_loop(
+    let result = run_configured_agent_loop(
         window.clone(),
         state.inner().clone(),
         run_context,
@@ -1703,7 +1714,10 @@ pub async fn get_pending_tool_approvals(
                 request_id,
                 run_id,
                 turn_index,
-                item_ids: entries.iter().map(|(item_id, _, _)| item_id.clone()).collect(),
+                item_ids: entries
+                    .iter()
+                    .map(|(item_id, _, _)| item_id.clone())
+                    .collect(),
                 status: "awaitingApproval".to_string(),
                 tool_calls: entries.iter().map(|(_, call, _)| call.clone()).collect(),
                 approval_ids: entries

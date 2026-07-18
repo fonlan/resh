@@ -3,6 +3,8 @@
 本清单配合 Phase 1–3 的 requestId 级取消生命周期，用于真实 Tauri UI 或可控慢速 mock 验收。
 路径放在 `scripts/checklists/`（非 `docs/`，避免被 `.gitignore` 忽略）。
 
+完整的 ReAct faux provider、跨渠道、SSH、回退与非目标验收见 [ai-agent-react-e2e-checklist.md](./ai-agent-react-e2e-checklist.md)。
+
 自动化覆盖（无需 UI）：
 
 ```bash

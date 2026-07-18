@@ -21,10 +21,15 @@ const {
   clampAiToolConfirmationCountdown,
   shouldExecuteToolCallsWithoutConfirmation,
 } = module.exports
+const confirmationSource = await fs.readFile(
+  path.resolve("src/components/ai/ToolConfirmation.tsx"),
+  "utf8",
+)
 
-const toolCall = (name, args = {}) => ({
+const toolCall = (name, args = {}, approvalPolicy = "Countdown") => ({
   id: `${name}-call`,
   type: "function",
+  approval_policy: approvalPolicy,
   function: {
     name,
     arguments: JSON.stringify(args),
@@ -37,15 +42,33 @@ assert.equal(clampAiToolConfirmationCountdown(30), 30)
 assert.equal(clampAiToolConfirmationCountdown(-1), 0)
 assert.equal(clampAiToolConfirmationCountdown(31), 30)
 
-const ordinaryCommand = [toolCall("run_in_terminal", { command: "pwd" })]
-assert.equal(shouldExecuteToolCallsWithoutConfirmation(ordinaryCommand, 0), true)
-assert.equal(shouldExecuteToolCallsWithoutConfirmation(ordinaryCommand, 5), false)
-assert.equal(shouldExecuteToolCallsWithoutConfirmation(ordinaryCommand, 30), false)
+const terminalCommand = [
+  toolCall("run_in_terminal", { command: "pwd" }, "AlwaysAsk"),
+]
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(terminalCommand, 0), false)
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(terminalCommand, 5), false)
 
-const sensitiveCommand = [toolCall("run_in_terminal", { command: "rm -rf /tmp/x" })]
+const countdownMutation = [
+  toolCall("sftp_upload", { remote_path: "/tmp/test" }, "Countdown"),
+]
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(countdownMutation, 0), true)
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(countdownMutation, 5), false)
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(countdownMutation, 30), false)
+
+const sensitiveCommand = [
+  toolCall("run_in_terminal", { command: "rm -rf /tmp/x" }, "AlwaysAsk"),
+]
 assert.equal(shouldExecuteToolCallsWithoutConfirmation(sensitiveCommand, 0), false)
 
-const readOnlyTool = [toolCall("read_file", { path: "README.md" })]
-assert.equal(shouldExecuteToolCallsWithoutConfirmation(readOnlyTool, 30), true)
+const readOnlyTool = [toolCall("read_file", { path: "README.md" }, "Auto")]
+assert.equal(shouldExecuteToolCallsWithoutConfirmation(readOnlyTool, 0), false)
+
+// The confirmation UI is a projection of backend policy: users can decline/cancel,
+// session grants stay restricted to Countdown calls, and AlwaysAsk never auto-confirms.
+assert.match(confirmationSource, /onCancelRun/)
+assert.match(confirmationSource, /onDecline/)
+assert.match(confirmationSource, /onApproveForSession/)
+assert.match(confirmationSource, /approval_policy === "Countdown"/)
+assert.match(confirmationSource, /approval_policy === "AlwaysAsk"/)
 
 console.log("AI tool confirmation checks passed")
