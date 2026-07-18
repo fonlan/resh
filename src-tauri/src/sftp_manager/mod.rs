@@ -1590,6 +1590,35 @@ impl SftpManager {
         }
     }
 
+    async fn finalize_ai_background_task(
+        db_manager: &DatabaseManager,
+        task_id: &str,
+        status: &str,
+    ) {
+        let task_id = task_id.to_string();
+        let status = status.to_string();
+        let _ = db_manager
+            .run_blocking(move |conn| {
+                conn.execute(
+                    "INSERT INTO ai_background_task_results (task_id, status)
+                     VALUES (?1, ?2)
+                     ON CONFLICT(task_id) DO UPDATE SET
+                       status = excluded.status,
+                       completed_at = CURRENT_TIMESTAMP",
+                    rusqlite::params![task_id, status],
+                )
+                .map_err(|error| error.to_string())?;
+                conn.execute(
+                    "UPDATE ai_tool_invocations SET status = ?1, updated_at = CURRENT_TIMESTAMP
+                     WHERE background_task_id = ?2 AND status IN ('queued', 'running')",
+                    rusqlite::params![status, task_id],
+                )
+                .map_err(|error| error.to_string())?;
+                Ok(())
+            })
+            .await;
+    }
+
     pub async fn download_file(
         app: AppHandle,
         db_manager: DatabaseManager,
@@ -2392,6 +2421,8 @@ impl SftpManager {
             },
         );
 
+        Self::finalize_ai_background_task(&db_manager, &task_id, final_status).await;
+
         if let Some(ai_sid) = ai_session_id_clone {
             let msg_id = Uuid::new_v4().to_string();
             let content = match &result {
@@ -2420,10 +2451,10 @@ impl SftpManager {
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
                 serde_json::json!({
-                    // Out-of-band SFTP completion is not part of an AI run.
-                    // Empty request_id is only accepted by the frontend when
-                    // the session is not generating; in-flight runs ignore it.
+                    // This background transfer is independent from an AI run. Its task id
+                    // lets the frontend deliver the completion while a different run streams.
                     "request_id": "",
+                    "background_task_id": task_id,
                     "messages": [{
                         "role": "system",
                         "content": content
@@ -3226,6 +3257,8 @@ impl SftpManager {
             },
         );
 
+        Self::finalize_ai_background_task(&db_manager, &task_id, final_status).await;
+
         if let Some(ai_sid) = ai_session_id_clone {
             let msg_id = Uuid::new_v4().to_string();
             let content = match &result {
@@ -3254,10 +3287,10 @@ impl SftpManager {
             let _ = app.emit(
                 &format!("ai-message-batch-{}", ai_sid),
                 serde_json::json!({
-                    // Out-of-band SFTP completion is not part of an AI run.
-                    // Empty request_id is only accepted by the frontend when
-                    // the session is not generating; in-flight runs ignore it.
+                    // This background transfer is independent from an AI run. Its task id
+                    // lets the frontend deliver the completion while a different run streams.
                     "request_id": "",
+                    "background_task_id": task_id,
                     "messages": [{
                         "role": "system",
                         "content": content

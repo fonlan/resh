@@ -12,20 +12,30 @@ import {
 interface ToolConfirmationProps {
   toolCalls: ToolCall[]
   autoConfirmDelaySeconds: number
-  onConfirm: () => void
-  onCancel: () => void
+  isResolving: boolean
+  onApproveOnce: () => void
+  onApproveForSession: () => void
+  onDecline: () => void
+  onCancelRun: () => void
 }
 
 export const ToolConfirmation = ({
   toolCalls,
   autoConfirmDelaySeconds,
-  onConfirm,
-  onCancel,
+  isResolving,
+  onApproveOnce,
+  onApproveForSession,
+  onDecline,
+  onCancelRun,
 }: ToolConfirmationProps) => {
   const { t } = useTranslation()
   const [countdown, setCountdown] = useState<number | null>(null)
   const [isSensitive, setIsSensitive] = useState(false)
   const confirmedRef = useRef(false)
+
+  const allowsSessionGrant = toolCalls.every(
+    (call) => call.approval_policy === "Countdown",
+  )
 
   useEffect(() => {
     const requiresExplicitApproval = toolCalls.some(
@@ -42,25 +52,24 @@ export const ToolConfirmation = ({
   }, [autoConfirmDelaySeconds, toolCalls])
 
   useEffect(() => {
-    if (countdown === null || confirmedRef.current) return
+    if (countdown === null || confirmedRef.current || isResolving) return
 
     if (countdown <= 0) {
-      // Ensure we only call onConfirm once
       confirmedRef.current = true
-      onConfirm()
+      onApproveOnce()
       return
     }
 
     const timer = setInterval(() => {
-      setCountdown((c) => {
-        if (c === null) return null
-        if (c <= 1) return 0
-        return c - 1
+      setCountdown((current) => {
+        if (current === null) return null
+        if (current <= 1) return 0
+        return current - 1
       })
     }, 1000)
 
     return () => clearInterval(timer)
-  }, [countdown, onConfirm])
+  }, [countdown, isResolving, onApproveOnce])
 
   return (
     <div
@@ -69,13 +78,11 @@ export const ToolConfirmation = ({
       <div className="flex items-center gap-1.5 font-semibold text-[13px] text-[var(--text-primary)]">
         {isSensitive ? (
           <>
-            <AlertTriangle size={16} className="text-red-500" />{" "}
-            {t.ai.tool.confirmExecution}
+            <AlertTriangle size={16} className="text-red-500" /> {t.ai.tool.confirmExecution}
           </>
         ) : (
           <>
-            <Clock size={16} />{" "}
-            {t.ai.tool.autoExecute.replace("{seconds}", String(countdown))}
+            <Clock size={16} /> {t.ai.tool.autoExecute.replace("{seconds}", String(countdown))}
           </>
         )}
       </div>
@@ -95,7 +102,7 @@ export const ToolConfirmation = ({
           }
           return (
             <div
-              key={call.id}
+              key={call.approval_item_id || call.id}
               className="bg-black/20 p-2 rounded-md border border-white/10"
             >
               <span className="font-mono text-xs opacity-70">
@@ -106,19 +113,14 @@ export const ToolConfirmation = ({
               </code>
               {timeoutSeconds !== null && (
                 <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                  {t.ai.tool.timeoutSeconds.replace(
-                    "{seconds}",
-                    String(timeoutSeconds),
-                  )}
+                  {t.ai.tool.timeoutSeconds.replace("{seconds}", String(timeoutSeconds))}
                 </span>
               )}
               {waitFinish !== null && (
                 <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
                   {t.ai.tool.waitFinish.replace(
                     "{value}",
-                    waitFinish
-                      ? t.ai.tool.waitFinishOn
-                      : t.ai.tool.waitFinishOff,
+                    waitFinish ? t.ai.tool.waitFinishOn : t.ai.tool.waitFinishOff,
                   )}
                 </span>
               )}
@@ -126,24 +128,42 @@ export const ToolConfirmation = ({
           )
         })}
       </div>
-      <div className="flex justify-end gap-2 mt-1">
-        <button
-          type="button"
-          className="px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 bg-white/10 text-[var(--text-primary)] hover:bg-white/20"
-          onClick={onCancel}
-        >
-          {t.ai.tool.cancel}
-        </button>
-        <button
-          type="button"
-          className={`px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 ${isSensitive ? "bg-red-600 hover:bg-red-700" : "bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)]"}`}
-          onClick={onConfirm}
-        >
-          {isSensitive
-            ? t.ai.tool.confirmRun
-            : t.ai.tool.runNow.replace("{seconds}", String(countdown))}
-        </button>
-      </div>
+      {isResolving ? (
+        <div className="text-[12px] text-[var(--text-muted)]">{t.ai.tool.resolving}</div>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-2 mt-1">
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border border-white/10 transition-all duration-200 bg-transparent text-[var(--text-muted)] hover:bg-white/10"
+            onClick={onCancelRun}
+          >
+            {t.ai.tool.cancelRun}
+          </button>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 bg-white/10 text-[var(--text-primary)] hover:bg-white/20"
+            onClick={onDecline}
+          >
+            {t.ai.tool.decline}
+          </button>
+          {allowsSessionGrant && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 bg-white/10 text-[var(--text-primary)] hover:bg-white/20"
+              onClick={onApproveForSession}
+            >
+              {t.ai.tool.allowForSession}
+            </button>
+          )}
+          <button
+            type="button"
+            className={`px-3 py-1.5 rounded text-[12px] font-medium cursor-pointer border-0 transition-all duration-200 ${isSensitive ? "bg-red-600 hover:bg-red-700" : "bg-[var(--accent-primary)] text-white hover:bg-[var(--accent-hover)]"}`}
+            onClick={onApproveOnce}
+          >
+            {isSensitive ? t.ai.tool.confirmRun : t.ai.tool.allowOnce}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

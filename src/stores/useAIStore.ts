@@ -1,6 +1,39 @@
 import { create } from "zustand"
-import { ChatMessage, AISession, ToolCall, AiRequestId } from "../types/ai"
+import {
+  ChatMessage,
+  AISession,
+  ToolCall,
+  AiRequestId,
+  AiRunSnapshot,
+  AiToolCallEventPayload,
+} from "../types/ai"
 import { aiService } from "../services/aiService"
+
+/** Convert one backend approval snapshot into the UI's display model. */
+const projectPendingToolCalls = (
+  snapshot: AiToolCallEventPayload | null,
+): ToolCall[] | null => {
+  if (
+    !snapshot ||
+    snapshot.status !== "awaitingApproval" ||
+    snapshot.item_ids.length !== snapshot.tool_calls.length ||
+    snapshot.approval_ids.length !== snapshot.tool_calls.length ||
+    snapshot.approval_policies.length !== snapshot.tool_calls.length
+  ) {
+    return null
+  }
+
+  return snapshot.tool_calls.map((call, index) => ({
+    ...call,
+    approval_item_id: snapshot.item_ids[index],
+    approval_policy: snapshot.approval_policies[index],
+    approval_id: snapshot.approval_ids[index],
+    approval_request_id: snapshot.request_id,
+    approval_run_id: snapshot.run_id,
+    approval_turn_index: snapshot.turn_index,
+    approval_status: snapshot.status,
+  }))
+}
 
 interface AIState {
   sessions: AISession[]
@@ -12,6 +45,8 @@ interface AIState {
   isGenerating: Record<string, boolean>
   /** Current AI run id per session; used to ignore late events from older runs. */
   activeRequestId: Record<string, AiRequestId | null>
+  /** Latest non-terminal lifecycle snapshot returned by the backend for each session. */
+  runSnapshots: Record<string, AiRunSnapshot | null>
   pendingToolCalls: Record<string, ToolCall[] | null>
   stoppedSessions: Set<string> // Track sessions that were manually stopped
 
@@ -57,6 +92,8 @@ interface AIState {
     sessionId: string,
     requestId: string | null | undefined,
   ) => boolean
+  /** Apply a backend snapshot without allowing an older restored run to replace a live request. */
+  hydrateRunSnapshot: (sessionId: string, snapshot: AiRunSnapshot | null) => boolean
   deleteSession: (serverId: string, sessionId: string) => Promise<void>
   clearSessions: (serverId: string) => Promise<void>
   addCompleteMessage: (sessionId: string, message: ChatMessage) => void
@@ -72,6 +109,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   isLoading: false,
   isGenerating: {},
   activeRequestId: {},
+  runSnapshots: {},
   pendingToolCalls: {},
   stoppedSessions: new Set<string>(),
 
@@ -110,6 +148,7 @@ export const useAIStore = create<AIState>((set, get) => ({
           ...state.activeRequestId,
           [sessionId]: requestId,
         },
+        runSnapshots: { ...state.runSnapshots, [sessionId]: null },
         isGenerating: { ...state.isGenerating, [sessionId]: true },
         stoppedSessions,
       }
@@ -122,6 +161,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
     set((state) => ({
       activeRequestId: { ...state.activeRequestId, [sessionId]: null },
+      runSnapshots: { ...state.runSnapshots, [sessionId]: null },
       isGenerating: { ...state.isGenerating, [sessionId]: false },
     }))
     return true
@@ -142,6 +182,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       stoppedSessions.add(sessionId)
       return {
         activeRequestId: { ...state.activeRequestId, [sessionId]: null },
+        runSnapshots: { ...state.runSnapshots, [sessionId]: null },
         isGenerating: { ...state.isGenerating, [sessionId]: false },
         pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: null },
         stoppedSessions,
@@ -155,6 +196,31 @@ export const useAIStore = create<AIState>((set, get) => ({
       return false
     }
     return get().activeRequestId[sessionId] === requestId
+  },
+
+  hydrateRunSnapshot: (sessionId, snapshot) => {
+    const currentRequestId = get().activeRequestId[sessionId]
+    if (
+      currentRequestId != null &&
+      (snapshot == null || currentRequestId !== snapshot.request_id)
+    ) {
+      return false
+    }
+    if (get().stoppedSessions.has(sessionId)) {
+      return false
+    }
+    set((state) => ({
+      runSnapshots: { ...state.runSnapshots, [sessionId]: snapshot },
+      activeRequestId: {
+        ...state.activeRequestId,
+        [sessionId]: snapshot?.status === "running" ? snapshot.request_id : null,
+      },
+      isGenerating: {
+        ...state.isGenerating,
+        [sessionId]: snapshot?.status === "running",
+      },
+    }))
+    return true
   },
 
   loadSessions: async (serverId) => {
@@ -185,31 +251,39 @@ export const useAIStore = create<AIState>((set, get) => ({
         : state.activeSessionIdBySshSession,
     }))
     if (sessionId) {
-      const msgs = await aiService.getMessages(sessionId)
+      // A load is only a snapshot. If a stream/lifecycle event changes this session while
+      // the three requests are in flight, its newer projection wins over this stale result.
+      const projectionAtLoad = {
+        activeRequestId: get().activeRequestId[sessionId] ?? null,
+        pendingToolCalls: get().pendingToolCalls[sessionId] ?? null,
+        messages: get().messages[sessionId],
+        stopped: get().stoppedSessions.has(sessionId),
+      }
+      const [msgs, runSnapshot, pendingSnapshot] = await Promise.all([
+        aiService.getMessages(sessionId),
+        aiService.getRunSnapshot(sessionId),
+        aiService.getPendingToolApprovals(sessionId),
+      ])
 
-      // Check if this session was manually stopped - if so, don't restore pending tool calls
+      const stateAfterLoad = get()
+      if (
+        stateAfterLoad.activeSessionId !== sessionId ||
+        (stateAfterLoad.activeRequestId[sessionId] ?? null) !==
+          projectionAtLoad.activeRequestId ||
+        (stateAfterLoad.pendingToolCalls[sessionId] ?? null) !==
+          projectionAtLoad.pendingToolCalls ||
+        stateAfterLoad.messages[sessionId] !== projectionAtLoad.messages ||
+        stateAfterLoad.stoppedSessions.has(sessionId) !== projectionAtLoad.stopped
+      ) {
+        return
+      }
+
+      // A local stop wins until the backend's cancellation reaches a terminal state.
       const isStopped = get().stoppedSessions.has(sessionId)
 
-      // Check for pending tool calls in history
-      let pending = null
-      if (!isStopped && msgs.length > 0) {
-        const lastMsg = msgs[msgs.length - 1]
-        if (
-          lastMsg.role === "assistant" &&
-          lastMsg.tool_calls &&
-          lastMsg.tool_calls.length > 0
-        ) {
-          const hasVisibleTools = lastMsg.tool_calls.some(
-            (tc) =>
-              tc.function.name !== "get_terminal_output" &&
-              tc.function.name !== "get_selected_terminal_output" &&
-              tc.function.name !== "read_file",
-          )
-          if (hasVisibleTools) {
-            pending = lastMsg.tool_calls
-          }
-        }
-      }
+      // Pending approvals are restored atomically with the session projection from
+      // ai_tool_invocations, never inferred from message order.
+      const pending = projectPendingToolCalls(pendingSnapshot)
 
       // Preserve only the latest unsynced user message while backend persistence is in-flight
       const currentState = get()
@@ -245,6 +319,9 @@ export const useAIStore = create<AIState>((set, get) => ({
         messages: { ...state.messages, [sessionId]: finalMessages },
         pendingToolCalls: { ...state.pendingToolCalls, [sessionId]: pending },
       }))
+      if (!isStopped) {
+        get().hydrateRunSnapshot(sessionId, runSnapshot)
+      }
     }
   },
 
@@ -397,12 +474,14 @@ export const useAIStore = create<AIState>((set, get) => ({
     set((s) => {
       const isGenerating = { ...s.isGenerating }
       const activeRequestId = { ...s.activeRequestId }
+      const runSnapshots = { ...s.runSnapshots }
       const pendingToolCalls = { ...s.pendingToolCalls }
       const messages = { ...s.messages }
       const activeSessionIdBySshSession = { ...s.activeSessionIdBySshSession }
       const stoppedSessions = new Set(s.stoppedSessions)
       delete isGenerating[sessionId]
       delete activeRequestId[sessionId]
+      delete runSnapshots[sessionId]
       delete pendingToolCalls[sessionId]
       delete messages[sessionId]
       Object.keys(activeSessionIdBySshSession).forEach((sshSessionId) => {
@@ -414,6 +493,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return {
         isGenerating,
         activeRequestId,
+        runSnapshots,
         pendingToolCalls,
         messages,
         activeSessionIdBySshSession,
@@ -448,6 +528,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       },
       isGenerating: {},
       activeRequestId: {},
+      runSnapshots: {},
       pendingToolCalls: {},
       messages: {},
       stoppedSessions: new Set<string>(),

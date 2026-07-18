@@ -90,6 +90,8 @@ pub struct FunctionDefinition {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub enum ToolOutcomeStatus {
     Completed,
+    BackgroundQueued,
+    BackgroundRunning,
     Failed,
     Declined,
     Cancelled,
@@ -99,10 +101,19 @@ impl ToolOutcomeStatus {
     pub fn as_db_status(&self) -> &'static str {
         match self {
             Self::Completed => "completed",
+            Self::BackgroundQueued => "queued",
+            Self::BackgroundRunning => "running",
             Self::Failed => "failed",
             Self::Declined => "declined",
             Self::Cancelled => "cancelled",
         }
+    }
+
+    pub fn is_successful_observation(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::BackgroundQueued | Self::BackgroundRunning
+        )
     }
 }
 
@@ -115,7 +126,7 @@ pub struct ToolOutcome {
 
 impl ToolOutcome {
     pub fn observation(&self) -> String {
-        if self.status == ToolOutcomeStatus::Completed {
+        if self.status.is_successful_observation() {
             return self.content.clone();
         }
         serde_json::json!({
@@ -140,15 +151,33 @@ pub struct AiToolCallEventPayload {
     pub request_id: String,
     pub run_id: String,
     pub turn_index: i64,
+    /// Persisted `ai_tool_invocations.id` values, aligned with `tool_calls`.
+    pub item_ids: Vec<String>,
+    /// Lifecycle status for these item projections. Kept explicit for incremental UI migration.
+    pub status: String,
     pub tool_calls: Vec<ToolCall>,
     pub approval_ids: Vec<String>,
     pub approval_policies: Vec<ToolApproval>,
+}
+
+/// Latest non-terminal run for session restore. The frontend projects this state and does not
+/// infer it from message order.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiRunSnapshot {
+    pub run_id: String,
+    pub request_id: String,
+    pub status: String,
+    pub turn_index: i64,
 }
 
 /// Batch of complete messages for `ai-message-batch-*`.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiMessageBatchPayload {
     pub request_id: String,
+    /// Present only for task updates that outlive an Agent run. These events are intentionally
+    /// independent from requestId gating so a completed background task can update the UI while
+    /// another run is streaming.
+    pub background_task_id: Option<String>,
     pub messages: Vec<ChatMessage>,
 }
 

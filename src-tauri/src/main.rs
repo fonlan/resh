@@ -299,6 +299,7 @@ async fn main() {
             commands::ai::send_interrupt,
             commands::ai::send_terminal_input,
             commands::ai::execute_agent_tools,
+            commands::ai::get_ai_run_snapshot,
             commands::ai::get_pending_tool_approvals,
             commands::ai::generate_session_title,
             commands::ai::delete_ai_session,

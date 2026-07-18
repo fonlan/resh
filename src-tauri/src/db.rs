@@ -99,6 +99,7 @@ impl DatabaseManager {
                 status TEXT NOT NULL,
                 turn_index INTEGER NOT NULL,
                 approval_id TEXT,
+                background_task_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(run_id, tool_call_id),
@@ -108,6 +109,10 @@ impl DatabaseManager {
         )?;
         let _ = conn.execute(
             "ALTER TABLE ai_tool_invocations ADD COLUMN approval_id TEXT",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE ai_tool_invocations ADD COLUMN background_task_id TEXT",
             [],
         );
         conn.execute(
@@ -132,12 +137,31 @@ impl DatabaseManager {
             "CREATE INDEX IF NOT EXISTS idx_ai_tool_invocations_approval ON ai_tool_invocations(run_id, turn_index, approval_id)",
             [],
         )?;
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_tool_invocations_background_task
+             ON ai_tool_invocations(background_task_id) WHERE background_task_id IS NOT NULL",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS ai_background_task_results (
+                task_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                completed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_background_task_results_status
+             ON ai_background_task_results(status)",
+            [],
+        )?;
 
         // A process restart never replays a side-effecting invocation. Approval waits are
         // durable; active work is explicitly marked interrupted for recovery/UI inspection.
         conn.execute(
             "UPDATE ai_tool_invocations SET status = 'interrupted', updated_at = CURRENT_TIMESTAMP
-             WHERE status = 'executing'",
+             WHERE status IN ('executing', 'queued', 'running')",
             [],
         )?;
         conn.execute(

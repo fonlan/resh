@@ -16,6 +16,11 @@ export const aiService = {
   getMessages: (sessionId: string) =>
     invoke<ChatMessage[]>("get_ai_messages", { sessionId }),
 
+  getRunSnapshot: (sessionId: string) =>
+    invoke<import("../types/ai").AiRunSnapshot | null>("get_ai_run_snapshot", {
+      sessionId,
+    }),
+
   sendMessage: (
     sessionId: string,
     content: string,

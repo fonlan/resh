@@ -96,6 +96,7 @@ async fn persist_tool_outcome(
         &format!("ai-message-batch-{}", session_id),
         AiMessageBatchPayload {
             request_id: request_id.to_string(),
+            background_task_id: None,
             messages: vec![ChatMessage {
                 role: "tool".to_string(),
                 content: Some(content),
@@ -108,6 +109,42 @@ async fn persist_tool_outcome(
         },
     );
     Ok(())
+}
+
+/// Bind an independently running terminal/SFTP task before it is spawned so its
+/// completion can update exactly this persisted invocation, even after the Agent turn ends.
+async fn bind_background_task(
+    state: &Arc<AppState>,
+    run_id: &str,
+    tool_call_id: &str,
+    task_id: &str,
+) -> Result<(), String> {
+    let run_id = run_id.to_string();
+    let tool_call_id = tool_call_id.to_string();
+    let task_id = task_id.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            let updated = conn
+                .execute(
+                    "UPDATE ai_tool_invocations
+                     SET background_task_id = ?1,
+                         status = COALESCE(
+                             (SELECT status FROM ai_background_task_results WHERE task_id = ?1),
+                             status
+                         ),
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE run_id = ?2 AND tool_call_id = ?3
+                       AND status IN ('queued', 'running')",
+                    params![task_id, run_id, tool_call_id],
+                )
+                .map_err(|error| error.to_string())?;
+            if updated != 1 {
+                return Err("Background task invocation is no longer active".to_string());
+            }
+            Ok(())
+        })
+        .await
 }
 
 async fn execute_tools(
@@ -531,66 +568,124 @@ async fn execute_tools(
                     if let Ok(args) =
                         serde_json::from_str::<serde_json::Value>(&call.function.arguments)
                     {
-                        if let Some(cmd) = args["command"].as_str() {
+                        if let Some(command) = args["command"].as_str() {
                             match extract_required_timeout_seconds(&args, "run_in_background") {
                                 Ok(timeout) => {
-                                    match execute_command_in_exec_channel(
-                                        ssh_id,
-                                        cmd,
-                                        timeout,
-                                        Some(&cancellation_token),
-                                    )
-                                    .await
-                                    {
-                                        Ok(exec_result) => {
-                                            let clean_output = String::from_utf8_lossy(
-                                                &strip_ansi_escapes::strip(
-                                                    exec_result.output.as_bytes(),
-                                                ),
+                                    let task_id = Uuid::new_v4().to_string();
+                                    let ssh_id = ssh_id.to_string();
+                                    let command = command.to_string();
+                                    let session_id = session_id.to_string();
+                                    let task_id_for_completion = task_id.clone();
+                                    let app_handle_for_completion = app_handle.clone();
+                                    let db_manager = state.db_manager.clone();
+                                    tokio::spawn(async move {
+                                        let (invocation_status, completion) =
+                                            match execute_command_in_exec_channel(
+                                                &ssh_id, &command, timeout, None,
                                             )
-                                            .to_string();
-
-                                            if exec_result.timed_out {
-                                                if clean_output.trim().is_empty() {
-                                                    format!(
-                                                        "Error: run_in_background timed out after {}s.",
-                                                        timeout
+                                            .await
+                                            {
+                                                Ok(exec_result) => {
+                                                    let output = String::from_utf8_lossy(
+                                                        &strip_ansi_escapes::strip(
+                                                            exec_result.output.as_bytes(),
+                                                        ),
                                                     )
-                                                } else {
-                                                    format!(
-                                                        "Error: run_in_background timed out after {}s.\n\n[Partial output]\n{}",
-                                                        timeout,
-                                                        clean_output.trim()
-                                                    )
-                                                }
-                                            } else if let Some(status) = exec_result.exit_status {
-                                                if status != 0 {
-                                                    if clean_output.trim().is_empty() {
-                                                        format!("Error: run_in_background command exited with status {}.", status)
+                                                    .to_string();
+                                                    let status = if exec_result.timed_out {
+                                                        "timed_out"
+                                                    } else if exec_result.exit_status.unwrap_or(0)
+                                                        == 0
+                                                    {
+                                                        "completed"
                                                     } else {
-                                                        format!("Error: run_in_background command exited with status {}.\n\n{}", status, clean_output)
-                                                    }
-                                                } else if clean_output.trim().is_empty() {
-                                                    "Command completed successfully with no output"
-                                                        .to_string()
-                                                } else {
-                                                    clean_output
+                                                        "failed"
+                                                    };
+                                                    let invocation_status = if status == "completed"
+                                                    {
+                                                        "completed"
+                                                    } else {
+                                                        "failed"
+                                                    };
+                                                    (
+                                                        invocation_status,
+                                                        serde_json::json!({
+                                                            "task_id": task_id_for_completion.clone(),
+                                                            "status": status,
+                                                            "kind": "terminal_command",
+                                                            "exit_status": exec_result.exit_status,
+                                                            "output": output,
+                                                        })
+                                                        .to_string(),
+                                                    )
                                                 }
-                                            } else if clean_output.trim().is_empty() {
-                                                "Command completed with no output".to_string()
-                                            } else {
-                                                clean_output
-                                            }
-                                        }
-                                        Err(e) => {
-                                            if e == AI_CANCELLED {
-                                                return Err(e);
-                                            }
-                                            format!("Error: {}", e)
-                                        }
-                                    }
+                                                Err(error) => (
+                                                    "failed",
+                                                    serde_json::json!({
+                                                        "task_id": task_id_for_completion.clone(),
+                                                        "status": "failed",
+                                                        "kind": "terminal_command",
+                                                        "error": error,
+                                                    })
+                                                    .to_string(),
+                                                ),
+                                            };
+                                        let message_id = Uuid::new_v4().to_string();
+                                        let session_id_for_db = session_id.clone();
+                                        let completion_for_db = completion.clone();
+                                        let task_id_for_db = task_id_for_completion.clone();
+                                        let task_id_for_invocation = task_id_for_completion.clone();
+                                        let _ = db_manager
+                                            .run_blocking(move |conn| {
+                                                conn.execute(
+                                                    "INSERT INTO ai_background_task_results (task_id, status)
+                                                     VALUES (?1, ?2)
+                                                     ON CONFLICT(task_id) DO UPDATE SET
+                                                       status = excluded.status,
+                                                       completed_at = CURRENT_TIMESTAMP",
+                                                    params![task_id_for_db, invocation_status],
+                                                )
+                                                .map_err(|error| error.to_string())?;
+                                                conn.execute(
+                                                    "UPDATE ai_tool_invocations SET status = ?1, updated_at = CURRENT_TIMESTAMP
+                                                     WHERE background_task_id = ?2 AND status IN ('queued', 'running')",
+                                                    params![invocation_status, task_id_for_invocation],
+                                                )
+                                                .map_err(|error| error.to_string())?;
+                                                conn.execute(
+                                                    "INSERT INTO ai_messages (id, session_id, role, content)
+                                                     VALUES (?1, ?2, 'system', ?3)",
+                                                    params![message_id, session_id_for_db, completion_for_db],
+                                                )
+                                                .map_err(|error| error.to_string())?;
+                                                Ok(())
+                                            })
+                                            .await;
+                                        let _ = app_handle_for_completion.emit(
+                                            &format!("ai-message-batch-{}", session_id),
+                                            AiMessageBatchPayload {
+                                                request_id: String::new(),
+                                                background_task_id: Some(task_id_for_completion),
+                                                messages: vec![ChatMessage {
+                                                    role: "system".to_string(),
+                                                    content: Some(completion),
+                                                    reasoning_content: None,
+                                                    tool_calls: None,
+                                                    tool_call_id: None,
+                                                    created_at: None,
+                                                    model_id: None,
+                                                }],
+                                            },
+                                        );
+                                    });
+                                    serde_json::json!({
+                                        "task_id": task_id,
+                                        "status": "running",
+                                        "kind": "terminal_command",
+                                    })
+                                    .to_string()
                                 }
-                                Err(err) => err,
+                                Err(error) => error,
                             }
                         } else {
                             "Error: Missing 'command' argument".to_string()
@@ -663,7 +758,12 @@ async fn execute_tools(
                                         None,
                                         Some(session_id.to_string()),
                                     ).await {
-                                            Ok(task_id) => format!("Download started in background. Task ID: {}. Local path: {}. I will notify you once it's finished.", task_id, final_local_path),
+                                            Ok(task_id) => serde_json::json!({
+                                                "task_id": task_id,
+                                                "status": "running",
+                                                "kind": "sftp_download",
+                                                "local_path": final_local_path,
+                                            }).to_string(),
                                             Err(e) => format!("Error starting download: {}", e),
                                         }
                                     } else {
@@ -681,7 +781,11 @@ async fn execute_tools(
                                     None,
                                     Some(session_id.to_string()),
                                 ).await {
-                                        Ok(task_id) => format!("SFTP session is busy. Download task {} has been queued and will start as soon as possible.", task_id),
+                                        Ok(task_id) => serde_json::json!({
+                                            "task_id": task_id,
+                                            "status": "queued",
+                                            "kind": "sftp_download",
+                                        }).to_string(),
                                         Err(e) => format!("Error queuing download: {}", e),
                                     }
                                 }
@@ -735,7 +839,12 @@ async fn execute_tools(
                                             None,
                                             Some(session_id.to_string()),
                                         ).await {
-                                            Ok(task_id) => format!("Upload started in background. Task ID: {}. Target: {}. I will notify you once it's finished.", task_id, remote_path),
+                                            Ok(task_id) => serde_json::json!({
+                                                "task_id": task_id,
+                                                "status": "running",
+                                                "kind": "sftp_upload",
+                                                "remote_path": remote_path,
+                                            }).to_string(),
                                             Err(e) => format!("Error starting upload: {}", e),
                                         }
                                     }
@@ -750,7 +859,12 @@ async fn execute_tools(
                                             None,
                                             Some(session_id.to_string()),
                                         ).await {
-                                            Ok(task_id) => format!("SFTP session is busy. Upload task {} has been queued and will start as soon as possible.", task_id),
+                                            Ok(task_id) => serde_json::json!({
+                                                "task_id": task_id,
+                                                "status": "queued",
+                                                "kind": "sftp_upload",
+                                                "remote_path": remote_path,
+                                            }).to_string(),
                                             Err(e) => format!("Error queuing upload: {}", e),
                                         }
                                     }
@@ -799,10 +913,21 @@ async fn execute_tools(
             _ => format!("Error: Unknown tool {}", call.function.name),
         };
 
-        let status = if result.starts_with("Error:") || result.starts_with("Failed") {
-            ToolOutcomeStatus::Failed
-        } else {
-            ToolOutcomeStatus::Completed
+        let background_status = serde_json::from_str::<serde_json::Value>(&result)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("status")
+                    .and_then(|status| status.as_str())
+                    .map(str::to_owned)
+            });
+        let status = match background_status.as_deref() {
+            Some("queued") => ToolOutcomeStatus::BackgroundQueued,
+            Some("running") => ToolOutcomeStatus::BackgroundRunning,
+            _ if result.starts_with("Error:") || result.starts_with("Failed") => {
+                ToolOutcomeStatus::Failed
+            }
+            _ => ToolOutcomeStatus::Completed,
         };
         let outcome = ToolOutcome {
             tool_call_id: call.id.clone(),
@@ -1065,12 +1190,45 @@ pub(super) async fn cancel_persisted_agent_run(
                 let Some(run_id) = run_id else {
                     return Ok(false);
                 };
+                let mut statement = conn
+                    .prepare(
+                        "SELECT tool_call_id, turn_index FROM ai_tool_invocations
+                         WHERE run_id = ?1 AND status IN ('proposed', 'awaitingApproval', 'executing')",
+                    )
+                    .map_err(|error| error.to_string())?;
+                let cancelled_calls = statement
+                    .query_map(params![run_id], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .map_err(|error| error.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| error.to_string())?;
                 conn.execute(
                     "UPDATE ai_tool_invocations SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
                      WHERE run_id = ?1 AND status IN ('proposed', 'awaitingApproval', 'executing')",
                     params![run_id],
                 )
                 .map_err(|error| error.to_string())?;
+                let observation = serde_json::json!({
+                    "status": "cancelled",
+                    "error": "The user cancelled this tool call before it completed.",
+                })
+                .to_string();
+                for (tool_call_id, turn_index) in cancelled_calls {
+                    conn.execute(
+                        "INSERT INTO ai_messages (id, session_id, role, content, tool_call_id, run_id, turn_index)
+                         VALUES (?1, ?2, 'tool', ?3, ?4, ?5, ?6)",
+                        params![
+                            Uuid::new_v4().to_string(),
+                            session_id,
+                            observation,
+                            tool_call_id,
+                            run_id,
+                            turn_index
+                        ],
+                    )
+                    .map_err(|error| error.to_string())?;
+                }
                 conn.execute(
                     "UPDATE ai_runs SET status = 'cancelled', stop_reason = 'Cancelled',
                          completed_at_ms = ?1, updated_at = CURRENT_TIMESTAMP
@@ -1120,7 +1278,8 @@ async fn mark_invocations(
             for id in ids {
                 conn.execute(
                     "UPDATE ai_tool_invocations SET status = ?1, updated_at = CURRENT_TIMESTAMP
-                 WHERE run_id = ?2 AND tool_call_id = ?3",
+                     WHERE run_id = ?2 AND tool_call_id = ?3
+                       AND status IN ('proposed', 'executing', 'queued', 'running')",
                     params![status, run_id, id],
                 )
                 .map_err(|e| e.to_string())?;
@@ -1195,6 +1354,19 @@ async fn persist_terminal_outcomes(
             outcome,
         )
         .await?;
+        let background_task_id = if matches!(
+            outcome.status,
+            ToolOutcomeStatus::BackgroundQueued | ToolOutcomeStatus::BackgroundRunning
+        ) {
+            Some(
+                serde_json::from_str::<serde_json::Value>(&outcome.content)
+                    .ok()
+                    .and_then(|value| value.get("task_id")?.as_str().map(str::to_string))
+                    .ok_or_else(|| "Background tool outcome is missing task_id".to_string())?,
+            )
+        } else {
+            None
+        };
         mark_invocations(
             state,
             &context.run_id,
@@ -1202,6 +1374,9 @@ async fn persist_terminal_outcomes(
             outcome.status.as_db_status(),
         )
         .await?;
+        if let Some(task_id) = background_task_id {
+            bind_background_task(state, &context.run_id, &outcome.tool_call_id, &task_id).await?;
+        }
     }
     Ok(())
 }
@@ -1210,7 +1385,7 @@ async fn persist_approval_requests(
     state: &Arc<AppState>,
     context: &AgentRunContext,
     calls: &[PreparedToolCall],
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<(String, String)>, String> {
     let run_id = context.run_id.clone();
     let requests: Vec<(String, String)> = calls
         .iter()
@@ -1221,6 +1396,7 @@ async fn persist_approval_requests(
         .db_manager
         .run_blocking(move |conn| {
             with_immediate_transaction(conn, |conn| {
+                let mut persisted = Vec::with_capacity(updates.len());
                 for (tool_call_id, approval_id) in updates {
                     let changed = conn
                         .execute(
@@ -1233,15 +1409,20 @@ async fn persist_approval_requests(
                     if changed != 1 {
                         return Err("Tool invocation is no longer available for approval".to_string());
                     }
+                    let item_id = conn
+                        .query_row(
+                            "SELECT id FROM ai_tool_invocations
+                             WHERE run_id = ?1 AND tool_call_id = ?2 AND approval_id = ?3",
+                            params![run_id, tool_call_id, approval_id],
+                            |row| row.get::<_, String>(0),
+                        )
+                        .map_err(|error| error.to_string())?;
+                    persisted.push((item_id, approval_id));
                 }
-                Ok(())
+                Ok(persisted)
             })
         })
-        .await?;
-    Ok(requests
-        .into_iter()
-        .map(|(_, approval_id)| approval_id)
-        .collect())
+        .await
 }
 
 async fn execute_prepared_tool(
@@ -1635,6 +1816,17 @@ pub(super) async fn resume_agent_run(
                     }
                 }
 
+                if approval_action == ToolApprovalAction::Cancel {
+                    conn.execute(
+                        "UPDATE ai_runs SET status = 'cancelled', stop_reason = 'Cancelled',
+                             completed_at_ms = ?1, updated_at = CURRENT_TIMESTAMP
+                         WHERE id = ?2 AND status = 'awaitingApproval'",
+                        params![now_ms(), run_id],
+                    )
+                    .map_err(|error| error.to_string())?;
+                    return Ok(AgentRunResume::AlreadyResolved);
+                }
+
                 conn.execute(
                     "UPDATE ai_runs SET status = 'running', active_request_id = ?1, updated_at = CURRENT_TIMESTAMP
                      WHERE id = ?2 AND status = 'awaitingApproval'",
@@ -1799,8 +1991,16 @@ pub(super) async fn run_agent_loop(
             }
 
             if !batch.awaiting_approval.is_empty() {
-                let approval_ids =
+                let approval_requests =
                     persist_approval_requests(&state, &context, &batch.awaiting_approval).await?;
+                let item_ids = approval_requests
+                    .iter()
+                    .map(|(item_id, _)| item_id.clone())
+                    .collect();
+                let approval_ids = approval_requests
+                    .into_iter()
+                    .map(|(_, approval_id)| approval_id)
+                    .collect();
                 set_run_state(
                     &state,
                     &context.run_id,
@@ -1826,6 +2026,8 @@ pub(super) async fn run_agent_loop(
                             request_id: request_id.clone(),
                             run_id: context.run_id.clone(),
                             turn_index,
+                            item_ids,
+                            status: "awaitingApproval".to_string(),
                             tool_calls: approval_calls.clone(),
                             approval_ids,
                             approval_policies,

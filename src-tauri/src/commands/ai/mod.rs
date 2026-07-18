@@ -8,7 +8,7 @@ mod types;
 
 pub use tool_registry::create_tools;
 pub use types::{
-    AccessTokenResponse, AiErrorEventPayload, AiToolCallEventPayload, ChatMessage,
+    AccessTokenResponse, AiErrorEventPayload, AiRunSnapshot, AiToolCallEventPayload, ChatMessage,
     DeviceCodeResponse, FunctionCall, FunctionDefinition, ToolCall, ToolDefinition,
 };
 
@@ -1601,6 +1601,39 @@ pub async fn execute_agent_tools(
 /// Returns durable approval state for the currently selected session. The UI restores
 /// this directly instead of inferring pending calls from the last assistant message.
 #[tauri::command]
+pub async fn get_ai_run_snapshot(
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<Option<AiRunSnapshot>, String> {
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.query_row(
+                "SELECT r.id, r.active_request_id, r.status, COALESCE(MAX(i.turn_index), 0)
+                 FROM ai_runs r
+                 LEFT JOIN ai_tool_invocations i ON i.run_id = r.id
+                 WHERE r.session_id = ?1 AND r.status IN ('running', 'awaitingApproval')
+                 GROUP BY r.id, r.active_request_id, r.status
+                 ORDER BY r.updated_at DESC LIMIT 1",
+                params![session_id],
+                |row| {
+                    Ok(AiRunSnapshot {
+                        run_id: row.get(0)?,
+                        request_id: row.get(1)?,
+                        status: row.get(2)?,
+                        turn_index: row.get(3)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+        })
+        .await
+}
+
+/// Returns durable approval state for the currently selected session. The UI restores
+/// this directly instead of inferring pending calls from the last assistant message.
+#[tauri::command]
 pub async fn get_pending_tool_approvals(
     state: State<'_, Arc<AppState>>,
     session_id: String,
@@ -1625,7 +1658,7 @@ pub async fn get_pending_tool_approvals(
             };
             let mut statement = conn
                 .prepare(
-                    "SELECT tool_call_id, tool_name, arguments_json, approval_id
+                    "SELECT id, tool_call_id, tool_name, arguments_json, approval_id
                      FROM ai_tool_invocations
                      WHERE run_id = ?1 AND turn_index = ?2 AND status = 'awaitingApproval'
                      ORDER BY rowid ASC",
@@ -1634,16 +1667,17 @@ pub async fn get_pending_tool_approvals(
             let rows = statement
                 .query_map(params![run_id.clone(), turn_index], |row| {
                     Ok((
+                        row.get::<_, String>(0)?,
                         ToolCall {
-                            id: row.get(0)?,
+                            id: row.get(1)?,
                             tool_type: "function".to_string(),
                             function: FunctionCall {
-                                name: row.get(1)?,
-                                arguments: row.get(2)?,
+                                name: row.get(2)?,
+                                arguments: row.get(3)?,
                             },
                             thought_signatures: None,
                         },
-                        row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                        row.get::<_, Option<String>>(4)?.unwrap_or_default(),
                     ))
                 })
                 .map_err(|error| error.to_string())?;
@@ -1653,13 +1687,13 @@ pub async fn get_pending_tool_approvals(
             if entries.is_empty()
                 || entries
                     .iter()
-                    .any(|(_, approval_id)| approval_id.is_empty())
+                    .any(|(_, _, approval_id)| approval_id.is_empty())
             {
                 return Err("Persisted approval state is incomplete".to_string());
             }
             let approval_policies = entries
                 .iter()
-                .map(|(call, _)| {
+                .map(|(_, call, _)| {
                     tool_registry::tool_policy(&call.function.name)
                         .map(|policy| policy.approval)
                         .ok_or_else(|| "Persisted approval references an unknown tool".to_string())
@@ -1669,10 +1703,12 @@ pub async fn get_pending_tool_approvals(
                 request_id,
                 run_id,
                 turn_index,
-                tool_calls: entries.iter().map(|(call, _)| call.clone()).collect(),
+                item_ids: entries.iter().map(|(item_id, _, _)| item_id.clone()).collect(),
+                status: "awaitingApproval".to_string(),
+                tool_calls: entries.iter().map(|(_, call, _)| call.clone()).collect(),
                 approval_ids: entries
                     .into_iter()
-                    .map(|(_, approval_id)| approval_id)
+                    .map(|(_, _, approval_id)| approval_id)
                     .collect(),
                 approval_policies,
             }))
