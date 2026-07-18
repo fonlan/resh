@@ -10,13 +10,14 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::history::{
-    load_history, read_remote_file_via_sftp, to_genai_messages, READ_FILE_MAX_BYTES,
+    load_history, read_remote_file_via_sftp, to_genai_messages, ProviderCapabilities,
+    READ_FILE_MAX_BYTES,
 };
 use super::stream_parsing::{
     accumulate_streamed_tool_call_chunk, append_reasoning_stream_text, append_response_stream_text,
-    extract_command, extract_required_timeout_seconds, extract_think_segments, extract_timeout,
-    extract_wait_finish, flush_reasoning_buffer, flush_response_buffer,
-    flush_think_parser_remainder, normalize_streamed_tool_calls,
+    extract_required_timeout_seconds, extract_think_segments, extract_timeout,
+    flush_reasoning_buffer, flush_response_buffer, flush_think_parser_remainder,
+    merge_captured_and_streamed_tool_calls, normalize_streamed_tool_calls,
 };
 use super::tool_registry::{
     is_session_grant_eligible, tool_policy, PreparedToolCall, ToolPolicyEngine, ToolPreparation,
@@ -1549,6 +1550,7 @@ pub(super) async fn resume_agent_run(
                                     name: row.get(1)?,
                                     arguments: row.get(2)?,
                                 },
+                                thought_signatures: None,
                             },
                             row.get::<_, Option<String>>(3)?,
                         ))
@@ -1748,6 +1750,7 @@ pub(super) async fn run_agent_loop(
                 request_id.clone(),
                 context.run_id.clone(),
                 turn_index,
+                context.budget.total_tool_calls,
             )
             .await?;
             let Some(calls) = calls.filter(|calls| !calls.is_empty()) else {
@@ -1857,6 +1860,7 @@ pub fn stream_model_turn(
     request_id: String,
     run_id: String,
     turn_index: i64,
+    cumulative_tool_calls: u32,
 ) -> futures::future::BoxFuture<'static, Result<Option<Vec<ToolCall>>, String>> {
     Box::pin(async move {
         if cancellation_token.is_cancelled() {
@@ -1897,9 +1901,12 @@ pub fn stream_model_turn(
                 &session_id,
                 is_agent_mode,
                 ssh_session_id.as_deref(),
+                &channel,
+                &model,
             ) => history?,
         };
-        let genai_history = to_genai_messages(history);
+        let provider_capabilities = ProviderCapabilities::for_channel_and_model(&channel, &model);
+        let genai_history = to_genai_messages(history, provider_capabilities);
 
         let genai_tools: Option<Vec<Tool>> = tools.as_ref().map(|ts| {
             ts.iter()
@@ -2100,10 +2107,10 @@ pub fn stream_model_turn(
                         last_emit_at = Instant::now();
 
                         tracing::debug!(
-                            "[AI] ToolCallChunk raw: call_id={}, fn_name={}, fn_arguments={:?}",
+                            "[AI] ToolCallChunk received: call_id={}, name_present={}, arguments_len={}",
                             chunk.tool_call.call_id,
-                            chunk.tool_call.fn_name,
-                            chunk.tool_call.fn_arguments
+                            !chunk.tool_call.fn_name.is_empty(),
+                            chunk.tool_call.fn_arguments.to_string().len()
                         );
 
                         let args = chunk
@@ -2112,8 +2119,6 @@ pub fn stream_model_turn(
                             .as_str()
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| chunk.tool_call.fn_arguments.to_string());
-
-                        tracing::debug!("[AI] ToolCallChunk extracted args: \"{}\"", args);
 
                         if chunk.tool_call.fn_name.is_empty() && args.is_empty() {
                             tracing::debug!("[AI] ToolCallChunk (skipped): empty fn_name and args");
@@ -2158,6 +2163,11 @@ pub fn stream_model_turn(
                         }
                     }
                     ChatStreamEvent::End(end) => {
+                        let captured_usage = end.captured_usage.clone();
+                        let provider_stop_reason = end
+                            .captured_stop_reason
+                            .as_ref()
+                            .map(|reason| reason.raw().to_string());
                         flush_think_parser_remainder(
                             &window,
                             &response_event,
@@ -2191,80 +2201,71 @@ pub fn stream_model_turn(
                             end.captured_reasoning_content,
                         );
 
-                        let tool_calls = if let Some(content) = end.captured_content {
+                        let captured_tool_calls = if let Some(content) = end.captured_content {
                             let raw_tool_calls = content.tool_calls();
                             tracing::debug!(
-                                "[AI] End event captured_content tool_calls count: {}",
+                                "[AI] Stream end captured tool calls: count={}",
                                 raw_tool_calls.len()
                             );
-
-                            let calls_from_captured: Vec<ToolCall> = raw_tool_calls
+                            raw_tool_calls
                                 .into_iter()
-                                .filter(|tc| !tc.fn_name.is_empty())
-                                .map(|tc| {
-                                    let args = tc
+                                .filter(|tool_call| !tool_call.fn_name.is_empty())
+                                .map(|tool_call| {
+                                    let arguments = tool_call
                                         .fn_arguments
                                         .as_str()
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| tc.fn_arguments.to_string());
+                                        .map(str::to_string)
+                                        .unwrap_or_else(|| tool_call.fn_arguments.to_string());
                                     ToolCall {
-                                        id: tc.call_id.clone(),
+                                        id: tool_call.call_id.clone(),
                                         tool_type: "function".to_string(),
                                         function: FunctionCall {
-                                            name: tc.fn_name.clone(),
-                                            arguments: args,
+                                            name: tool_call.fn_name.clone(),
+                                            arguments,
                                         },
+                                        thought_signatures: tool_call.thought_signatures.clone(),
                                     }
                                 })
-                                .collect();
-
-                            if calls_from_captured.is_empty() && !accumulated_tool_calls.is_empty()
-                            {
-                                tracing::debug!("[AI] captured_content tool_calls is empty, fallback to accumulated tool_calls: {}", accumulated_tool_calls.len());
-                                for acc_call in &accumulated_tool_calls {
-                                    tracing::debug!(
-                                        "[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
-                                        acc_call.id,
-                                        acc_call.function.name,
-                                        acc_call.function.arguments
-                                    );
-                                }
-                                accumulated_tool_calls.clone()
-                            } else {
-                                calls_from_captured
-                            }
+                                .collect()
                         } else {
-                            tracing::debug!("[AI] End event has no captured_content, using accumulated tool_calls: {}", accumulated_tool_calls.len());
-                            for acc_call in &accumulated_tool_calls {
-                                tracing::debug!(
-                                    "[AI] Accumulated tool call: id={}, name={}, args=\"{}\"",
-                                    acc_call.id,
-                                    acc_call.function.name,
-                                    acc_call.function.arguments
-                                );
-                            }
-                            accumulated_tool_calls.clone()
+                            Vec::new()
                         };
-
-                        let tool_calls = normalize_streamed_tool_calls(tool_calls);
+                        let tool_calls =
+                            normalize_streamed_tool_calls(merge_captured_and_streamed_tool_calls(
+                                accumulated_tool_calls.clone(),
+                                captured_tool_calls,
+                                &tool_call_id_aliases,
+                            ));
 
                         for call in &tool_calls {
                             let timeout = extract_timeout(&call.function.arguments);
-                            let command = extract_command(&call.function.arguments);
-                            let wait_finish = extract_wait_finish(&call.function.arguments);
                             let timeout_display = timeout
                                 .map(|value| format!("{}s", value))
                                 .unwrap_or_else(|| "missing".to_string());
                             tracing::info!(
-                                    "[AI] Tool call received: id={}, name={}, command=\"{}\", timeout={}, wait_finish={}, raw_args=\"{}\"",
-                                    call.id,
-                                    call.function.name,
-                                    command.as_deref().unwrap_or("N/A"),
-                                    timeout_display,
-                                    wait_finish.unwrap_or(true),
-                                    call.function.arguments
-                                );
+                                "[AI] Tool call received: id={}, name={}, timeout={}, arguments_len={}, has_thought_signatures={}",
+                                call.id,
+                                call.function.name,
+                                timeout_display,
+                                call.function.arguments.len(),
+                                call.thought_signatures.is_some()
+                            );
                         }
+
+                        tracing::info!(
+                            target: "ai_turn",
+                            run_id = %run_id,
+                            request_id = %request_id,
+                            turn_index,
+                            provider_stop_reason = ?provider_stop_reason,
+                            prompt_tokens = ?captured_usage.as_ref().and_then(|usage| usage.prompt_tokens),
+                            completion_tokens = ?captured_usage.as_ref().and_then(|usage| usage.completion_tokens),
+                            total_tokens = ?captured_usage.as_ref().and_then(|usage| usage.total_tokens),
+                            cumulative_model_turns = turn_index,
+                            cumulative_tool_calls = cumulative_tool_calls,
+                            emitted_tool_calls = tool_calls.len(),
+                            "AI model turn completed"
+                        );
 
                         if !tool_calls.is_empty() {
                             *final_tool_calls.get_or_insert_with(Vec::new) = tool_calls;

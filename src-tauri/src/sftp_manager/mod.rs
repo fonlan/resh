@@ -1114,9 +1114,7 @@ impl SftpManager {
                 drop(permits);
                 drop(tasks);
                 permit.release().await;
-                return Err(format!(
-                    "SFTP transfer task id already in use: {task_id}"
-                ));
+                return Err(format!("SFTP transfer task id already in use: {task_id}"));
             }
             tasks.insert(task_id.clone(), cancel_token);
             permits.insert(task_id.clone(), permit);
@@ -1195,9 +1193,7 @@ impl SftpManager {
                 drop(permits);
                 drop(tasks);
                 permit.release().await;
-                return Err(format!(
-                    "SFTP transfer task id already in use: {task_id}"
-                ));
+                return Err(format!("SFTP transfer task id already in use: {task_id}"));
             }
             tasks.insert(task_id.clone(), cancel_token);
             permits.insert(task_id.clone(), permit);

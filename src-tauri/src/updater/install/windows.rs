@@ -26,7 +26,8 @@ pub fn preflight_and_spawn(ctx: &PreparedInstallContext) -> Result<(), String> {
         .to_path_buf();
 
     // Staged package must live in the same directory as the running EXE.
-    let staged = std::fs::canonicalize(&ctx.staged_path).unwrap_or_else(|_| ctx.staged_path.clone());
+    let staged =
+        std::fs::canonicalize(&ctx.staged_path).unwrap_or_else(|_| ctx.staged_path.clone());
     let staged_parent = staged
         .parent()
         .ok_or_else(|| "Staged update has no parent directory".to_string())?;
@@ -56,10 +57,8 @@ pub fn preflight_and_spawn(ctx: &PreparedInstallContext) -> Result<(), String> {
         return Err("Backup path already exists; refuse to overwrite".to_string());
     }
 
-    let helper_dir = crate::updater::paths::ensure_trusted_updates_subdir(
-        &ctx.app_data_dir,
-        "helpers",
-    )?;
+    let helper_dir =
+        crate::updater::paths::ensure_trusted_updates_subdir(&ctx.app_data_dir, "helpers")?;
     let script_path = helper_dir.join(HELPER_SCRIPT_NAME);
     crate::updater::paths::write_trusted_updates_file(
         &ctx.app_data_dir,
@@ -180,9 +179,8 @@ pub fn cleanup_after_ack(
 
 fn probe_dir_writable(dir: &Path) -> Result<(), String> {
     let probe = dir.join(format!(".resh-update-write-probe-{}", Uuid::new_v4()));
-    fs::write(&probe, b"ok").map_err(|e| {
-        format!("Update directory is not writable; cannot install in place: {e}")
-    })?;
+    fs::write(&probe, b"ok")
+        .map_err(|e| format!("Update directory is not writable; cannot install in place: {e}"))?;
     let _ = fs::remove_file(&probe);
     Ok(())
 }

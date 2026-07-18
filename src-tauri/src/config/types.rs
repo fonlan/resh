@@ -145,6 +145,14 @@ pub struct AiModel {
     pub id: String,
     pub name: String,
     pub channel_id: String,
+    /// Optional model-specific context window in tokens. When omitted the AI runtime uses a
+    /// conservative provider default before compacting history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    /// Tokens held back for the next model response. This is intentionally separate from the
+    /// context window so history compaction runs before a provider-side overflow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_reserve: Option<u32>,
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default = "default_true")]

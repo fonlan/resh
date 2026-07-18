@@ -145,10 +145,7 @@ pub async fn wait_until_operations_idle_cmd(
     timeout_ms: Option<u64>,
 ) -> Result<WaitUntilIdleResult, String> {
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).clamp(100, 600_000));
-    let idle = state
-        .operation_coordinator
-        .wait_until_idle(timeout)
-        .await?;
+    let idle = state.operation_coordinator.wait_until_idle(timeout).await?;
     let snapshot = state.operation_coordinator.snapshot().await;
     Ok(WaitUntilIdleResult { idle, snapshot })
 }

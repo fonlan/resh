@@ -120,7 +120,9 @@ mod tests {
     fn asset(name: &str) -> GitHubAssetDto {
         GitHubAssetDto {
             name: name.to_string(),
-            browser_download_url: format!("https://github.com/fonlan/resh/releases/download/x/{name}"),
+            browser_download_url: format!(
+                "https://github.com/fonlan/resh/releases/download/x/{name}"
+            ),
             size: 100,
             digest: None,
         }
@@ -178,7 +180,10 @@ mod tests {
     fn missing_install_asset_errors() {
         let rel = release(
             "v2.0.0",
-            vec![asset("SHA256SUMS.txt"), asset("Resh-v2.0.0-macos-x86_64.dmg")],
+            vec![
+                asset("SHA256SUMS.txt"),
+                asset("Resh-v2.0.0-macos-x86_64.dmg"),
+            ],
         );
         let err = select_release_assets(&rel, PlatformTarget::WindowsX86_64).unwrap_err();
         assert!(err.contains("windows-x86_64.exe"));
@@ -186,10 +191,7 @@ mod tests {
 
     #[test]
     fn missing_checksums_errors() {
-        let rel = release(
-            "v2.0.0",
-            vec![asset("Resh-v2.0.0-windows-x86_64.exe")],
-        );
+        let rel = release("v2.0.0", vec![asset("Resh-v2.0.0-windows-x86_64.exe")]);
         let err = select_release_assets(&rel, PlatformTarget::WindowsX86_64).unwrap_err();
         assert!(err.contains("SHA256SUMS.txt"));
     }

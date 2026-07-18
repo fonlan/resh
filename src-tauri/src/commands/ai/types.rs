@@ -6,6 +6,10 @@ pub struct ToolCall {
     #[serde(rename = "type")]
     pub tool_type: String,
     pub function: FunctionCall,
+    /// Provider-issued signatures (for example Gemini thought signatures) that must accompany
+    /// the original tool call when a provider requires round-tripping it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thought_signatures: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

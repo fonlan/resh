@@ -221,6 +221,7 @@ mod ai_run_outcome_tests {
                 name: "read_file".to_string(),
                 arguments: "{}".to_string(),
             },
+            thought_signatures: None,
         }
     }
 
@@ -640,67 +641,6 @@ mod ai_cancel_race_async_tests {
 }
 
 #[cfg(test)]
-mod history_window_tests {
-    use super::history::truncate_dialog_messages_for_history;
-    use super::ChatMessage;
-
-    fn msg(role: &str) -> ChatMessage {
-        ChatMessage {
-            role: role.to_string(),
-            content: Some(format!("{}-content", role)),
-            reasoning_content: None,
-            tool_calls: None,
-            tool_call_id: None,
-            created_at: None,
-            model_id: None,
-        }
-    }
-
-    #[test]
-    fn truncate_moves_start_to_next_user_within_window() {
-        let messages = vec![
-            msg("user"),
-            msg("assistant"),
-            msg("user"),
-            msg("assistant"),
-            msg("tool"),
-            msg("user"),
-            msg("assistant"),
-        ];
-
-        let truncated = truncate_dialog_messages_for_history(messages, 4);
-        let roles: Vec<&str> = truncated.iter().map(|m| m.role.as_str()).collect();
-
-        assert_eq!(roles, vec!["user", "assistant"]);
-    }
-
-    #[test]
-    fn truncate_falls_back_to_previous_user_when_window_tail_has_no_user() {
-        let messages = vec![
-            msg("user"),
-            msg("assistant"),
-            msg("user"),
-            msg("assistant"),
-            msg("tool"),
-        ];
-
-        let truncated = truncate_dialog_messages_for_history(messages, 2);
-        let roles: Vec<&str> = truncated.iter().map(|m| m.role.as_str()).collect();
-
-        assert_eq!(roles, vec!["user", "assistant", "tool"]);
-    }
-
-    #[test]
-    fn truncate_returns_empty_when_no_user_exists() {
-        let messages = vec![msg("assistant"), msg("tool"), msg("assistant")];
-
-        let truncated = truncate_dialog_messages_for_history(messages, 3);
-
-        assert!(truncated.is_empty());
-    }
-}
-
-#[cfg(test)]
 mod pending_tool_call_tests {
     use super::{
         latest_assistant_tool_calls_with_pending_ids, ChatMessage, FunctionCall, ToolCall,
@@ -714,6 +654,7 @@ mod pending_tool_call_tests {
                 name: name.to_string(),
                 arguments: "{}".to_string(),
             },
+            thought_signatures: None,
         }
     }
 
@@ -788,13 +729,23 @@ mod pending_tool_call_tests {
 
 #[cfg(test)]
 mod streamed_tool_call_tests {
-    use super::history::to_genai_messages;
+    use super::history::{to_genai_messages, ProviderCapabilities, ToolResultEncoding};
     use super::stream_parsing::{
         accumulate_streamed_tool_call_chunk, normalize_streamed_tool_calls,
     };
     use super::turn::apply_reasoning_fallback;
     use super::types::{ChatMessage, FunctionCall, ToolCall};
     use std::collections::HashMap;
+
+    fn openai_capabilities() -> ProviderCapabilities {
+        ProviderCapabilities {
+            reasoning_round_trip: true,
+            preserve_thought_signatures: true,
+            tool_result_encoding: ToolResultEncoding::IndividualToolMessages,
+            requires_tool_call_ids: true,
+            openai_compatible: true,
+        }
+    }
 
     fn new_call(id: &str, name: &str, arguments: &str) -> ToolCall {
         ToolCall {
@@ -804,6 +755,7 @@ mod streamed_tool_call_tests {
                 name: name.to_string(),
                 arguments: arguments.to_string(),
             },
+            thought_signatures: None,
         }
     }
 
@@ -879,7 +831,7 @@ mod streamed_tool_call_tests {
             model_id: None,
         }];
 
-        let messages = to_genai_messages(history);
+        let messages = to_genai_messages(history, openai_capabilities());
 
         assert!(messages.is_empty());
     }
@@ -903,7 +855,7 @@ mod streamed_tool_call_tests {
             model_id: None,
         }];
 
-        let messages = to_genai_messages(history);
+        let messages = to_genai_messages(history, openai_capabilities());
 
         assert_eq!(messages.len(), 1);
         let tool_calls = messages[0].content.tool_calls();
@@ -924,7 +876,7 @@ mod streamed_tool_call_tests {
             model_id: None,
         }];
 
-        let messages = to_genai_messages(history);
+        let messages = to_genai_messages(history, openai_capabilities());
 
         assert_eq!(messages.len(), 1);
         let tool_calls = messages[0].content.tool_calls();
@@ -946,7 +898,7 @@ mod streamed_tool_call_tests {
             model_id: None,
         }];
 
-        let messages = to_genai_messages(history);
+        let messages = to_genai_messages(history, openai_capabilities());
 
         assert_eq!(messages.len(), 1);
         assert_eq!(
@@ -993,7 +945,7 @@ mod streamed_tool_call_tests {
             },
         ];
 
-        let messages = to_genai_messages(history);
+        let messages = to_genai_messages(history, openai_capabilities());
 
         assert!(messages.is_empty());
     }
@@ -1689,6 +1641,7 @@ pub async fn get_pending_tool_approvals(
                                 name: row.get(1)?,
                                 arguments: row.get(2)?,
                             },
+                            thought_signatures: None,
                         },
                         row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                     ))

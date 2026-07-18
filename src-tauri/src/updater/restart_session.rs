@@ -169,10 +169,7 @@ pub fn set_pending_restore_token(token: Option<String>) {
 }
 
 pub fn get_pending_restore_token() -> Option<String> {
-    PENDING_RESTORE_TOKEN
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
+    PENDING_RESTORE_TOKEN.lock().ok().and_then(|g| g.clone())
 }
 
 /// Atomic write: temp file + fsync + rename. Does not modify local.json / sync.json.
@@ -546,11 +543,8 @@ mod tests {
 
     #[test]
     fn parse_restore_args() {
-        let t = capture_restore_token_from_args([
-            "resh",
-            "--restore-update-session",
-            "abc-123_def",
-        ]);
+        let t =
+            capture_restore_token_from_args(["resh", "--restore-update-session", "abc-123_def"]);
         assert_eq!(t.as_deref(), Some("abc-123_def"));
         let t2 = capture_restore_token_from_args(["resh", "--restore-update-session=tok1"]);
         assert_eq!(t2.as_deref(), Some("tok1"));

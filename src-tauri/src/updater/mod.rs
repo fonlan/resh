@@ -21,9 +21,9 @@ pub use download::{
     parse_github_sha256_digest, parse_sha256sums_for_file, MAX_INSTALL_ASSET_BYTES,
 };
 pub use install::{
-    ack_update_install, clear_last_install_failure, install_prepared_update, load_last_install_failure,
-    platform_supports_install, schedule_exit_after_helper_started, write_install_alive_marker,
-    InstallPreparedUpdateRequest, InstallPreparedUpdateResponse,
+    ack_update_install, clear_last_install_failure, install_prepared_update,
+    load_last_install_failure, platform_supports_install, schedule_exit_after_helper_started,
+    write_install_alive_marker, InstallPreparedUpdateRequest, InstallPreparedUpdateResponse,
 };
 pub use restart_barrier::{
     CategoryCount, CoordinatorMode, OperationCategory, OperationCoordinator, OperationPermit,
@@ -32,7 +32,7 @@ pub use restart_barrier::{
 pub use restart_session::{
     ack_restart_session, capture_restore_token_from_args, cleanup_stale_snapshots,
     get_pending_restart_session, get_pending_restore_token, is_valid_token, load_snapshot,
-    load_snapshot_with_options, restore_session_cli_args, restarts_dir, set_pending_restore_token,
+    load_snapshot_with_options, restarts_dir, restore_session_cli_args, set_pending_restore_token,
     write_snapshot, PendingRestartSession, RestartSessionSnapshot, SnapshotSplitLayout,
     SnapshotTab, SNAPSHOT_SCHEMA_VERSION, SNAPSHOT_TTL_SECS,
 };
@@ -40,9 +40,7 @@ pub use types::{
     CheckUpdateResult, DownloadProgressEvent, GitHubAssetDto, GitHubReleaseDto, PreparedUpdate,
     UpdateAssetInfo, UpdateInfo,
 };
-pub use version::{
-    compare_semver, is_newer_than, parse_release_tag, parse_semver, VersionCompare,
-};
+pub use version::{compare_semver, is_newer_than, parse_release_tag, parse_semver, VersionCompare};
 
 pub const GITHUB_OWNER: &str = "fonlan";
 pub const GITHUB_REPO: &str = "resh";
@@ -100,6 +98,8 @@ mod tests {
         // Subdomains of allowed hosts are not trusted (e.g. GitHub Pages).
         assert!(!is_allowed_download_host("pages.github.com"));
         assert!(!is_allowed_download_host("evil.github.com"));
-        assert!(!is_allowed_download_host("cdn.objects.githubusercontent.com"));
+        assert!(!is_allowed_download_host(
+            "cdn.objects.githubusercontent.com"
+        ));
     }
 }

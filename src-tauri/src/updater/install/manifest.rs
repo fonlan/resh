@@ -48,7 +48,10 @@ pub fn install_manifest_path(app_data_dir: &Path) -> PathBuf {
 }
 
 /// Atomically write the install manifest (part + rename). Restrictive mode on Unix.
-pub fn write_install_manifest(app_data_dir: &Path, manifest: &InstallManifest) -> Result<(), String> {
+pub fn write_install_manifest(
+    app_data_dir: &Path,
+    manifest: &InstallManifest,
+) -> Result<(), String> {
     if !manifest_fields_are_sane(manifest) {
         return Err("Install manifest failed internal safety checks".to_string());
     }
@@ -567,8 +570,7 @@ fn manifest_fields_are_sane(manifest: &InstallManifest) -> bool {
     {
         return false;
     }
-    if manifest.install_parent.contains("..")
-        || !Path::new(&manifest.install_parent).is_absolute()
+    if manifest.install_parent.contains("..") || !Path::new(&manifest.install_parent).is_absolute()
     {
         return false;
     }
@@ -604,8 +606,7 @@ fn is_safe_artifact_basename(name: &str, kind: &str, manifest: &InstallManifest)
     }
     match kind {
         "backup" => {
-            name.starts_with("Resh.backup.v")
-                && (name.ends_with(".app") || name.ends_with(".exe"))
+            name.starts_with("Resh.backup.v") && (name.ends_with(".app") || name.ends_with(".exe"))
         }
         "staging" => name.starts_with("Resh.staging.v") && name.ends_with(".app"),
         _ => false,
@@ -927,9 +928,15 @@ mod tests {
             restore_token: Some("restore-token-1".into()),
         };
         cleanup_manifest_paths(dir.path(), &m, &binding);
-        assert!(sentinel.exists(), "forged backup under external parent must survive");
+        assert!(
+            sentinel.exists(),
+            "forged backup under external parent must survive"
+        );
         assert!(evil_target.exists());
-        assert!(evil_staged.exists(), "forged co-located staged path must survive");
+        assert!(
+            evil_staged.exists(),
+            "forged co-located staged path must survive"
+        );
     }
 
     #[test]
@@ -954,7 +961,10 @@ mod tests {
             restore_token: Some("restore-token-1".into()),
         };
         cleanup_manifest_paths(dir.path(), &m, &binding);
-        assert!(!backup.exists(), "exact backup under live parent should be cleaned");
+        assert!(
+            !backup.exists(),
+            "exact backup under live parent should be cleaned"
+        );
     }
 
     #[test]
@@ -1120,7 +1130,10 @@ mod tests {
             restore_token: Some("restore-token-1".into()),
         };
         cleanup_manifest_paths(dir.path(), &mw, &binding_w);
-        assert!(evil_exe.exists(), "forged external .Resh-*.exe must survive");
+        assert!(
+            evil_exe.exists(),
+            "forged external .Resh-*.exe must survive"
+        );
     }
 
     #[test]

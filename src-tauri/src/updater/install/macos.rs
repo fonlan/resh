@@ -244,8 +244,7 @@ fn path_on_readonly_filesystem(path: &Path) -> bool {
                 let lower = line.to_ascii_lowercase();
                 let matches_mount = if let Some(ref mp) = mount_point {
                     // "on /Applications (" or "on / ("
-                    line.contains(&format!(" on {mp} "))
-                        || line.contains(&format!(" on {mp}("))
+                    line.contains(&format!(" on {mp} ")) || line.contains(&format!(" on {mp}("))
                 } else {
                     // Fallback: any line mentioning the path prefix.
                     let s = path.to_string_lossy();
@@ -776,7 +775,9 @@ mod tests {
         assert!(s.contains("if ! listing="));
         // Quarantine clear is not best-effort: no `|| true` on the -dr line.
         for line in s.lines() {
-            if line.contains("xattr") && line.contains("com.apple.quarantine") && line.contains("-dr")
+            if line.contains("xattr")
+                && line.contains("com.apple.quarantine")
+                && line.contains("-dr")
             {
                 assert!(
                     !line.contains("|| true"),
@@ -794,7 +795,9 @@ mod tests {
         let clear_idx = s
             .find(clear_marker)
             .expect("clear_quarantine_strict on final app");
-        let open_idx = s.find(open_marker).expect("open -n new app with restore token");
+        let open_idx = s
+            .find(open_marker)
+            .expect("open -n new app with restore token");
         assert!(
             open_idx > clear_idx,
             "open -n must run only after quarantine clear/recheck"
@@ -852,9 +855,7 @@ mod tests {
             "/private/var/folders/xx/AppTranslocation/abc/Resh.app"
         ))
         .is_err());
-        assert!(
-            reject_non_upgradable_location(Path::new("/Volumes/Resh/Resh.app")).is_err()
-        );
+        assert!(reject_non_upgradable_location(Path::new("/Volumes/Resh/Resh.app")).is_err());
     }
 
     #[test]

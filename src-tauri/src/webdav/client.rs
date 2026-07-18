@@ -102,7 +102,6 @@ impl WebDAVClient {
         let content = response.bytes().await?;
         Ok(Some(content.to_vec()))
     }
-
 }
 
 #[cfg(test)]

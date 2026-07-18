@@ -14,6 +14,10 @@ export interface AIModel {
   id: string
   name: string
   channelId: string
+  /** Optional provider/model context capacity in tokens. */
+  contextWindow?: number
+  /** Tokens reserved for the next model response. */
+  responseReserve?: number
   enabled: boolean
   synced: boolean
   updatedAt: string

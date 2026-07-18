@@ -36,7 +36,10 @@ mod tests {
         let resolved =
             resolve_app_data_dir_from_default(Path::new("/tmp/App Support/com.fonlan.resh"));
 
-        assert_eq!(resolved, Path::new("/tmp/App Support").join(APP_DATA_DIR_NAME));
+        assert_eq!(
+            resolved,
+            Path::new("/tmp/App Support").join(APP_DATA_DIR_NAME)
+        );
         assert_eq!(
             resolved.file_name().and_then(|name| name.to_str()),
             Some("Resh")

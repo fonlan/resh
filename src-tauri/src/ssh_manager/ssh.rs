@@ -132,7 +132,9 @@ pub struct SSHClient;
 /// 调用方应当**立刻** drop `SESSIONS.get` 返回的 shard guard
 /// 再去 `arc.lock().await`，避免持 shard guard 跨 await 引发死锁。
 fn get_session_arc(session_id: &str) -> Option<Arc<Mutex<SessionData>>> {
-    SESSIONS.get(session_id).map(|entry| Arc::clone(entry.value()))
+    SESSIONS
+        .get(session_id)
+        .map(|entry| Arc::clone(entry.value()))
 }
 
 impl SSHClient {
@@ -802,8 +804,7 @@ impl SSHClient {
 
     pub async fn reconnect(session_id: &str) -> Result<(), String> {
         let (config, tx, cols, rows, previous_generation) = {
-            let arc = get_session_arc(session_id)
-                .ok_or_else(|| "Session not found".to_string())?;
+            let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
             let data = arc.lock().await;
             (
                 data.config.clone(),
@@ -1090,66 +1091,64 @@ impl SSHClient {
         let arc = get_session_arc(session_id).ok_or_else(|| "Session not found".to_string())?;
         let mut session_data = arc.lock().await;
         let current_buffer_len = session_data.terminal_buffer.len();
-            let recording_start = session_data.last_output_len;
-            let mut recorder_len = 0usize;
-            let mut preview = String::new();
+        let recording_start = session_data.last_output_len;
+        let mut recorder_len = 0usize;
+        let mut preview = String::new();
 
-            let state = if let Some(recorder) = session_data.command_recorder.as_ref() {
-                // Completion detection must use recorder data because terminal_buffer is rolling
-                // and can be truncated when it hits MAX_BUFFER_SIZE.
-                let new_content = recorder.as_str();
-                recorder_len = new_content.len();
-                preview = new_content.chars().take(50).collect::<String>();
-                let marker_completed = session_data
-                    .recording_completion_marker
-                    .as_ref()
-                    .is_some_and(|marker| new_content.contains(marker));
-                if marker_completed {
-                    session_data.prompt_match_streak = 0;
-                    CompletionCheckState::CompletedByMarker
-                } else if let Some(recorded_prompt) = session_data.recording_prompt.clone() {
-                    // Priority 2: Prompt suffix comparison
-                    // Record prompt suffix before command, compare after command
-                    // Simple and works with any shell/theme
-                    let recorder_suffix = Self::extract_prompt_suffix(new_content, 3);
-                    let terminal_suffix =
-                        Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
-                    let prompt_matched = recorder_suffix.as_deref()
-                        == Some(recorded_prompt.as_str())
-                        || terminal_suffix.as_deref() == Some(recorded_prompt.as_str());
-                    let has_new_output = recorder_len > 0 || current_buffer_len > recording_start;
+        let state = if let Some(recorder) = session_data.command_recorder.as_ref() {
+            // Completion detection must use recorder data because terminal_buffer is rolling
+            // and can be truncated when it hits MAX_BUFFER_SIZE.
+            let new_content = recorder.as_str();
+            recorder_len = new_content.len();
+            preview = new_content.chars().take(50).collect::<String>();
+            let marker_completed = session_data
+                .recording_completion_marker
+                .as_ref()
+                .is_some_and(|marker| new_content.contains(marker));
+            if marker_completed {
+                session_data.prompt_match_streak = 0;
+                CompletionCheckState::CompletedByMarker
+            } else if let Some(recorded_prompt) = session_data.recording_prompt.clone() {
+                // Priority 2: Prompt suffix comparison
+                // Record prompt suffix before command, compare after command
+                // Simple and works with any shell/theme
+                let recorder_suffix = Self::extract_prompt_suffix(new_content, 3);
+                let terminal_suffix = Self::extract_prompt_suffix(&session_data.terminal_buffer, 3);
+                let prompt_matched = recorder_suffix.as_deref() == Some(recorded_prompt.as_str())
+                    || terminal_suffix.as_deref() == Some(recorded_prompt.as_str());
+                let has_new_output = recorder_len > 0 || current_buffer_len > recording_start;
 
-                    if has_new_output && prompt_matched {
-                        if session_data.last_completion_probe_recorder_len == recorder_len {
-                            session_data.prompt_match_streak =
-                                session_data.prompt_match_streak.saturating_add(1);
-                        } else {
-                            session_data.prompt_match_streak = 1;
-                        }
+                if has_new_output && prompt_matched {
+                    if session_data.last_completion_probe_recorder_len == recorder_len {
+                        session_data.prompt_match_streak =
+                            session_data.prompt_match_streak.saturating_add(1);
                     } else {
-                        session_data.prompt_match_streak = 0;
-                    }
-
-                    if has_new_output
-                        && prompt_matched
-                        && session_data.prompt_match_streak >= PROMPT_MATCH_STREAK_REQUIRED
-                    {
-                        CompletionCheckState::CompletedByPrompt
-                    } else {
-                        CompletionCheckState::Waiting
+                        session_data.prompt_match_streak = 1;
                     }
                 } else {
                     session_data.prompt_match_streak = 0;
+                }
+
+                if has_new_output
+                    && prompt_matched
+                    && session_data.prompt_match_streak >= PROMPT_MATCH_STREAK_REQUIRED
+                {
+                    CompletionCheckState::CompletedByPrompt
+                } else {
                     CompletionCheckState::Waiting
                 }
             } else {
                 session_data.prompt_match_streak = 0;
-                CompletionCheckState::NoRecorder
-            };
-            session_data.last_completion_probe_recorder_len = recorder_len;
+                CompletionCheckState::Waiting
+            }
+        } else {
+            session_data.prompt_match_streak = 0;
+            CompletionCheckState::NoRecorder
+        };
+        session_data.last_completion_probe_recorder_len = recorder_len;
 
-            if session_data.last_completion_check_state != Some(state) {
-                tracing::debug!(
+        if session_data.last_completion_check_state != Some(state) {
+            tracing::debug!(
                     "[check_command_completed] {} - state={:?}, buffer_len={}, start={}, recorder_len={}, content={:?}",
                     session_id,
                     state,
@@ -1158,10 +1157,10 @@ impl SSHClient {
                     recorder_len,
                     preview
                 );
-                session_data.last_completion_check_state = Some(state);
-            }
+            session_data.last_completion_check_state = Some(state);
+        }
 
-            Ok(state.is_completed())
+        Ok(state.is_completed())
     }
 
     pub async fn get_command_recording_diagnostics(

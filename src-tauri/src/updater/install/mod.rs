@@ -17,10 +17,10 @@ mod macos;
 #[cfg(windows)]
 mod windows;
 
+use super::current_app_version;
 use super::download::get_prepared_update;
 use super::restart_session::{is_valid_token, load_snapshot_with_options};
 use super::types::PreparedUpdate;
-use super::current_app_version;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -28,7 +28,8 @@ use tauri::{AppHandle, Manager};
 
 pub use result::{
     clear_install_alive_marker, clear_last_install_failure, install_failure_path,
-    install_result_path, load_last_install_failure, read_install_result, write_install_alive_marker,
+    install_result_path, load_last_install_failure, read_install_result,
+    write_install_alive_marker,
 };
 
 /// Opaque request accepted by `install_prepared_update`.
@@ -88,11 +89,12 @@ pub async fn install_prepared_update(
     // Snapshot must exist on disk (pre-install: do not require target == current).
     let snapshot = load_snapshot_with_options(&app_data_dir, &request.snapshot_token, false)?;
 
-    let (prepared, staged_path) = get_prepared_update(&request.prepared_id)
-        .await
-        .ok_or_else(|| {
-            "Unknown or expired prepared update. Download the update again.".to_string()
-        })?;
+    let (prepared, staged_path) =
+        get_prepared_update(&request.prepared_id)
+            .await
+            .ok_or_else(|| {
+                "Unknown or expired prepared update. Download the update again.".to_string()
+            })?;
 
     if !staged_path.is_file() {
         return Err("Prepared update file is missing; download again".to_string());

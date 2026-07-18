@@ -1,9 +1,7 @@
 //! Install result / failure markers written by platform helpers.
 
 use super::updates_root;
-use crate::updater::paths::{
-    remove_trusted_updates_relative, updates_root_exists_and_trusted,
-};
+use crate::updater::paths::{remove_trusted_updates_relative, updates_root_exists_and_trusted};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,11 +45,9 @@ pub fn write_install_alive_marker(app_data_dir: &Path, restore_token: &str) {
     // against a validated updates directory fd (Unix) / revalidated root (others).
     // Mode 0600 is applied on the open fd (Unix fchmod); do not re-resolve the path.
     let relative = PathBuf::from(format!("install-alive-{restore_token}.ready"));
-    if let Err(e) = crate::updater::paths::write_trusted_updates_file(
-        app_data_dir,
-        &relative,
-        b"alive\n",
-    ) {
+    if let Err(e) =
+        crate::updater::paths::write_trusted_updates_file(app_data_dir, &relative, b"alive\n")
+    {
         tracing::warn!("skipping alive marker write: {e}");
     }
 }
@@ -234,7 +230,10 @@ mod tests {
         symlink(&external, app_data.join("updates")).unwrap();
 
         assert!(load_last_install_failure(&app_data).is_none());
-        assert!(secret.exists(), "must not follow updates symlink to external");
+        assert!(
+            secret.exists(),
+            "must not follow updates symlink to external"
+        );
     }
 
     #[test]

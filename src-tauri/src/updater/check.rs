@@ -1,8 +1,8 @@
 use super::assets::{select_release_assets, PlatformTarget};
+use super::current_app_version;
 use super::github::{fetch_latest_stable_release, GithubFetchCache, GithubFetchOutcome};
 use super::types::{CheckUpdateResult, GitHubReleaseDto, UpdateInfo};
 use super::version::{is_newer_than, parse_release_tag};
-use super::current_app_version;
 use crate::config::types::Proxy;
 use crate::http::resolve_proxy_by_id;
 use std::collections::HashMap;
@@ -159,9 +159,12 @@ async fn run_check(
             && now.saturating_sub(cache.checked_at_unix) < AUTO_CHECK_MIN_INTERVAL_SECS as i64
         {
             if let Some(ref release) = cache.body {
-                return finalize_check_result(
-                    evaluate_release(release, &current_version, platform, true),
-                )
+                return finalize_check_result(evaluate_release(
+                    release,
+                    &current_version,
+                    platform,
+                    true,
+                ))
                 .await;
             }
         }
@@ -364,8 +367,7 @@ mod tests {
     #[test]
     fn up_to_date_when_equal() {
         let rel = stable_release("v1.1.0");
-        let result =
-            evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::WindowsX86_64);
+        let result = evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::WindowsX86_64);
         match result {
             CheckUpdateResult::UpToDate {
                 current_version,
@@ -382,16 +384,14 @@ mod tests {
     #[test]
     fn no_update_when_older_remote() {
         let rel = stable_release("v1.0.0");
-        let result =
-            evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::WindowsX86_64);
+        let result = evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::WindowsX86_64);
         assert!(matches!(result, CheckUpdateResult::UpToDate { .. }));
     }
 
     #[test]
     fn update_available_when_newer() {
         let rel = stable_release("v1.2.0");
-        let result =
-            evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::MacOsAarch64);
+        let result = evaluate_release_for_test(&rel, "1.1.0", PlatformTarget::MacOsAarch64);
         match result {
             CheckUpdateResult::UpdateAvailable { update, .. } => {
                 assert_eq!(update.version, "1.2.0");
@@ -441,8 +441,7 @@ mod tests {
     fn incomplete_release_is_error() {
         let mut rel = stable_release("v9.0.0");
         rel.assets.retain(|a| a.name != "SHA256SUMS.txt");
-        let result =
-            evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
+        let result = evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
         match result {
             CheckUpdateResult::Error { code, message } => {
                 assert_eq!(code, "incomplete_release");
@@ -456,8 +455,7 @@ mod tests {
     fn invalid_tag_is_error() {
         let mut rel = stable_release("v1.0.0");
         rel.tag_name = "not-semver".to_string();
-        let result =
-            evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
+        let result = evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
         assert!(matches!(
             result,
             CheckUpdateResult::Error {
@@ -471,8 +469,7 @@ mod tests {
     fn rejects_prerelease_flag() {
         let mut rel = stable_release("v2.0.0");
         rel.prerelease = true;
-        let result =
-            evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
+        let result = evaluate_release_for_test(&rel, "1.0.0", PlatformTarget::WindowsX86_64);
         assert!(matches!(
             result,
             CheckUpdateResult::Error {

@@ -1,7 +1,7 @@
 // Shared HTTP client construction for WebDAV, AI, and updater.
 
 use crate::config::types::Proxy;
-use reqwest::{Client, Proxy as ReqwestProxy, redirect::Policy};
+use reqwest::{redirect::Policy, Client, Proxy as ReqwestProxy};
 use std::time::Duration;
 
 /// Options for building a reqwest client with optional proxy support.

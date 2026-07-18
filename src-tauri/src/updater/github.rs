@@ -1,7 +1,7 @@
 use super::types::GitHubReleaseDto;
 use super::{GITHUB_ACCEPT, GITHUB_API_VERSION};
-use crate::http::{build_http_client, HttpClientOptions};
 use crate::config::types::Proxy;
+use crate::http::{build_http_client, HttpClientOptions};
 use reqwest::StatusCode;
 use std::time::Duration;
 
@@ -36,7 +36,9 @@ pub enum GithubFetchOutcome {
     },
     /// HTTP 304: use previously cached release body.
     NotModified,
-    RateLimited { retry_after_secs: Option<u64> },
+    RateLimited {
+        retry_after_secs: Option<u64>,
+    },
 }
 
 pub async fn fetch_latest_stable_release(
@@ -44,7 +46,10 @@ pub async fn fetch_latest_stable_release(
     etag: Option<&str>,
 ) -> Result<GithubFetchOutcome, String> {
     let options = HttpClientOptions {
-        user_agent: format!("Resh/{} (https://github.com/fonlan/resh)", env!("CARGO_PKG_VERSION")),
+        user_agent: format!(
+            "Resh/{} (https://github.com/fonlan/resh)",
+            env!("CARGO_PKG_VERSION")
+        ),
         connect_timeout: Duration::from_secs(CONNECT_TIMEOUT_SECS),
         timeout: Duration::from_secs(REQUEST_TIMEOUT_SECS),
         max_redirects: 5,
@@ -109,7 +114,9 @@ async fn request_latest(
         if status == StatusCode::TOO_MANY_REQUESTS
             || body.to_ascii_lowercase().contains("rate limit")
         {
-            return Ok(GithubFetchOutcome::RateLimited { retry_after_secs: retry_after });
+            return Ok(GithubFetchOutcome::RateLimited {
+                retry_after_secs: retry_after,
+            });
         }
         return Err(format!(
             "GitHub API forbidden (HTTP 403): {}",

@@ -155,15 +155,21 @@ fn parse_semver_inner(raw: &str) -> Result<SemVer, String> {
 
     let mut parts = core.split('.');
     let major = parse_num(
-        parts.next().ok_or_else(|| format!("Invalid version: {}", raw))?,
+        parts
+            .next()
+            .ok_or_else(|| format!("Invalid version: {}", raw))?,
         raw,
     )?;
     let minor = parse_num(
-        parts.next().ok_or_else(|| format!("Invalid version: {}", raw))?,
+        parts
+            .next()
+            .ok_or_else(|| format!("Invalid version: {}", raw))?,
         raw,
     )?;
     let patch = parse_num(
-        parts.next().ok_or_else(|| format!("Invalid version: {}", raw))?,
+        parts
+            .next()
+            .ok_or_else(|| format!("Invalid version: {}", raw))?,
         raw,
     )?;
     if parts.next().is_some() {
@@ -191,10 +197,7 @@ fn parse_semver_inner(raw: &str) -> Result<SemVer, String> {
                     Ok(PrePart::Num(part.parse().map_err(|_| {
                         format!("Invalid numeric pre-release in: {}", raw)
                     })?))
-                } else if part
-                    .chars()
-                    .all(|c| c.is_ascii_alphanumeric() || c == '-')
-                {
+                } else if part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     Ok(PrePart::Text(part.to_string()))
                 } else {
                     Err(format!("Invalid pre-release identifier in: {}", raw))

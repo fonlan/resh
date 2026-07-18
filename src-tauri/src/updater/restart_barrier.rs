@@ -309,10 +309,7 @@ mod tests {
     async fn acquire_and_release_idle() {
         let c = Arc::new(OperationCoordinator::new());
         assert!(c.is_idle().await);
-        let p = c
-            .try_acquire(OperationCategory::ConfigWrite)
-            .await
-            .unwrap();
+        let p = c.try_acquire(OperationCategory::ConfigWrite).await.unwrap();
         assert!(!c.is_idle().await);
         let snap = c.snapshot().await;
         assert_eq!(snap.total, 1);
@@ -338,10 +335,7 @@ mod tests {
     #[tokio::test]
     async fn draining_rejects_new_permits() {
         let c = Arc::new(OperationCoordinator::new());
-        let p = c
-            .try_acquire(OperationCategory::WebdavSync)
-            .await
-            .unwrap();
+        let p = c.try_acquire(OperationCategory::WebdavSync).await.unwrap();
         c.begin_draining().await;
         assert!(c.is_draining());
         let err = c
@@ -361,10 +355,7 @@ mod tests {
         assert!(!err2.is_empty());
         c.cancel_draining(None).await;
         assert!(!c.is_draining());
-        let p2 = c
-            .try_acquire(OperationCategory::ConfigWrite)
-            .await
-            .unwrap();
+        let p2 = c.try_acquire(OperationCategory::ConfigWrite).await.unwrap();
         p2.release().await;
     }
 
@@ -405,10 +396,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(30)).await;
             p.release().await;
         });
-        let idle2 = c2
-            .wait_until_idle(Duration::from_secs(2))
-            .await
-            .unwrap();
+        let idle2 = c2.wait_until_idle(Duration::from_secs(2)).await.unwrap();
         assert!(idle2);
     }
 
@@ -418,10 +406,7 @@ mod tests {
     #[tokio::test]
     async fn cancelled_release_future_still_zeros_count() {
         let c = Arc::new(OperationCoordinator::new());
-        let p = c
-            .try_acquire(OperationCategory::ConfigWrite)
-            .await
-            .unwrap();
+        let p = c.try_acquire(OperationCategory::ConfigWrite).await.unwrap();
         assert!(!c.is_idle().await);
 
         // Drop the permit without calling release — equivalent to cancel after
@@ -444,10 +429,7 @@ mod tests {
     async fn concurrent_acquire_while_draining_never_leaks() {
         let c = Arc::new(OperationCoordinator::new());
         // Hold a background sync permit across the begin boundary.
-        let sync = c
-            .try_acquire(OperationCategory::WebdavSync)
-            .await
-            .unwrap();
+        let sync = c.try_acquire(OperationCategory::WebdavSync).await.unwrap();
         let session = c.begin_draining().await;
         assert!(c.is_draining());
 
@@ -473,16 +455,9 @@ mod tests {
         assert!(c.is_idle().await);
 
         // Still draining until matching cancel.
-        assert!(
-            c.try_acquire(OperationCategory::ConfigWrite)
-                .await
-                .is_err()
-        );
+        assert!(c.try_acquire(OperationCategory::ConfigWrite).await.is_err());
         assert!(c.cancel_draining(Some(session)).await);
-        let p = c
-            .try_acquire(OperationCategory::ConfigWrite)
-            .await
-            .unwrap();
+        let p = c.try_acquire(OperationCategory::ConfigWrite).await.unwrap();
         p.release().await;
     }
 

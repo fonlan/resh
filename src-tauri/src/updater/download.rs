@@ -2,8 +2,8 @@
 
 use super::assets::{expected_install_asset_name, PlatformTarget};
 use super::check::get_discovered_update;
-use super::types::{DownloadProgressEvent, PreparedUpdate, UpdateInfo};
 use super::is_allowed_download_host;
+use super::types::{DownloadProgressEvent, PreparedUpdate, UpdateInfo};
 use crate::config::types::Proxy;
 use crate::http::resolve_proxy_by_id;
 use futures::StreamExt;
@@ -60,8 +60,7 @@ fn runtime() -> &'static DownloadRuntime {
 /// Look up a previously prepared update by id (for later install phase).
 pub async fn get_prepared_update(id: &str) -> Option<(PreparedUpdate, PathBuf)> {
     let map = runtime().prepared.lock().await;
-    map.get(id)
-        .map(|e| (e.prepared.clone(), e.path.clone()))
+    map.get(id).map(|e| (e.prepared.clone(), e.path.clone()))
 }
 
 /// Remove a prepared entry and optionally delete its file.
@@ -94,12 +93,9 @@ pub async fn download_update(
     update_proxy_id: Option<&str>,
     update_id: &str,
 ) -> Result<PreparedUpdate, String> {
-    let update = get_discovered_update(update_id)
-        .await
-        .ok_or_else(|| {
-            "Unknown or expired update id. Check for updates again before downloading."
-                .to_string()
-        })?;
+    let update = get_discovered_update(update_id).await.ok_or_else(|| {
+        "Unknown or expired update id. Check for updates again before downloading.".to_string()
+    })?;
 
     // Single download at a time.
     let mut guard = runtime().in_flight.lock().await;
@@ -114,15 +110,7 @@ pub async fn download_update(
     *guard = Some((download_id.clone(), token.clone()));
     drop(guard);
 
-    let result = run_download(
-        app,
-        proxies,
-        update_proxy_id,
-        &update,
-        &download_id,
-        token,
-    )
-    .await;
+    let result = run_download(app, proxies, update_proxy_id, &update, &download_id, token).await;
 
     let mut guard = runtime().in_flight.lock().await;
     *guard = None;
@@ -813,7 +801,10 @@ fn is_test_http_localhost_allowed(url: &reqwest::Url) -> bool {
     if url.scheme() != "http" {
         return false;
     }
-    matches!(url.host_str(), Some("127.0.0.1") | Some("localhost") | Some("[::1]"))
+    matches!(
+        url.host_str(),
+        Some("127.0.0.1") | Some("localhost") | Some("[::1]")
+    )
 }
 
 #[cfg(not(test))]
@@ -914,12 +905,7 @@ pub fn parse_sha256sums_for_file(text: &str, file_name: &str) -> Result<String, 
         return Err("SHA256SUMS.txt is empty".to_string());
     }
 
-    found.ok_or_else(|| {
-        format!(
-            "SHA256SUMS.txt is missing entry for '{}'",
-            file_name
-        )
-    })
+    found.ok_or_else(|| format!("SHA256SUMS.txt is missing entry for '{}'", file_name))
 }
 
 fn parse_sha256sum_line(line: &str) -> Option<(&str, &str)> {
@@ -959,7 +945,10 @@ pub fn parse_github_sha256_digest(digest: &str) -> Result<Option<String>, String
     } else if is_hex_sha256(&lower) {
         lower.as_str()
     } else {
-        return Err(format!("Unsupported GitHub asset digest format: {}", digest));
+        return Err(format!(
+            "Unsupported GitHub asset digest format: {}",
+            digest
+        ));
     };
     if !is_hex_sha256(hex) {
         return Err(format!("Invalid GitHub SHA-256 digest: {}", digest));
@@ -1023,11 +1012,7 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  SHA256SUMS.txt
 
     #[test]
     fn conflicting_entries_error() {
-        let text = format!(
-            "{}  foo.exe\n{}  foo.exe\n",
-            "a".repeat(64),
-            "b".repeat(64)
-        );
+        let text = format!("{}  foo.exe\n{}  foo.exe\n", "a".repeat(64), "b".repeat(64));
         let err = parse_sha256sums_for_file(&text, "foo.exe").unwrap_err();
         assert!(err.contains("Conflicting"));
     }
@@ -1140,10 +1125,11 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  SHA256SUMS.txt
                         .and_then(|l| l.split_whitespace().nth(1))
                         .unwrap_or("/");
                     let path = path.split('?').next().unwrap_or(path).to_string();
-                    let (status, headers, body) = routes
-                        .get(&path)
-                        .cloned()
-                        .unwrap_or((404, vec![], b"not found".to_vec()));
+                    let (status, headers, body) =
+                        routes
+                            .get(&path)
+                            .cloned()
+                            .unwrap_or((404, vec![], b"not found".to_vec()));
                     let reason = if status == 200 { "OK" } else { "ERR" };
                     let mut resp = format!(
                         "HTTP/1.1 {status} {reason}\r\nConnection: close\r\nContent-Length: {}\r\n",
@@ -1455,7 +1441,10 @@ bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  SHA256SUMS.txt
             let guard = PartGuard::new(part.clone());
             guard.disarm();
         }
-        assert!(part.exists(), "disarmed PartGuard must not delete ready path");
+        assert!(
+            part.exists(),
+            "disarmed PartGuard must not delete ready path"
+        );
         tokio::fs::remove_file(&part).await.ok();
     }
 

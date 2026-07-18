@@ -490,6 +490,7 @@ pub struct MessagePayload {
 pub struct ToolCallPayload {
     pub id: String,
     pub function: ToolCallFunction,
+    pub thought_signatures: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -575,6 +576,7 @@ mod tests {
                             name: "ls".to_string(),
                             arguments: "{}".to_string(),
                         },
+                        thought_signatures: None,
                     },
                     ToolCallPayload {
                         id: "tc2".to_string(),
@@ -582,6 +584,7 @@ mod tests {
                             name: "pwd".to_string(),
                             arguments: "{}".to_string(),
                         },
+                        thought_signatures: None,
                     },
                 ]),
                 tool_call_id: None,
@@ -628,6 +631,7 @@ mod tests {
                         name: "ls".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    thought_signatures: None,
                 }]),
                 tool_call_id: None,
                 created_at: None,
@@ -661,6 +665,7 @@ mod tests {
                         name: "ls".to_string(),
                         arguments: "{}".to_string(),
                     },
+                    thought_signatures: None,
                 }]),
                 tool_call_id: None,
                 created_at: None,
@@ -692,6 +697,7 @@ mod tests {
                         name: "run_in_terminal".to_string(),
                         arguments: r#"{"command": "ls", "timeoutSeconds": 30}"#.to_string(),
                     },
+                    thought_signatures: None,
                 }]),
                 tool_call_id: None,
                 created_at: None,

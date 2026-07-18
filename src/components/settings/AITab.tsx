@@ -387,28 +387,6 @@ export const AITab: React.FC<AITabProps> = ({
         <div className="flex gap-4">
           <div className="flex flex-col gap-1.5 mb-4 flex-1">
             <label
-              htmlFor="ai-max-history"
-              className="block text-sm font-medium text-zinc-400 mb-1.5 "
-            >
-              {t.ai.maxChatContext}
-            </label>
-            <input
-              id="ai-max-history"
-              type="number"
-              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-              value={general.aiMaxHistory || 10}
-              onChange={(e) => {
-                const val = parseInt(e.target.value)
-                if (!isNaN(val)) {
-                  onGeneralUpdate({ ...general, aiMaxHistory: val })
-                }
-              }}
-              min={1}
-              max={100}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5 mb-4 flex-1">
-            <label
               htmlFor="ai-timeout"
               className="block text-sm font-medium text-zinc-400 mb-1.5 "
             >

@@ -16,21 +16,6 @@ pub(super) fn extract_timeout(arguments: &str) -> Option<u64> {
         .and_then(|v| v.as_u64())
 }
 
-pub(super) fn extract_command(arguments: &str) -> Option<String> {
-    serde_json::from_str::<serde_json::Value>(arguments)
-        .ok()?
-        .get("command")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-}
-
-pub(super) fn extract_wait_finish(arguments: &str) -> Option<bool> {
-    serde_json::from_str::<serde_json::Value>(arguments)
-        .ok()?
-        .get("wait_finish")
-        .and_then(|v| v.as_bool())
-}
-
 pub(super) fn extract_required_timeout_seconds(
     arguments: &serde_json::Value,
     tool_name: &str,
@@ -98,6 +83,7 @@ pub(super) fn accumulate_streamed_tool_call_chunk(
             name: fn_name.to_string(),
             arguments: args.to_string(),
         },
+        thought_signatures: None,
     });
     tool_call_id_aliases.insert(call_id.to_string(), effective_id);
 }
@@ -153,6 +139,72 @@ pub(super) fn normalize_streamed_tool_calls(tool_calls: Vec<ToolCall>) -> Vec<To
     }
 
     normalized
+}
+
+fn canonical_tool_call_id(id: &str, aliases: &HashMap<String, String>) -> String {
+    let mut canonical = id;
+    let mut seen = std::collections::HashSet::new();
+    while let Some(next) = aliases.get(canonical) {
+        if !seen.insert(canonical) {
+            break;
+        }
+        canonical = next;
+    }
+    canonical.to_string()
+}
+
+fn choose_more_complete_arguments(streamed: &str, captured: &str) -> String {
+    if captured.trim().is_empty() {
+        return streamed.to_string();
+    }
+    let streamed_valid = parse_tool_call_arguments(streamed).is_ok();
+    let captured_valid = parse_tool_call_arguments(captured).is_ok();
+    match (streamed_valid, captured_valid) {
+        (true, false) => streamed.to_string(),
+        (false, true) => captured.to_string(),
+        // If both values are usable (or both are partial), retaining the longer representation
+        // avoids replacing a complete streamed JSON object with a shortened captured snapshot.
+        _ if streamed.len() >= captured.len() => streamed.to_string(),
+        _ => captured.to_string(),
+    }
+}
+
+pub(super) fn merge_captured_and_streamed_tool_calls(
+    streamed: Vec<ToolCall>,
+    captured: Vec<ToolCall>,
+    tool_call_id_aliases: &HashMap<String, String>,
+) -> Vec<ToolCall> {
+    let mut merged = streamed;
+
+    for mut captured_call in captured {
+        if captured_call.id.trim().is_empty() {
+            tracing::warn!("[AI] Dropping captured tool call without a stable id");
+            continue;
+        }
+        captured_call.id = canonical_tool_call_id(&captured_call.id, tool_call_id_aliases);
+
+        if let Some(streamed_call) = merged.iter_mut().find(|call| call.id == captured_call.id) {
+            if !captured_call.function.name.trim().is_empty() {
+                streamed_call.function.name = captured_call.function.name;
+            }
+            streamed_call.function.arguments = choose_more_complete_arguments(
+                &streamed_call.function.arguments,
+                &captured_call.function.arguments,
+            );
+            if captured_call
+                .thought_signatures
+                .as_ref()
+                .map(|signatures| !signatures.is_empty())
+                .unwrap_or(false)
+            {
+                streamed_call.thought_signatures = captured_call.thought_signatures;
+            }
+        } else {
+            merged.push(captured_call);
+        }
+    }
+
+    merged
 }
 
 pub(super) fn parse_tool_call_arguments(arguments: &str) -> Result<serde_json::Value, String> {
@@ -410,4 +462,64 @@ pub(super) fn flush_reasoning_buffer(
             },
         )
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_captured_and_streamed_tool_calls;
+    use crate::commands::ai::types::{FunctionCall, ToolCall};
+    use std::collections::HashMap;
+
+    fn tool_call(id: &str, name: &str, arguments: &str) -> ToolCall {
+        ToolCall {
+            id: id.to_string(),
+            tool_type: "function".to_string(),
+            function: FunctionCall {
+                name: name.to_string(),
+                arguments: arguments.to_string(),
+            },
+            thought_signatures: None,
+        }
+    }
+
+    #[test]
+    fn captured_partial_call_does_not_replace_complete_streamed_arguments() {
+        let merged = merge_captured_and_streamed_tool_calls(
+            vec![tool_call(
+                "call_1",
+                "write_file",
+                r#"{"path":"/tmp/a","content":"complete"}"#,
+            )],
+            vec![tool_call("call_1", "write_file", "{}")],
+            &HashMap::new(),
+        );
+
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            merged[0].function.arguments,
+            r#"{"path":"/tmp/a","content":"complete"}"#
+        );
+    }
+
+    #[test]
+    fn captured_alias_merges_into_streamed_stable_id_without_dropping_other_calls() {
+        let mut aliases = HashMap::new();
+        aliases.insert("captured_alias".to_string(), "call_1".to_string());
+        let merged = merge_captured_and_streamed_tool_calls(
+            vec![
+                tool_call("call_1", "read_file", r#"{"path":"/tmp/a"}"#),
+                tool_call("call_2", "read_file", r#"{"path":"/tmp/b"}"#),
+            ],
+            vec![tool_call(
+                "captured_alias",
+                "read_file",
+                r#"{"path":"/tmp/a"}"#,
+            )],
+            &aliases,
+        );
+
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, "call_1");
+        assert_eq!(merged[1].id, "call_2");
+    }
 }

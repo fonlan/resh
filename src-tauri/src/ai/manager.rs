@@ -395,6 +395,8 @@ mod tests {
             id: "model".to_string(),
             name: name.to_string(),
             channel_id: "channel".to_string(),
+            context_window: None,
+            response_reserve: None,
             enabled: true,
             synced: true,
             updated_at: "now".to_string(),

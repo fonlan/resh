@@ -312,6 +312,7 @@ mod tests {
                 name: name.to_string(),
                 arguments: arguments.to_string(),
             },
+            thought_signatures: None,
         }
     }
 

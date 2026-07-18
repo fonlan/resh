@@ -51,11 +51,7 @@ pub fn resolve_trusted_updates_root(app_data_dir: &Path, allow_missing: bool) ->
 
     let updates = updates_root(app_data_dir);
     if !updates.exists() {
-        return if allow_missing {
-            Some(updates)
-        } else {
-            None
-        };
+        return if allow_missing { Some(updates) } else { None };
     }
 
     if let Ok(meta) = fs::symlink_metadata(&updates) {
@@ -247,7 +243,7 @@ pub fn remove_trusted_updates_relative(app_data_dir: &Path, relative: &Path) -> 
                 let _ = fs::remove_file(&path);
                 true
             }
-            Ok(_) => true, // unexpected type; do not delete
+            Ok(_) => true,  // unexpected type; do not delete
             Err(_) => true, // already absent
         }
     }
@@ -334,7 +330,10 @@ pub fn path_has_symlink_component_under_root(path: &Path, updates: &Path) -> boo
             if !path_c.starts_with(&updates_c) && path_c != updates_c {
                 return false;
             }
-            return walk_symlink_components(&updates_c, path_c.strip_prefix(&updates_c).unwrap_or(Path::new("")));
+            return walk_symlink_components(
+                &updates_c,
+                path_c.strip_prefix(&updates_c).unwrap_or(Path::new("")),
+            );
         }
         // Path may not exist yet (leaf missing): only walk if logical prefix matches.
         return false;
@@ -390,10 +389,7 @@ pub fn ensure_trusted_updates_dir(app_data_dir: &Path) -> Result<PathBuf, String
 }
 
 /// Ensure `app-data/updates/<subdir>` exists as a real (non-symlink) directory.
-pub fn ensure_trusted_updates_subdir(
-    app_data_dir: &Path,
-    subdir: &str,
-) -> Result<PathBuf, String> {
+pub fn ensure_trusted_updates_subdir(app_data_dir: &Path, subdir: &str) -> Result<PathBuf, String> {
     if subdir != "helpers" && subdir != "restarts" {
         return Err(format!("disallowed updates subdir '{subdir}'"));
     }
@@ -432,7 +428,9 @@ pub fn ensure_trusted_updates_subdir(
         }
         fs::create_dir_all(&dir).map_err(|e| format!("create updates/{subdir}: {e}"))?;
         if path_entry_is_symlink(&dir) || !dir.is_dir() {
-            return Err(format!("Updates {subdir}/ is no longer trusted after create"));
+            return Err(format!(
+                "Updates {subdir}/ is no longer trusted after create"
+            ));
         }
         if !updates_root_exists_and_trusted(app_data_dir) {
             return Err("Updates directory is no longer trusted after subdir create".to_string());
@@ -608,8 +606,7 @@ fn parse_allowed_relative_or_part(relative: &Path) -> Result<Vec<String>, String
 fn is_allowed_updates_relative_write_extra(components: &[String]) -> bool {
     if components.len() == 2 && components[0] == "helpers" {
         let leaf = components[1].as_str();
-        return leaf == "apply-windows-update.ps1"
-            || leaf == "apply-windows-update.ps1.part";
+        return leaf == "apply-windows-update.ps1" || leaf == "apply-windows-update.ps1.part";
     }
     false
 }
@@ -722,11 +719,7 @@ fn create_trusted_updates_file_unix(
 
     let c_leaf = CString::new(leaf).map_err(|_| "invalid leaf name".to_string())?;
     // O_NOFOLLOW on create: if leaf is a symlink, open fails instead of following.
-    let flags = libc::O_WRONLY
-        | libc::O_CREAT
-        | libc::O_TRUNC
-        | libc::O_CLOEXEC
-        | libc::O_NOFOLLOW;
+    let flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC | libc::O_CLOEXEC | libc::O_NOFOLLOW;
     let file_fd = unsafe { libc::openat(parent_fd, c_leaf.as_ptr(), flags, 0o600) };
     let _ = unsafe { libc::close(parent_fd) };
     if file_fd < 0 {
@@ -739,7 +732,10 @@ fn create_trusted_updates_file_unix(
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     if unsafe { libc::fstat(file_fd, &mut st) } != 0 {
         let _ = unsafe { libc::close(file_fd) };
-        return Err(format!("fstat created file: {}", io::Error::last_os_error()));
+        return Err(format!(
+            "fstat created file: {}",
+            io::Error::last_os_error()
+        ));
     }
     if (st.st_mode & libc::S_IFMT) != libc::S_IFREG {
         let _ = unsafe { libc::close(file_fd) };
@@ -810,10 +806,7 @@ fn create_trusted_updates_file_portable(
         let mid = updates.join(&components[0]);
         if mid.exists() {
             if path_entry_is_symlink(&mid) || !mid.is_dir() {
-                return Err(format!(
-                    "intermediate dir {} is not trusted",
-                    components[0]
-                ));
+                return Err(format!("intermediate dir {} is not trusted", components[0]));
             }
         } else {
             fs::create_dir_all(&mid).map_err(|e| format!("create intermediate: {e}"))?;
@@ -829,9 +822,9 @@ fn create_trusted_updates_file_portable(
     if !updates_root_exists_and_trusted(app_data_dir) {
         return Err("Updates directory is no longer trusted before write".to_string());
     }
-    if has_intermediate_symlink_ancestor(&updates.join(PathBuf::from_iter(
-        components.iter().map(|s| s.as_str()),
-    ))) {
+    if has_intermediate_symlink_ancestor(
+        &updates.join(PathBuf::from_iter(components.iter().map(|s| s.as_str()))),
+    ) {
         return Err("refusing write: intermediate path component is a symlink".to_string());
     }
     let path = updates.join(PathBuf::from_iter(components.iter().map(|s| s.as_str())));
@@ -859,8 +852,7 @@ fn rename_trusted_updates_portable(
     }
     let from_path = updates.join(PathBuf::from_iter(from.iter().map(|s| s.as_str())));
     let to_path = updates.join(PathBuf::from_iter(to.iter().map(|s| s.as_str())));
-    if has_intermediate_symlink_ancestor(&from_path)
-        || has_intermediate_symlink_ancestor(&to_path)
+    if has_intermediate_symlink_ancestor(&from_path) || has_intermediate_symlink_ancestor(&to_path)
     {
         return Err("refusing rename: intermediate path component is a symlink".to_string());
     }
@@ -956,14 +948,8 @@ fn remove_live_parent_artifact_unix(live_parent: &Path, leaf: &str) -> bool {
 #[cfg(unix)]
 fn unlink_tree_at(parent_fd: i32, name: &std::ffi::CStr) -> bool {
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
-    let st_rc = unsafe {
-        libc::fstatat(
-            parent_fd,
-            name.as_ptr(),
-            &mut st,
-            libc::AT_SYMLINK_NOFOLLOW,
-        )
-    };
+    let st_rc =
+        unsafe { libc::fstatat(parent_fd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) };
     if st_rc != 0 {
         return true; // already absent
     }
@@ -1361,11 +1347,8 @@ mod tests {
         fs::write(&secret, b"keep").unwrap();
         symlink(&external, app_data.join("updates")).unwrap();
 
-        let err = write_trusted_updates_file(
-            &app_data,
-            Path::new("install-alive-tok.ready"),
-            b"alive\n",
-        );
+        let err =
+            write_trusted_updates_file(&app_data, Path::new("install-alive-tok.ready"), b"alive\n");
         assert!(err.is_err());
         assert_eq!(fs::read(&secret).unwrap(), b"keep");
     }
@@ -1397,12 +1380,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let app_data = tmp.path().join("app");
         fs::create_dir_all(&app_data).unwrap();
-        write_trusted_updates_file(
-            &app_data,
-            Path::new("install-alive-tok.ready"),
-            b"alive\n",
-        )
-        .unwrap();
+        write_trusted_updates_file(&app_data, Path::new("install-alive-tok.ready"), b"alive\n")
+            .unwrap();
         let path = app_data.join("updates").join("install-alive-tok.ready");
         assert!(path.is_file());
         assert!(!path_entry_is_symlink(&path));
@@ -1477,7 +1456,10 @@ mod tests {
         symlink(&external, &link).unwrap();
         assert!(remove_live_parent_artifact_nofollow(&live, &link));
         assert!(!link.exists(), "symlink node should be unlinked");
-        assert!(secret.exists(), "must not recurse into external via dir symlink");
+        assert!(
+            secret.exists(),
+            "must not recurse into external via dir symlink"
+        );
     }
 
     #[test]
@@ -1506,7 +1488,10 @@ mod tests {
         .unwrap();
         let path = app_data.join("updates").join("install-manifest.json");
         assert_eq!(fs::read_to_string(&path).unwrap(), "{\"ok\":true}");
-        assert!(!app_data.join("updates").join("install-manifest.json.part").exists());
+        assert!(!app_data
+            .join("updates")
+            .join("install-manifest.json.part")
+            .exists());
     }
 
     #[test]
