@@ -8,6 +8,7 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -101,6 +102,97 @@ enum WatchedUploadResult {
     },
 }
 
+/// The watcher preflight is deliberately separated from its I/O branches so
+/// tests can prove an unchanged metadata save invokes the upload branch only,
+/// never the remote-body snapshot branch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WatcherUploadPreflight {
+    UploadWithoutRemoteBody,
+    ConflictNeedsSnapshot,
+    ConflictDeletedNoBody,
+}
+
+fn evaluate_watcher_upload_preflight(
+    baseline: &RemoteFileRevision,
+    current: &RemoteFileRevision,
+) -> WatcherUploadPreflight {
+    match compare_remote_metadata(baseline, current) {
+        RemoteRevisionComparison::MetadataUnchanged => {
+            WatcherUploadPreflight::UploadWithoutRemoteBody
+        }
+        RemoteRevisionComparison::MetadataChanged => WatcherUploadPreflight::ConflictNeedsSnapshot,
+        RemoteRevisionComparison::Deleted => WatcherUploadPreflight::ConflictDeletedNoBody,
+    }
+}
+
+async fn dispatch_watcher_upload_preflight<
+    T,
+    Upload,
+    Snapshot,
+    Deleted,
+    UploadFuture,
+    SnapshotFuture,
+    DeletedFuture,
+>(
+    preflight: WatcherUploadPreflight,
+    upload_without_remote_body: Upload,
+    conflict_with_snapshot: Snapshot,
+    deleted_without_remote_body: Deleted,
+) -> T
+where
+    Upload: FnOnce() -> UploadFuture,
+    Snapshot: FnOnce() -> SnapshotFuture,
+    Deleted: FnOnce() -> DeletedFuture,
+    UploadFuture: Future<Output = T>,
+    SnapshotFuture: Future<Output = T>,
+    DeletedFuture: Future<Output = T>,
+{
+    match preflight {
+        WatcherUploadPreflight::UploadWithoutRemoteBody => upload_without_remote_body().await,
+        WatcherUploadPreflight::ConflictNeedsSnapshot => conflict_with_snapshot().await,
+        WatcherUploadPreflight::ConflictDeletedNoBody => deleted_without_remote_body().await,
+    }
+}
+
+fn mark_watched_file_paused_conflict(file: &mut WatchedFile, conflict: PendingConflictState) {
+    file.upload_status = WatchedUploadStatus::PausedConflict;
+    file.pending_local_changes = true;
+    file.conflict = Some(conflict);
+}
+
+fn mark_watched_file_uploaded(file: &mut WatchedFile, revision: RemoteFileRevision) {
+    file.baseline_revision = revision;
+    file.upload_status = WatchedUploadStatus::Idle;
+    file.pending_local_changes = false;
+    file.conflict = None;
+    file.suppress_content_sha256 = None;
+    file.suppress_until = None;
+}
+
+fn mark_watched_file_adopted(
+    file: &mut WatchedFile,
+    revision: RemoteFileRevision,
+    content_hash: String,
+) {
+    file.baseline_revision = revision;
+    file.upload_status = WatchedUploadStatus::Idle;
+    file.pending_local_changes = false;
+    file.conflict = None;
+    file.suppress_content_sha256 = Some(content_hash);
+    file.suppress_until = Some(Instant::now() + WATCHER_SUPPRESS_WINDOW);
+}
+
+fn paths_for_session_cleanup(
+    files: &HashMap<PathBuf, WatchedFile>,
+    session_id: &str,
+) -> Vec<PathBuf> {
+    files
+        .iter()
+        .filter(|(_, watched)| watched.session_id == session_id)
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
 pub struct SftpEditManager {
     watched_files: Arc<Mutex<HashMap<PathBuf, WatchedFile>>>,
     watched_directories: Arc<Mutex<HashMap<PathBuf, usize>>>,
@@ -131,46 +223,53 @@ impl SftpEditManager {
                         let decision = {
                             let mut files = watched_files_clone.lock().unwrap();
                             if let Some(file) = files.get_mut(&path) {
-                                if Self::should_suppress_event(file, &path) {
-                                    EventDecision::Suppress
-                                } else if file.upload_status
-                                    == WatchedUploadStatus::PausedConflict
-                                {
-                                    // Coalesce further local saves while conflicted.
-                                    // Only emit once when transitioning to pending so the UI
-                                    // can show "still has a local version" without spam.
-                                    let already_pending = file.pending_local_changes;
-                                    file.pending_local_changes = true;
-                                    if already_pending {
-                                        EventDecision::Ignore
-                                    } else if let Some(conflict) = file.conflict.as_ref() {
-                                        EventDecision::MarkPending {
-                                            event: SftpEditConflictEvent {
-                                                edit_id: file.edit_id.clone(),
-                                                conflict_id: conflict.conflict_id.clone(),
-                                                session_id: file.session_id.clone(),
-                                                remote_path: file.remote_path.clone(),
-                                                local_path: path
-                                                    .to_string_lossy()
-                                                    .to_string(),
-                                                reason: conflict.reason.clone(),
-                                                expected_revision: file
-                                                    .baseline_revision
-                                                    .clone(),
-                                                current_revision: conflict
-                                                    .current_revision
-                                                    .clone(),
-                                                pending_local_changes: true,
-                                                snapshot_error: None,
-                                            },
-                                        }
-                                    } else {
+                                let suppress_active = Self::should_suppress_event(file, &path);
+                                let already_pending = file.pending_local_changes;
+                                let has_conflict = file.conflict.is_some();
+                                let upload_status = file.upload_status;
+                                match decide_local_watcher_event(
+                                    true,
+                                    suppress_active,
+                                    upload_status,
+                                    already_pending,
+                                    has_conflict,
+                                ) {
+                                    WatcherLocalEventDecision::Suppress => EventDecision::Suppress,
+                                    WatcherLocalEventDecision::Ignore => EventDecision::Ignore,
+                                    WatcherLocalEventDecision::QueueUpload => {
+                                        EventDecision::QueueUpload
+                                    }
+                                    WatcherLocalEventDecision::CoalescePending => {
+                                        file.pending_local_changes = true;
                                         EventDecision::Ignore
                                     }
-                                } else {
-                                    // Idle or already uploading: debounce another attempt so
-                                    // the latest local bytes are considered after in-flight work.
-                                    EventDecision::QueueUpload
+                                    WatcherLocalEventDecision::MarkPendingFirstTime => {
+                                        file.pending_local_changes = true;
+                                        if let Some(conflict) = file.conflict.as_ref() {
+                                            EventDecision::MarkPending {
+                                                event: SftpEditConflictEvent {
+                                                    edit_id: file.edit_id.clone(),
+                                                    conflict_id: conflict.conflict_id.clone(),
+                                                    session_id: file.session_id.clone(),
+                                                    remote_path: file.remote_path.clone(),
+                                                    local_path: path
+                                                        .to_string_lossy()
+                                                        .to_string(),
+                                                    reason: conflict.reason.clone(),
+                                                    expected_revision: file
+                                                        .baseline_revision
+                                                        .clone(),
+                                                    current_revision: conflict
+                                                        .current_revision
+                                                        .clone(),
+                                                    pending_local_changes: true,
+                                                    snapshot_error: None,
+                                                },
+                                            }
+                                        } else {
+                                            EventDecision::Ignore
+                                        }
+                                    }
                                 }
                             } else {
                                 EventDecision::Ignore
@@ -377,11 +476,15 @@ impl SftpEditManager {
                                         }
                                     };
 
-                                let result = match compare_remote_metadata(
+                                let preflight = evaluate_watcher_upload_preflight(
                                     &current_watched_file.baseline_revision,
                                     &current_revision,
-                                ) {
-                                    RemoteRevisionComparison::MetadataUnchanged => {
+                                );
+                                let snapshot_error_revision = current_revision.clone();
+                                let deleted_revision = current_revision.clone();
+                                let result = dispatch_watcher_upload_preflight(
+                                    preflight,
+                                    || async {
                                         Self::upload_modified_file(
                                             &session_id,
                                             &path_inner,
@@ -389,12 +492,11 @@ impl SftpEditManager {
                                         )
                                         .await
                                         .map(WatchedUploadResult::Saved)
-                                    }
-                                    RemoteRevisionComparison::MetadataChanged => {
+                                    },
+                                    || async {
                                         // Only download a remote snapshot when the conflict UI
                                         // needs a hashed revision. Never open TRUNCATE here.
-                                        match read_remote_snapshot(&session_id, &remote_path).await
-                                        {
+                                        match read_remote_snapshot(&session_id, &remote_path).await {
                                             Ok(snapshot) => Ok(WatchedUploadResult::Conflict {
                                                 reason: if snapshot.revision.exists {
                                                     "metadataChanged"
@@ -407,20 +509,21 @@ impl SftpEditManager {
                                             Err(error_message) => {
                                                 Ok(WatchedUploadResult::Conflict {
                                                     reason: "metadataChanged",
-                                                    current_revision,
+                                                    current_revision: snapshot_error_revision,
                                                     snapshot_error: Some(error_message),
                                                 })
                                             }
                                         }
-                                    }
-                                    RemoteRevisionComparison::Deleted => {
+                                    },
+                                    || async {
                                         Ok(WatchedUploadResult::Conflict {
                                             reason: "deleted",
-                                            current_revision,
+                                            current_revision: deleted_revision,
                                             snapshot_error: None,
                                         })
-                                    }
-                                };
+                                    },
+                                )
+                                .await;
                                 drop(path_lock);
 
                                 match result {
@@ -432,13 +535,7 @@ impl SftpEditManager {
                                                     && current.upload_status
                                                         != WatchedUploadStatus::PausedConflict
                                                 {
-                                                    current.baseline_revision = revision;
-                                                    current.upload_status =
-                                                        WatchedUploadStatus::Idle;
-                                                    current.pending_local_changes = false;
-                                                    current.conflict = None;
-                                                    current.suppress_content_sha256 = None;
-                                                    current.suppress_until = None;
+                                                    mark_watched_file_uploaded(current, revision);
                                                 }
                                             }
                                         }
@@ -795,11 +892,7 @@ impl SftpEditManager {
     pub fn cleanup_session(&self, session_id: &str) {
         let to_remove = {
             let files = self.watched_files.lock().unwrap();
-            files
-                .iter()
-                .filter(|(_, watched)| watched.session_id == session_id)
-                .map(|(lp, _)| lp.clone())
-                .collect::<Vec<_>>()
+            paths_for_session_cleanup(&files, session_id)
         };
 
         for path in to_remove {
@@ -952,13 +1045,7 @@ impl SftpEditManager {
                 let mut files = self.watched_files.lock().unwrap();
                 if let Some(current) = files.get_mut(&local_path) {
                     if current.edit_id == watched.edit_id {
-                        current.baseline_revision = snapshot.revision.clone();
-                        current.upload_status = WatchedUploadStatus::Idle;
-                        current.pending_local_changes = false;
-                        current.conflict = None;
-                        // Keep suppress markers so the write-back event is ignored.
-                        current.suppress_content_sha256 = Some(content_hash);
-                        current.suppress_until = Some(Instant::now() + WATCHER_SUPPRESS_WINDOW);
+                        mark_watched_file_adopted(current, snapshot.revision.clone(), content_hash);
                     }
                 }
             }
@@ -1086,12 +1173,7 @@ impl SftpEditManager {
                 let mut files = self.watched_files.lock().unwrap();
                 if let Some(current) = files.get_mut(&local_path) {
                     if current.edit_id == watched.edit_id {
-                        current.baseline_revision = revision.clone();
-                        current.upload_status = WatchedUploadStatus::Idle;
-                        current.pending_local_changes = false;
-                        current.conflict = None;
-                        current.suppress_content_sha256 = None;
-                        current.suppress_until = None;
+                        mark_watched_file_uploaded(current, revision.clone());
                     }
                 }
             }
@@ -1144,13 +1226,14 @@ impl SftpEditManager {
         let mut files = self.watched_files.lock().unwrap();
         if let Some(current) = files.get_mut(local_path) {
             if current.edit_id == edit_id {
-                current.upload_status = WatchedUploadStatus::PausedConflict;
-                current.pending_local_changes = true;
-                current.conflict = Some(PendingConflictState {
-                    conflict_id: conflict_id.to_string(),
-                    reason: reason.to_string(),
-                    current_revision: current_revision.clone(),
-                });
+                mark_watched_file_paused_conflict(
+                    current,
+                    PendingConflictState {
+                        conflict_id: conflict_id.to_string(),
+                        reason: reason.to_string(),
+                        current_revision: current_revision.clone(),
+                    },
+                );
                 return SftpEditConflictEvent {
                     edit_id: current.edit_id.clone(),
                     conflict_id: conflict_id.to_string(),
@@ -1309,6 +1392,76 @@ enum EventDecision {
     Ignore,
 }
 
+/// Pure local-event decision for the external-editor watcher.
+/// Network I/O and filesystem suppress checks stay outside so unit tests can
+/// exercise pause/coalesce/resume without a real SFTP session.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WatcherLocalEventDecision {
+    QueueUpload,
+    /// First local save while already paused; UI should refresh pending flag once.
+    MarkPendingFirstTime,
+    /// Further local saves while paused; merge into one pending version, no spam.
+    CoalescePending,
+    Suppress,
+    Ignore,
+}
+
+fn decide_local_watcher_event(
+    is_watched: bool,
+    suppress_active: bool,
+    upload_status: WatchedUploadStatus,
+    already_pending_local: bool,
+    has_conflict: bool,
+) -> WatcherLocalEventDecision {
+    if !is_watched {
+        return WatcherLocalEventDecision::Ignore;
+    }
+    if suppress_active {
+        return WatcherLocalEventDecision::Suppress;
+    }
+    if upload_status == WatchedUploadStatus::PausedConflict {
+        if already_pending_local {
+            return WatcherLocalEventDecision::CoalescePending;
+        }
+        if has_conflict {
+            return WatcherLocalEventDecision::MarkPendingFirstTime;
+        }
+        return WatcherLocalEventDecision::Ignore;
+    }
+    // Idle or Uploading: debounce another attempt so the latest local bytes win.
+    WatcherLocalEventDecision::QueueUpload
+}
+
+#[cfg(test)]
+/// Pure suppress evaluation once wall-clock and content hash are known.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SuppressDecision {
+    SuppressByWindow,
+    SuppressByContentHash,
+    ClearStaleMarkers,
+    NoSuppress,
+}
+
+#[cfg(test)]
+fn evaluate_suppress(
+    now_before_deadline: bool,
+    has_window: bool,
+    expected_hash: Option<&str>,
+    actual_hash: Option<&str>,
+) -> SuppressDecision {
+    if has_window && now_before_deadline {
+        return SuppressDecision::SuppressByWindow;
+    }
+    if let Some(expected) = expected_hash {
+        return match actual_hash {
+            Some(actual) if actual == expected => SuppressDecision::SuppressByContentHash,
+            // Unreadable or different content: drop stale markers.
+            _ => SuppressDecision::ClearStaleMarkers,
+        };
+    }
+    SuppressDecision::NoSuppress
+}
+
 async fn write_local_file_atomically(local_path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = local_path
         .parent()
@@ -1348,4 +1501,278 @@ async fn write_local_file_atomically(local_path: &Path, bytes: &[u8]) -> Result<
             format!("Failed to replace local file: {}", e)
         })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sftp_manager::edit_revision::RemoteFileRevision;
+    use crate::updater::{OperationCategory, OperationCoordinator};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    fn rev(size: u64, mtime: u64) -> RemoteFileRevision {
+        RemoteFileRevision {
+            exists: true,
+            size: Some(size),
+            mtime: Some(mtime),
+            sha256: Some("h".to_string()),
+        }
+    }
+
+    fn watched_file(session_id: &str, status: WatchedUploadStatus) -> WatchedFile {
+        WatchedFile {
+            edit_id: "edit-1".to_string(),
+            session_id: session_id.to_string(),
+            remote_path: "/remote/file.txt".to_string(),
+            baseline_revision: rev(10, 5),
+            upload_status: status,
+            pending_local_changes: false,
+            conflict: None,
+            suppress_until: None,
+            suppress_content_sha256: None,
+        }
+    }
+
+    fn pending_conflict() -> PendingConflictState {
+        PendingConflictState {
+            conflict_id: "conflict-1".to_string(),
+            reason: "metadataChanged".to_string(),
+            current_revision: rev(11, 6),
+        }
+    }
+
+    #[test]
+    fn local_event_queues_upload_when_idle_or_uploading() {
+        assert_eq!(
+            decide_local_watcher_event(true, false, WatchedUploadStatus::Idle, false, false),
+            WatcherLocalEventDecision::QueueUpload
+        );
+        assert_eq!(
+            decide_local_watcher_event(true, false, WatchedUploadStatus::Uploading, false, false),
+            WatcherLocalEventDecision::QueueUpload
+        );
+    }
+
+    #[test]
+    fn local_event_pauses_and_coalesces_while_conflicted() {
+        assert_eq!(
+            decide_local_watcher_event(
+                true,
+                false,
+                WatchedUploadStatus::PausedConflict,
+                false,
+                true
+            ),
+            WatcherLocalEventDecision::MarkPendingFirstTime
+        );
+        assert_eq!(
+            decide_local_watcher_event(
+                true,
+                false,
+                WatchedUploadStatus::PausedConflict,
+                true,
+                true
+            ),
+            WatcherLocalEventDecision::CoalescePending
+        );
+    }
+
+    #[test]
+    fn local_event_suppress_and_unwatched() {
+        assert_eq!(
+            decide_local_watcher_event(true, true, WatchedUploadStatus::Idle, false, false),
+            WatcherLocalEventDecision::Suppress
+        );
+        assert_eq!(
+            decide_local_watcher_event(false, false, WatchedUploadStatus::Idle, false, false),
+            WatcherLocalEventDecision::Ignore
+        );
+    }
+
+    #[test]
+    fn conflict_pause_resolve_and_pending_merge_state_machine() {
+        let mut file = watched_file("session-1", WatchedUploadStatus::Uploading);
+        mark_watched_file_paused_conflict(&mut file, pending_conflict());
+        assert_eq!(file.upload_status, WatchedUploadStatus::PausedConflict);
+        assert!(file.pending_local_changes);
+        assert!(file.conflict.is_some());
+
+        // Duplicate local saves stay paused and coalesce into the existing pending version.
+        assert_eq!(
+            decide_local_watcher_event(
+                true,
+                false,
+                file.upload_status,
+                file.pending_local_changes,
+                file.conflict.is_some(),
+            ),
+            WatcherLocalEventDecision::CoalescePending
+        );
+
+        // Adopt remote resumes the actual watcher record with a suppression marker.
+        mark_watched_file_adopted(&mut file, rev(11, 6), "remote-hash".to_string());
+        assert_eq!(file.upload_status, WatchedUploadStatus::Idle);
+        assert!(!file.pending_local_changes);
+        assert!(file.conflict.is_none());
+        assert!(file.suppress_until.is_some());
+        assert_eq!(file.suppress_content_sha256.as_deref(), Some("remote-hash"));
+
+        // Overwrite/recreate completion clears suppression and queues the next local save.
+        mark_watched_file_uploaded(&mut file, rev(12, 7));
+        assert!(file.suppress_until.is_none());
+        assert!(file.suppress_content_sha256.is_none());
+        assert_eq!(
+            decide_local_watcher_event(
+                true,
+                false,
+                file.upload_status,
+                file.pending_local_changes,
+                file.conflict.is_some(),
+            ),
+            WatcherLocalEventDecision::QueueUpload
+        );
+    }
+
+    #[test]
+    fn suppress_by_window_hash_and_stale_clear() {
+        assert_eq!(
+            evaluate_suppress(true, true, Some("abc"), Some("abc")),
+            SuppressDecision::SuppressByWindow
+        );
+        assert_eq!(
+            evaluate_suppress(false, true, Some("abc"), Some("abc")),
+            SuppressDecision::SuppressByContentHash
+        );
+        assert_eq!(
+            evaluate_suppress(false, false, Some("abc"), Some("def")),
+            SuppressDecision::ClearStaleMarkers
+        );
+        assert_eq!(
+            evaluate_suppress(false, false, Some("abc"), None),
+            SuppressDecision::ClearStaleMarkers
+        );
+        assert_eq!(
+            evaluate_suppress(false, false, None, Some("abc")),
+            SuppressDecision::NoSuppress
+        );
+    }
+
+    #[test]
+    fn session_cleanup_selects_only_matching_real_watcher_records() {
+        let mut files = HashMap::new();
+        files.insert(
+            PathBuf::from("/tmp/a"),
+            watched_file("session-1", WatchedUploadStatus::Idle),
+        );
+        files.insert(
+            PathBuf::from("/tmp/b"),
+            watched_file("session-2", WatchedUploadStatus::Idle),
+        );
+        files.insert(
+            PathBuf::from("/tmp/c"),
+            watched_file("session-1", WatchedUploadStatus::PausedConflict),
+        );
+
+        let mut paths = paths_for_session_cleanup(&files, "session-1");
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![PathBuf::from("/tmp/a"), PathBuf::from("/tmp/c")]
+        );
+        assert!(paths_for_session_cleanup(&files, "session-3").is_empty());
+    }
+
+    #[tokio::test]
+    async fn watcher_upload_preflight_invokes_no_snapshot_reader_for_unchanged_metadata() {
+        let baseline = rev(10, 5);
+        let body_reads = Arc::new(AtomicUsize::new(0));
+        let uploads = Arc::new(AtomicUsize::new(0));
+        let deleted = Arc::new(AtomicUsize::new(0));
+        let body_reads_for_snapshot = Arc::clone(&body_reads);
+        let uploads_for_fast_path = Arc::clone(&uploads);
+        let deleted_for_deleted_path = Arc::clone(&deleted);
+
+        let result = dispatch_watcher_upload_preflight(
+            evaluate_watcher_upload_preflight(&baseline, &rev(10, 5)),
+            move || {
+                uploads_for_fast_path.fetch_add(1, Ordering::SeqCst);
+                async { "uploaded" }
+            },
+            move || {
+                body_reads_for_snapshot.fetch_add(1, Ordering::SeqCst);
+                async { "snapshot" }
+            },
+            move || {
+                deleted_for_deleted_path.fetch_add(1, Ordering::SeqCst);
+                async { "deleted" }
+            },
+        )
+        .await;
+
+        assert_eq!(result, "uploaded");
+        assert_eq!(uploads.load(Ordering::SeqCst), 1);
+        assert_eq!(body_reads.load(Ordering::SeqCst), 0);
+        assert_eq!(deleted.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn watcher_upload_preflight_reads_snapshot_only_for_metadata_conflict() {
+        let baseline = rev(10, 5);
+        let body_reads = Arc::new(AtomicUsize::new(0));
+        let body_reads_for_snapshot = Arc::clone(&body_reads);
+
+        let result = dispatch_watcher_upload_preflight(
+            evaluate_watcher_upload_preflight(&baseline, &rev(11, 5)),
+            || async { "uploaded" },
+            move || {
+                body_reads_for_snapshot.fetch_add(1, Ordering::SeqCst);
+                async { "snapshot" }
+            },
+            || async { "deleted" },
+        )
+        .await;
+
+        assert_eq!(result, "snapshot");
+        assert_eq!(body_reads.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn restart_barrier_releases_real_permit_before_conflict_wait() {
+        let coordinator = Arc::new(OperationCoordinator::new());
+        let permit = coordinator
+            .try_acquire(OperationCategory::SftpEditUpload)
+            .await
+            .unwrap();
+        let mut file = watched_file("session-1", WatchedUploadStatus::Uploading);
+        mark_watched_file_paused_conflict(&mut file, pending_conflict());
+
+        let during_upload = coordinator.snapshot().await;
+        assert_eq!(
+            during_upload
+                .categories
+                .iter()
+                .find(|entry| entry.category == OperationCategory::SftpEditUpload)
+                .unwrap()
+                .count,
+            1
+        );
+        permit.release().await;
+
+        // The conflict remains visible while the operation is no longer draining-safe work.
+        let after_preflight = coordinator.snapshot().await;
+        assert!(after_preflight.idle);
+        assert_eq!(file.upload_status, WatchedUploadStatus::PausedConflict);
+        assert!(file.conflict.is_some());
+        assert_eq!(
+            decide_local_watcher_event(
+                true,
+                false,
+                file.upload_status,
+                file.pending_local_changes,
+                file.conflict.is_some(),
+            ),
+            WatcherLocalEventDecision::CoalescePending
+        );
+    }
 }

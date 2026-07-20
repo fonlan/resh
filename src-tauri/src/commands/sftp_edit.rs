@@ -1,7 +1,7 @@
 use crate::commands::AppState;
 use crate::sftp_manager::edit_revision::{
-    compare_remote_metadata, metadata_matches, read_remote_revision, read_remote_snapshot,
-    sha256_hex, RemoteFileRevision, RemoteRevisionComparison,
+    evaluate_check_gate, evaluate_save_gate, read_remote_revision, read_remote_snapshot,
+    sha256_hex, CheckGateDecision, RemoteFileRevision, SaveGateDecision,
 };
 use crate::sftp_manager::{SftpManager, TransferProgress};
 use russh_sftp::protocol::{OpenFlags, StatusCode};
@@ -542,14 +542,14 @@ pub async fn sftp_check_text_file(
     expected_revision: RemoteFileRevision,
 ) -> Result<SftpCheckTextFileOutcome, String> {
     let current_revision = read_remote_revision(&session_id, &remote_path).await?;
-    let reason = match compare_remote_metadata(&expected_revision, &current_revision) {
-        RemoteRevisionComparison::MetadataUnchanged => {
+    let reason = match evaluate_check_gate(&expected_revision, &current_revision) {
+        CheckGateDecision::Unchanged => {
             return Ok(SftpCheckTextFileOutcome::Unchanged {
                 revision: current_revision,
             });
         }
-        RemoteRevisionComparison::MetadataChanged => "metadataChanged",
-        RemoteRevisionComparison::Deleted => "deleted",
+        CheckGateDecision::ChangedNeedsSnapshot { reason } => reason,
+        CheckGateDecision::Deleted => "deleted",
     };
 
     if !current_revision.exists {
@@ -628,27 +628,23 @@ pub async fn sftp_save_text_file(
             .await;
         let current_revision = read_remote_revision(&session_id, &remote_path).await?;
 
-        let conflict = match save_mode.as_str() {
-            "safe" => match compare_remote_metadata(&expected_revision, &current_revision) {
-                RemoteRevisionComparison::MetadataUnchanged => None,
-                RemoteRevisionComparison::MetadataChanged => {
-                    Some(("metadataChanged", current_revision))
-                }
-                RemoteRevisionComparison::Deleted => Some(("deleted", current_revision)),
-            },
-            "overwrite" => {
-                let confirmed_revision = conflict_revision.ok_or(
-                    "Explicit overwrite requires the conflictRevision returned by the server",
-                )?;
-                if metadata_matches(&confirmed_revision, &current_revision) {
-                    None
-                } else if current_revision.exists {
-                    Some(("metadataChanged", current_revision))
-                } else {
-                    Some(("deleted", current_revision))
-                }
+        let conflict = match evaluate_save_gate(
+            save_mode.as_str(),
+            &expected_revision,
+            &current_revision,
+            conflict_revision.as_ref(),
+        ) {
+            SaveGateDecision::ProceedWithoutSnapshot => None,
+            SaveGateDecision::Conflict { reason, .. } => Some((reason, current_revision)),
+            SaveGateDecision::MissingConflictRevision => {
+                return Err(
+                    "Explicit overwrite requires the conflictRevision returned by the server"
+                        .to_string(),
+                );
             }
-            other => return Err(format!("Unsupported SFTP text save mode: {}", other)),
+            SaveGateDecision::UnsupportedMode => {
+                return Err(format!("Unsupported SFTP text save mode: {}", save_mode));
+            }
         };
 
         if let Some((reason, current_revision)) = conflict {

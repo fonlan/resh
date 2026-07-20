@@ -74,6 +74,94 @@ pub fn metadata_matches(left: &RemoteFileRevision, right: &RemoteFileRevision) -
     left.exists == right.exists && left.size == right.size && left.mtime == right.mtime
 }
 
+/// Pure gate for built-in editor save / external auto-upload.
+///
+/// A regular save never downloads remote content merely to refresh a hash.
+/// Full-file reads happen only after this gate reports a conflict (or for the
+/// separate post-write verification path on small files).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SaveGateDecision {
+    /// size+mtime match; caller may write without reading remote body.
+    ProceedWithoutSnapshot,
+    /// Remote diverged; caller must not write. Content snapshot is needed only
+    /// when the file still exists (diff UI / confirm revision).
+    Conflict {
+        reason: &'static str,
+        needs_content_snapshot: bool,
+    },
+    /// overwrite mode requires the conflictRevision the user just reviewed.
+    MissingConflictRevision,
+    UnsupportedMode,
+}
+
+/// Decide whether a save/upload may proceed from metadata alone.
+///
+/// Known fast-mode ceiling (not a bug to "fix" here): when an external writer
+/// changes bytes but keeps the same size and the same mtime precision window,
+/// this gate returns [`SaveGateDecision::ProceedWithoutSnapshot`]. Callers must
+/// not claim that case is reliably detected without a future opt-in strong check.
+pub fn evaluate_save_gate(
+    save_mode: &str,
+    expected: &RemoteFileRevision,
+    current: &RemoteFileRevision,
+    conflict_revision: Option<&RemoteFileRevision>,
+) -> SaveGateDecision {
+    match save_mode {
+        "safe" => match compare_remote_metadata(expected, current) {
+            RemoteRevisionComparison::MetadataUnchanged => SaveGateDecision::ProceedWithoutSnapshot,
+            RemoteRevisionComparison::MetadataChanged => SaveGateDecision::Conflict {
+                reason: "metadataChanged",
+                needs_content_snapshot: true,
+            },
+            RemoteRevisionComparison::Deleted => SaveGateDecision::Conflict {
+                reason: "deleted",
+                needs_content_snapshot: false,
+            },
+        },
+        "overwrite" => {
+            let Some(confirmed) = conflict_revision else {
+                return SaveGateDecision::MissingConflictRevision;
+            };
+            if metadata_matches(confirmed, current) {
+                SaveGateDecision::ProceedWithoutSnapshot
+            } else if current.exists {
+                SaveGateDecision::Conflict {
+                    reason: "metadataChanged",
+                    needs_content_snapshot: true,
+                }
+            } else {
+                SaveGateDecision::Conflict {
+                    reason: "deleted",
+                    needs_content_snapshot: false,
+                }
+            }
+        }
+        _ => SaveGateDecision::UnsupportedMode,
+    }
+}
+
+/// Lightweight activation check for a clean built-in editor tab.
+/// Unchanged metadata must not download remote body content.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CheckGateDecision {
+    Unchanged,
+    ChangedNeedsSnapshot { reason: &'static str },
+    Deleted,
+}
+
+pub fn evaluate_check_gate(
+    expected: &RemoteFileRevision,
+    current: &RemoteFileRevision,
+) -> CheckGateDecision {
+    match compare_remote_metadata(expected, current) {
+        RemoteRevisionComparison::MetadataUnchanged => CheckGateDecision::Unchanged,
+        RemoteRevisionComparison::MetadataChanged => CheckGateDecision::ChangedNeedsSnapshot {
+            reason: "metadataChanged",
+        },
+        RemoteRevisionComparison::Deleted => CheckGateDecision::Deleted,
+    }
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -191,6 +279,15 @@ mod tests {
         }
     }
 
+    fn revision_with_hash(size: u64, mtime: u64, hash: &str) -> RemoteFileRevision {
+        RemoteFileRevision {
+            exists: true,
+            size: Some(size),
+            mtime: Some(mtime),
+            sha256: Some(hash.to_string()),
+        }
+    }
+
     #[test]
     fn metadata_comparison_uses_size_and_mtime_without_hash_download() {
         let expected = revision(4, 10);
@@ -222,5 +319,168 @@ mod tests {
         };
 
         assert!(metadata_matches(&expected, &current));
+    }
+
+    #[test]
+    fn safe_save_unchanged_metadata_proceeds_without_content_snapshot() {
+        let expected = revision(100, 42);
+        let current = revision_with_hash(100, 42, "irrelevant-for-gate");
+
+        assert_eq!(
+            evaluate_save_gate("safe", &expected, &current, None),
+            SaveGateDecision::ProceedWithoutSnapshot
+        );
+        // Same decision is the contract that ordinary saves must not call
+        // read_remote_snapshot / full-body hash download before writing.
+        assert_eq!(
+            evaluate_check_gate(&expected, &current),
+            CheckGateDecision::Unchanged
+        );
+    }
+
+    #[test]
+    fn safe_save_metadata_changed_requires_snapshot_and_does_not_write() {
+        let expected = revision(100, 42);
+        let current = revision(101, 42);
+
+        assert_eq!(
+            evaluate_save_gate("safe", &expected, &current, None),
+            SaveGateDecision::Conflict {
+                reason: "metadataChanged",
+                needs_content_snapshot: true,
+            }
+        );
+        assert_eq!(
+            evaluate_check_gate(&expected, &current),
+            CheckGateDecision::ChangedNeedsSnapshot {
+                reason: "metadataChanged",
+            }
+        );
+    }
+
+    #[test]
+    fn safe_save_remote_deleted_returns_deleted_without_body_read() {
+        let expected = revision(100, 42);
+        let current = RemoteFileRevision::missing();
+
+        assert_eq!(
+            evaluate_save_gate("safe", &expected, &current, None),
+            SaveGateDecision::Conflict {
+                reason: "deleted",
+                needs_content_snapshot: false,
+            }
+        );
+        assert_eq!(
+            evaluate_check_gate(&expected, &current),
+            CheckGateDecision::Deleted
+        );
+    }
+
+    #[test]
+    fn metadata_changed_even_when_content_hash_would_match() {
+        // mtime/size moved but bytes could still be identical after snapshot.
+        // Gate still reports conflict so the UI can show Diff / adopt remote;
+        // auto-merge of identical content is intentionally out of scope.
+        let expected = revision_with_hash(100, 42, "same-bytes");
+        let current = revision_with_hash(100, 99, "same-bytes");
+
+        assert_eq!(
+            compare_remote_metadata(&expected, &current),
+            RemoteRevisionComparison::MetadataChanged
+        );
+        assert_eq!(
+            evaluate_save_gate("safe", &expected, &current, None),
+            SaveGateDecision::Conflict {
+                reason: "metadataChanged",
+                needs_content_snapshot: true,
+            }
+        );
+    }
+
+    #[test]
+    fn overwrite_requires_conflict_revision_and_rejects_stale_confirmation() {
+        let expected = revision(100, 42);
+        let dialog_revision = revision(110, 50);
+        let current = revision(110, 50);
+        let moved_again = revision(120, 60);
+
+        assert_eq!(
+            evaluate_save_gate("overwrite", &expected, &current, None),
+            SaveGateDecision::MissingConflictRevision
+        );
+        assert_eq!(
+            evaluate_save_gate("overwrite", &expected, &current, Some(&dialog_revision)),
+            SaveGateDecision::ProceedWithoutSnapshot
+        );
+        assert_eq!(
+            evaluate_save_gate("overwrite", &expected, &moved_again, Some(&dialog_revision)),
+            SaveGateDecision::Conflict {
+                reason: "metadataChanged",
+                needs_content_snapshot: true,
+            }
+        );
+        assert_eq!(
+            evaluate_save_gate(
+                "overwrite",
+                &expected,
+                &RemoteFileRevision::missing(),
+                Some(&dialog_revision)
+            ),
+            SaveGateDecision::Conflict {
+                reason: "deleted",
+                needs_content_snapshot: false,
+            }
+        );
+    }
+
+    #[test]
+    fn successful_save_baseline_updates_to_post_write_revision() {
+        // After a write, callers replace the editor/watcher baseline with the
+        // verified remote revision (size always; sha256 for small files or from
+        // the uploaded stream). This pure assertion documents that contract.
+        let previous = revision(10, 1);
+        let written_bytes = b"hello world";
+        let next = RemoteFileRevision {
+            exists: true,
+            size: Some(written_bytes.len() as u64),
+            mtime: Some(2),
+            sha256: Some(sha256_hex(written_bytes)),
+        };
+
+        assert_ne!(previous, next);
+        assert_eq!(next.size, Some(11));
+        let expected_sha256 = sha256_hex(written_bytes);
+        assert_eq!(next.sha256.as_deref(), Some(expected_sha256.as_str()));
+        assert_eq!(
+            evaluate_save_gate("safe", &next, &next, None),
+            SaveGateDecision::ProceedWithoutSnapshot
+        );
+    }
+
+    #[test]
+    fn fast_mode_known_ceiling_same_size_same_mtime_is_not_detected() {
+        // Documented non-goal of the default fast path: content can change while
+        // size and mtime stay identical within server precision. Do not "fix" this
+        // as a detection success; only record that the gate treats it as unchanged.
+        let expected = revision_with_hash(64, 1_700_000_000, "content-a");
+        let stealth_edit = revision_with_hash(64, 1_700_000_000, "content-b");
+
+        assert_eq!(
+            compare_remote_metadata(&expected, &stealth_edit),
+            RemoteRevisionComparison::MetadataUnchanged
+        );
+        assert_eq!(
+            evaluate_save_gate("safe", &expected, &stealth_edit, None),
+            SaveGateDecision::ProceedWithoutSnapshot
+        );
+    }
+
+    #[test]
+    fn unsupported_save_mode_is_rejected() {
+        let expected = revision(1, 1);
+        assert_eq!(
+            evaluate_save_gate("force", &expected, &expected, None),
+            SaveGateDecision::UnsupportedMode
+        );
     }
 }
