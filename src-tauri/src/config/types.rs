@@ -529,6 +529,12 @@ pub struct Config {
 #[serde(rename_all = "camelCase")]
 pub struct SyncConfig {
     pub version: String,
+    /// Remote document schema; missing on legacy `sync.json` (treated as pre-conflict-resolution).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_schema: Option<u32>,
+    /// Optional opaque revision for diagnostics (not used as correctness authority).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
     #[serde(default)]
     pub servers: Vec<Server>,
     #[serde(default)]
@@ -557,8 +563,33 @@ pub struct SyncConfig {
         alias = "additional_prompt_updated_at"
     )]
     pub additional_prompt_updated_at: Option<String>,
+    /// Typed deletion tombstones (preferred).
+    #[serde(default)]
+    pub tombstones: Vec<crate::config::sync_protocol::DeletionTombstone>,
+    /// Legacy untyped removal list; still written for older clients during migration.
     #[serde(default)]
     pub removed_ids: Vec<String>,
+}
+
+impl SyncConfig {
+    pub fn empty(version: impl Into<String>) -> Self {
+        Self {
+            version: version.into(),
+            sync_schema: Some(crate::config::sync_protocol::SYNC_SCHEMA_VERSION),
+            revision: None,
+            servers: vec![],
+            authentications: vec![],
+            proxies: vec![],
+            snippets: vec![],
+            ai_channels: vec![],
+            ai_models: vec![],
+            sftp_custom_commands: vec![],
+            additional_prompt: None,
+            additional_prompt_updated_at: None,
+            tombstones: vec![],
+            removed_ids: vec![],
+        }
+    }
 }
 
 impl Config {

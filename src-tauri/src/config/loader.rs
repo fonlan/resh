@@ -19,6 +19,10 @@ impl ConfigManager {
         self.app_data_dir.join("local.json")
     }
 
+    pub fn app_data_dir(&self) -> &Path {
+        &self.app_data_dir
+    }
+
     pub fn save_local_config(&self, config: &Config) -> Result<(), String> {
         let path = self.local_config_path();
         self.save_config(config, &path)
@@ -193,20 +197,8 @@ mod tests {
         assert!(loaded.general.update.proxy_id.is_none());
 
         // SyncConfig must not carry general/update settings.
-        let sync_json = serde_json::to_value(crate::config::types::SyncConfig {
-            version: "1.0".to_string(),
-            servers: vec![],
-            authentications: vec![],
-            proxies: vec![],
-            snippets: vec![],
-            ai_channels: vec![],
-            ai_models: vec![],
-            sftp_custom_commands: vec![],
-            additional_prompt: None,
-            additional_prompt_updated_at: None,
-            removed_ids: vec![],
-        })
-        .unwrap();
+        let sync_json =
+            serde_json::to_value(crate::config::types::SyncConfig::empty("1.0")).unwrap();
         assert!(sync_json.get("general").is_none());
         assert!(sync_json.get("update").is_none());
     }

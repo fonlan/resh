@@ -1,6 +1,10 @@
 use crate::config::types::Proxy;
-use reqwest::Client;
+use reqwest::{
+    header::{ETAG, IF_MATCH, IF_NONE_MATCH},
+    Client, StatusCode,
+};
 use std::error::Error;
+use std::fmt;
 
 pub struct WebDAVClient {
     base_url: String,
@@ -8,6 +12,41 @@ pub struct WebDAVClient {
     password: String,
     client: Client,
 }
+
+/// A downloaded WebDAV resource together with the entity tag observed during the GET.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadedResource {
+    pub content: Vec<u8>,
+    pub etag: Option<String>,
+}
+
+/// Write precondition used to prevent a stale sync from silently overwriting the remote file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UploadCondition {
+    /// The file did not exist during GET, so only create it if it is still absent.
+    CreateOnly,
+    /// Replace only the exact entity tag returned by the preceding GET.
+    IfMatch(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WebDavError {
+    Request,
+    Http(StatusCode),
+    PreconditionFailed,
+}
+
+impl fmt::Display for WebDavError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Request => f.write_str("WebDAV request failed"),
+            Self::Http(status) => write!(f, "WebDAV request failed: HTTP {status}"),
+            Self::PreconditionFailed => f.write_str("WebDAV resource changed concurrently"),
+        }
+    }
+}
+
+impl Error for WebDavError {}
 
 impl WebDAVClient {
     pub fn new(base_url: String, username: String, password: String, proxy: Option<Proxy>) -> Self {
@@ -31,7 +70,7 @@ impl WebDAVClient {
                 tracing::warn!("Invalid WebDAV proxy configuration: {}", proxy_url);
             }
 
-            // 忽略 SSL 证书校验（用于公司代理 MITM 场景）
+            // Ignore certificate validation only for the explicitly configured proxy scenario.
             if proxy_config.ignore_ssl_errors {
                 tracing::warn!(
                     "WebDAV: Ignoring SSL certificates for proxy {}",
@@ -49,33 +88,50 @@ impl WebDAVClient {
         }
     }
 
-    pub async fn upload(&self, filename: &str, content: &[u8]) -> Result<(), Box<dyn Error>> {
-        let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
+    fn resource_url(&self, filename: &str) -> String {
+        format!("{}/{}", self.base_url.trim_end_matches('/'), filename)
+    }
 
-        let response = self
+    /// Conditionally upload a resource and return the new ETag when the server supplies one.
+    pub async fn upload_conditionally(
+        &self,
+        filename: &str,
+        content: &[u8],
+        condition: UploadCondition,
+    ) -> Result<Option<String>, WebDavError> {
+        let url = self.resource_url(filename);
+        let mut request = self
             .client
             .put(&url)
             .basic_auth(&self.username, Some(&self.password))
-            .body(content.to_vec())
-            .send()
-            .await?;
+            .body(content.to_vec());
+        request = match condition {
+            UploadCondition::CreateOnly => request.header(IF_NONE_MATCH, "*"),
+            UploadCondition::IfMatch(etag) => request.header(IF_MATCH, etag),
+        };
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Could not read response body".to_string());
-            tracing::error!("Upload failed: HTTP {} - {}", status, text);
-            return Err(format!("Upload failed: HTTP {} - {}", status, text).into());
+        let response = request.send().await.map_err(|_| WebDavError::Request)?;
+        let status = response.status();
+        if status == StatusCode::PRECONDITION_FAILED {
+            return Err(WebDavError::PreconditionFailed);
+        }
+        if !status.is_success() {
+            tracing::error!(status = %status, "WebDAV upload returned a non-success status");
+            return Err(WebDavError::Http(status));
         }
 
-        Ok(())
+        Ok(response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned))
     }
 
-    pub async fn download(&self, filename: &str) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        let url = format!("{}/{}", self.base_url.trim_end_matches('/'), filename);
-
+    pub async fn download(
+        &self,
+        filename: &str,
+    ) -> Result<Option<DownloadedResource>, WebDavError> {
+        let url = self.resource_url(filename);
         let response = self
             .client
             .get(&url)
@@ -83,24 +139,29 @@ impl WebDAVClient {
             .header("Cache-Control", "no-cache")
             .header("Pragma", "no-cache")
             .send()
-            .await?;
+            .await
+            .map_err(|_| WebDavError::Request)?;
 
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
+        if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
 
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Could not read response body".to_string());
-            tracing::error!("Download failed: HTTP {} - {}", status, text);
-            return Err(format!("Download failed: HTTP {} - {}", status, text).into());
+        let status = response.status();
+        if !status.is_success() {
+            tracing::error!(status = %status, "WebDAV download returned a non-success status");
+            return Err(WebDavError::Http(status));
         }
 
-        let content = response.bytes().await?;
-        Ok(Some(content.to_vec()))
+        let etag = response
+            .headers()
+            .get(ETAG)
+            .and_then(|value| value.to_str().ok())
+            .map(ToOwned::to_owned);
+        let content = response.bytes().await.map_err(|_| WebDavError::Request)?;
+        Ok(Some(DownloadedResource {
+            content: content.to_vec(),
+            etag,
+        }))
     }
 }
 
@@ -119,5 +180,14 @@ mod tests {
 
         assert_eq!(client.base_url, "https://example.com/webdav");
         assert_eq!(client.username, "user");
+    }
+
+    #[test]
+    fn webdav_errors_do_not_include_credentials() {
+        assert_eq!(WebDavError::Request.to_string(), "WebDAV request failed");
+        assert_eq!(
+            WebDavError::PreconditionFailed.to_string(),
+            "WebDAV resource changed concurrently"
+        );
     }
 }

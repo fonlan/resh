@@ -162,6 +162,8 @@ async fn main() {
                 config_manager: config_manager.clone(),
                 db_manager,
                 config: Mutex::new(local_config.clone()),
+                config_sync_gate: Mutex::new(()),
+                config_sync_generation: std::sync::atomic::AtomicU64::new(0),
                 ai_cancellation_tokens: commands::AiRunRegistry::new(),
                 ai_manager: resh::ai::manager::AiManager::new(),
                 sftp_edit_manager: SftpEditManager::new(app.handle().clone()),

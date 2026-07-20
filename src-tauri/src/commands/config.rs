@@ -129,6 +129,10 @@ pub struct AppState {
     pub config_manager: ConfigManager,
     pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
+    /// Serializes locally-originated WebDAV syncs. Together with `config_sync_generation`, this
+    /// prevents a queued stale save from uploading after a newer save has already synced.
+    pub config_sync_gate: Mutex<()>,
+    pub config_sync_generation: AtomicU64,
     /// session_id -> current AI run (request_id + token). At most one run per session.
     pub ai_cancellation_tokens: AiRunRegistry,
     pub ai_manager: AiManager,
@@ -138,6 +142,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub fn next_config_sync_generation(&self) -> u64 {
+        self.config_sync_generation.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub fn is_current_config_sync_generation(&self, generation: u64) -> bool {
+        self.config_sync_generation.load(Ordering::Acquire) == generation
+    }
+
     pub fn reserve_ai_run_generation(&self) -> u64 {
         self.ai_cancellation_tokens.reserve_generation()
     }
@@ -246,13 +258,11 @@ pub async fn save_config(
 
     let mut current_config = state.config.lock().await;
 
-    // Calculate removed IDs to prevent them from being resurrected by sync
-    let removed_ids = find_removed_ids(&current_config, &config);
-
     *current_config = config.clone();
 
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
+    let sync_generation = state.next_config_sync_generation();
     tracing::debug!("Local config saved to {:?}", local_path);
 
     // Update log level
@@ -274,11 +284,16 @@ pub async fn save_config(
             config.general.webdav.username.clone(),
             config.general.webdav.password.clone(),
             proxy,
-        );
+        )
+        .with_state_store(state.config_manager.app_data_dir().to_path_buf());
 
         let app_state = state.inner().clone();
         let sync_config = config.clone();
-        let sync_removed_ids = removed_ids;
+        // A background sync must never overwrite an edit saved while its network request was in
+        // flight. The byte snapshot is intentionally exact: any persisted local change wins and
+        // its own save schedules the next sync.
+        let sync_snapshot = serde_json::to_vec(&config)
+            .map_err(|e| format!("Failed to snapshot config for sync: {}", e))?;
         let sync_path = local_path.clone();
 
         let window = window.clone();
@@ -287,24 +302,58 @@ pub async fn save_config(
             .try_acquire(OperationCategory::WebdavSync)
             .await?;
         tokio::spawn(async move {
+            // Serialize app-originated syncs. If a newer save was queued first, this stale
+            // snapshot must not even issue its PUT; the newer generation owns the remote write.
+            let _sync_gate = app_state.config_sync_gate.lock().await;
+            if !app_state.is_current_config_sync_generation(sync_generation) {
+                tracing::info!(
+                    "Skipped stale background sync before remote write; a newer config save is queued"
+                );
+                sync_permit.release().await;
+                return;
+            }
+
             let mut local_copy = sync_config;
-            if let Err(e) = sync_manager.sync(&mut local_copy, sync_removed_ids).await {
-                tracing::warn!("Background sync failed: {}", e);
-                let _ = window.emit("sync-failed", e);
-            } else {
-                if let Err(e) = app_state
-                    .config_manager
-                    .save_config(&local_copy, &sync_path)
-                {
-                    tracing::error!("Failed to save merged config after sync: {}", e);
+            match sync_manager.sync(&mut local_copy, vec![]).await {
+                Ok(outcome) => match outcome {
+                    crate::config::SyncOutcome::Applied { .. } => {
+                        let mut in_memory = app_state.config.lock().await;
+                        if config_matches_snapshot(&in_memory, &sync_snapshot) {
+                            if let Err(e) = app_state
+                                .config_manager
+                                .save_config(&local_copy, &sync_path)
+                            {
+                                tracing::error!("Failed to save merged config after sync: {}", e);
+                            } else {
+                                *in_memory = local_copy.clone();
+                                let _ = window.emit("config-updated", local_copy);
+                            }
+                        } else {
+                            tracing::info!(
+                                "Discarded stale background sync projection; a newer local config is already saved"
+                            );
+                        }
+                    }
+                    crate::config::SyncOutcome::Conflicts { conflicts } => {
+                        tracing::info!(
+                            "Background sync has {} conflict(s); waiting for user resolution",
+                            conflicts.len()
+                        );
+                        let _ = window.emit("sync-conflicts", conflicts);
+                    }
+                    crate::config::SyncOutcome::ConcurrentRemoteChange { message } => {
+                        tracing::warn!("Background sync concurrent remote change: {}", message);
+                        let _ = window.emit("sync-failed", message);
+                    }
+                    crate::config::SyncOutcome::Failed { error } => {
+                        tracing::warn!("Background sync failed: {}", error.message);
+                        let _ = window.emit("sync-failed", error.message);
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Background sync failed: {}", e);
+                    let _ = window.emit("sync-failed", e);
                 }
-
-                {
-                    let mut in_memory = app_state.config.lock().await;
-                    *in_memory = local_copy.clone();
-                }
-
-                let _ = window.emit("config-updated", local_copy);
             }
             sync_permit.release().await;
         });
@@ -371,6 +420,11 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         .try_acquire(OperationCategory::WebdavSync)
         .await?;
 
+    // Manual and background syncs share one GET→merge→conditional-PUT critical section. Bump the
+    // generation so any earlier background snapshot queued behind this operation is discarded.
+    let _sync_gate = state.config_sync_gate.lock().await;
+    let _manual_sync_generation = state.next_config_sync_generation();
+
     let mut config = state.config.lock().await;
     if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
         sync_permit.release().await;
@@ -389,12 +443,31 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         config.general.webdav.username.clone(),
         config.general.webdav.password.clone(),
         proxy,
-    );
+    )
+    .with_state_store(state.config_manager.app_data_dir().to_path_buf());
 
     let sync_result = sync_manager.sync(&mut config, vec![]).await;
-    if let Err(e) = sync_result {
-        sync_permit.release().await;
-        return Err(e);
+    match sync_result {
+        Ok(crate::config::SyncOutcome::Applied { .. }) => {}
+        Ok(crate::config::SyncOutcome::Conflicts { conflicts }) => {
+            sync_permit.release().await;
+            return Err(format!(
+                "Sync conflicts: {} item(s) need resolution",
+                conflicts.len()
+            ));
+        }
+        Ok(crate::config::SyncOutcome::ConcurrentRemoteChange { message }) => {
+            sync_permit.release().await;
+            return Err(format!("Concurrent remote change: {}", message));
+        }
+        Ok(crate::config::SyncOutcome::Failed { error }) => {
+            sync_permit.release().await;
+            return Err(error.message);
+        }
+        Err(e) => {
+            sync_permit.release().await;
+            return Err(e);
+        }
     }
     if config.normalize_legacy_defaults() {
         tracing::info!(
@@ -416,52 +489,10 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
     Ok(result)
 }
 
-fn find_removed_ids(old: &Config, new: &Config) -> Vec<String> {
-    let mut removed = Vec::new();
-
-    let new_server_ids: Vec<&String> = new.servers.iter().map(|s| &s.id).collect();
-    for server in &old.servers {
-        if !new_server_ids.contains(&&server.id) {
-            removed.push(server.id.clone());
-        }
-    }
-
-    let new_auth_ids: Vec<&String> = new.authentications.iter().map(|a| &a.id).collect();
-    for auth in &old.authentications {
-        if !new_auth_ids.contains(&&auth.id) {
-            removed.push(auth.id.clone());
-        }
-    }
-
-    let new_proxy_ids: Vec<&String> = new.proxies.iter().map(|p| &p.id).collect();
-    for proxy in &old.proxies {
-        if !new_proxy_ids.contains(&&proxy.id) {
-            removed.push(proxy.id.clone());
-        }
-    }
-
-    let new_snippet_ids: Vec<&String> = new.snippets.iter().map(|s| &s.id).collect();
-    for snippet in &old.snippets {
-        if !new_snippet_ids.contains(&&snippet.id) {
-            removed.push(snippet.id.clone());
-        }
-    }
-
-    let new_channel_ids: Vec<&String> = new.ai_channels.iter().map(|c| &c.id).collect();
-    for channel in &old.ai_channels {
-        if !new_channel_ids.contains(&&channel.id) {
-            removed.push(channel.id.clone());
-        }
-    }
-
-    let new_model_ids: Vec<&String> = new.ai_models.iter().map(|m| &m.id).collect();
-    for model in &old.ai_models {
-        if !new_model_ids.contains(&&model.id) {
-            removed.push(model.id.clone());
-        }
-    }
-
-    removed
+fn config_matches_snapshot(config: &Config, snapshot: &[u8]) -> bool {
+    serde_json::to_vec(config)
+        .map(|current| current == snapshot)
+        .unwrap_or(false)
 }
 
 #[tauri::command]
@@ -520,6 +551,17 @@ mod tests {
             created_at: None,
             updated_at: "2026-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn config_snapshot_detects_a_newer_local_save() {
+        let original = Config::empty();
+        let snapshot = serde_json::to_vec(&original).unwrap();
+        assert!(config_matches_snapshot(&original, &snapshot));
+
+        let mut newer = original;
+        newer.general.theme = "light".to_string();
+        assert!(!config_matches_snapshot(&newer, &snapshot));
     }
 
     #[test]
