@@ -296,6 +296,7 @@ pub(crate) fn sanitize_path_component(value: &str, label: &str) -> Result<String
 }
 
 /// Best-effort PE magic + machine check without external crates.
+#[cfg(windows)]
 pub(crate) fn looks_like_windows_pe_x64(path: &Path) -> Result<(), String> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).map_err(|e| format!("open staged file: {e}"))?;
@@ -342,6 +343,7 @@ mod tests {
         assert!(sanitize_path_component("1.2.3", "version").is_ok());
     }
 
+    #[cfg(windows)]
     #[test]
     fn pe_magic_rejects_non_pe() {
         let dir = tempfile::tempdir().unwrap();

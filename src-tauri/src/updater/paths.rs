@@ -1090,6 +1090,7 @@ fn has_intermediate_symlink_ancestor(path: &Path) -> bool {
 }
 
 /// Delete without following directory symlinks (`remove_dir_all` does follow).
+#[cfg(not(unix))]
 pub fn remove_path_nofollow_best_effort(path: &Path) {
     if has_intermediate_symlink_ancestor(path) {
         tracing::warn!("refusing path delete: intermediate path component is a symlink");
@@ -1113,6 +1114,7 @@ pub fn remove_path_nofollow_best_effort(path: &Path) {
     }
 }
 
+#[cfg(not(unix))]
 fn remove_dir_all_nofollow(dir: &Path) {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
@@ -1141,6 +1143,7 @@ fn remove_dir_all_nofollow(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
     use std::io::Write;
 
     #[test]
@@ -1494,9 +1497,10 @@ mod tests {
             .exists());
     }
 
+    #[cfg(windows)]
     #[test]
     fn nofollow_remove_does_not_follow_dir_symlink() {
-        use std::os::unix::fs::symlink;
+        use std::os::windows::fs::symlink_dir;
         let tmp = tempfile::tempdir().unwrap();
         let external = tmp.path().join("external");
         fs::create_dir_all(&external).unwrap();
@@ -1506,7 +1510,7 @@ mod tests {
             f.write_all(b"secret").unwrap();
         }
         let link = tmp.path().join("link-dir");
-        symlink(&external, &link).unwrap();
+        symlink_dir(&external, &link).unwrap();
         remove_path_nofollow_best_effort(&link);
         assert!(secret.exists(), "must not follow dir symlink into external");
         assert!(!link.exists(), "symlink node itself may be unlinked");
