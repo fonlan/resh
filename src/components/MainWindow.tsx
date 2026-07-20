@@ -91,6 +91,7 @@ import {
   type EditorTabState,
   type OpenEditorTabPayload,
   type PendingDirtyEditorAction,
+  type RemoteFileRevision,
   type SplitViewState,
   type Tab,
 } from "./main/types"
@@ -109,6 +110,17 @@ import { useTabLayoutMeasurement } from "./main/useTabLayoutMeasurement"
 import { isMacOS } from "../utils/platform"
 
 type RememberedSplitViews = Record<string, SplitViewState>
+
+type SftpSaveTextFileOutcome =
+  | {
+      status: "saved"
+      revision: RemoteFileRevision
+    }
+  | {
+      status: "conflict"
+      reason: string
+      snapshotError?: string | null
+    }
 
 const isRememberedSplitViewValid = (
   splitView: SplitViewState,
@@ -625,6 +637,7 @@ export const MainWindow: React.FC = () => {
               content: string
               encoding: string
               languageHint?: string | null
+              revision: RemoteFileRevision
             }>("sftp_open_text_file", {
               sessionId,
               remotePath: tab.remotePath,
@@ -652,6 +665,7 @@ export const MainWindow: React.FC = () => {
                 content: opened.content,
                 savedContent: opened.content,
                 encoding: opened.encoding,
+                revision: opened.revision,
                 isSaving: false,
               },
             }))
@@ -1308,6 +1322,7 @@ export const MainWindow: React.FC = () => {
       const localPath = payload.localPath?.trim()
       const content = payload.content
       const encoding = payload.encoding?.trim()
+      const revision = payload.revision
       const language = payload.language?.trim() || "plaintext"
       if (
         !serverId ||
@@ -1315,7 +1330,9 @@ export const MainWindow: React.FC = () => {
         !remotePath ||
         !localPath ||
         typeof content !== "string" ||
-        !encoding
+        !encoding ||
+        !revision ||
+        typeof revision.exists !== "boolean"
       ) {
         showToast(t.mainWindow.editor.invalidPayload, "error")
         return
@@ -1341,6 +1358,7 @@ export const MainWindow: React.FC = () => {
           content,
           savedContent: content,
           encoding,
+          revision,
           isSaving: false,
         },
       }))
@@ -1443,13 +1461,24 @@ export const MainWindow: React.FC = () => {
         }
       })
       try {
-        await invoke("sftp_save_text_file", {
-          sessionId: targetTab.sessionId,
-          remotePath: targetTab.remotePath,
-          localPath: targetTab.localPath,
-          content: savingContent,
-          encoding: currentDocument.encoding,
-        })
+        const outcome = await invoke<SftpSaveTextFileOutcome>(
+          "sftp_save_text_file",
+          {
+            sessionId: targetTab.sessionId,
+            remotePath: targetTab.remotePath,
+            localPath: targetTab.localPath,
+            content: savingContent,
+            encoding: currentDocument.encoding,
+            expectedRevision: currentDocument.revision,
+          },
+        )
+        if (outcome.status !== "saved") {
+          throw new Error(
+            outcome.snapshotError ||
+              `Remote file conflict (${outcome.reason}); local changes were not saved`,
+          )
+        }
+        const savedRevision = outcome.revision
         let nextDirtyAfterSave = false
         setEditorDocuments((prev) => {
           const doc = prev[tabId]
@@ -1462,6 +1491,7 @@ export const MainWindow: React.FC = () => {
             [tabId]: {
               ...doc,
               savedContent: savingContent,
+              revision: savedRevision,
               isSaving: false,
             },
           }
@@ -1562,6 +1592,7 @@ export const MainWindow: React.FC = () => {
             content: sourceDocument.content,
             savedContent: sourceDocument.savedContent,
             encoding: sourceDocument.encoding,
+            revision: sourceDocument.revision,
             isSaving: false,
           },
         }))

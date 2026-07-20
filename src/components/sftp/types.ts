@@ -1,3 +1,5 @@
+import type { RemoteFileRevision } from "../main/types"
+
 export interface FileEntry {
   name: string
   path: string
@@ -37,6 +39,7 @@ export interface SftpOpenTextFileResult {
   content: string
   encoding: string
   languageHint?: string
+  revision: RemoteFileRevision
 }
 
 export interface CopyFallbackModalState {

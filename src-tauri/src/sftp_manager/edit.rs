@@ -1,22 +1,57 @@
 use crate::commands::AppState;
+use crate::sftp_manager::edit_revision::{
+    compare_remote_metadata, read_remote_revision, RemoteFileRevision, RemoteRevisionComparison,
+};
 use crate::sftp_manager::{SftpManager, TransferProgress};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncReadExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as AsyncMutex, OwnedMutexGuard};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 const EDIT_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
 const EDIT_UPLOAD_CHUNK_TIMEOUT_SECS: u64 = 30;
 
+#[derive(Clone, Debug)]
+struct WatchedFile {
+    session_id: String,
+    remote_path: String,
+    baseline_revision: RemoteFileRevision,
+    upload_paused_for_conflict: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpEditConflictEvent {
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+    reason: String,
+    expected_revision: RemoteFileRevision,
+    current_revision: RemoteFileRevision,
+}
+
+enum WatchedUploadResult {
+    Saved(RemoteFileRevision),
+    Conflict {
+        reason: &'static str,
+        current_revision: RemoteFileRevision,
+    },
+}
+
 pub struct SftpEditManager {
-    watched_files: Arc<Mutex<HashMap<PathBuf, (String, String)>>>,
+    watched_files: Arc<Mutex<HashMap<PathBuf, WatchedFile>>>,
     watched_directories: Arc<Mutex<HashMap<PathBuf, usize>>>,
+    /// One lock per remote file prevents Resh's editor and local-editor watcher
+    /// from racing each other between the metadata check and TRUNCATE write.
+    remote_write_locks: Arc<Mutex<HashMap<(String, String), Arc<AsyncMutex<()>>>>>,
     // watcher must be kept alive
     watcher: Arc<Mutex<Option<RecommendedWatcher>>>,
     _tx: mpsc::Sender<PathBuf>,
@@ -26,11 +61,11 @@ pub struct SftpEditManager {
 impl SftpEditManager {
     pub fn new(app: AppHandle) -> Self {
         let (tx, mut rx) = mpsc::channel::<PathBuf>(100);
-        let watched_files = Arc::new(Mutex::new(HashMap::<PathBuf, (String, String)>::new()));
+        let watched_files = Arc::new(Mutex::new(HashMap::<PathBuf, WatchedFile>::new()));
         let watched_files_clone = watched_files.clone();
         let app_clone = app.clone();
 
-        // Spawn background task to handle file changes with debouncing
+        // Spawn background task to handle file changes with debouncing.
         tokio::spawn(async move {
             let mut pending_updates: HashMap<PathBuf, tokio::time::Instant> = HashMap::new();
             let mut check_interval = tokio::time::interval(Duration::from_millis(100));
@@ -38,14 +73,15 @@ impl SftpEditManager {
             loop {
                 tokio::select! {
                     Some(path) = rx.recv() => {
-                        // Only debounce files we are actually watching
-                        let is_watched = {
+                        let is_uploadable = {
                             let files = watched_files_clone.lock().unwrap();
-                            files.contains_key(&path)
+                            files
+                                .get(&path)
+                                .is_some_and(|file| !file.upload_paused_for_conflict)
                         };
 
-                        if is_watched {
-                            // Delay upload by 500ms to allow atomic writes to complete
+                        if is_uploadable {
+                            // Delay upload by 500ms to allow atomic writes to complete.
                             pending_updates.insert(path, tokio::time::Instant::now() + Duration::from_millis(500));
                         }
                     }
@@ -63,118 +99,220 @@ impl SftpEditManager {
                         });
 
                         for path in ready_paths {
-                            let info = {
+                            let watched_file = {
                                 let files = watched_files_clone.lock().unwrap();
                                 files.get(&path).cloned()
                             };
 
-                            if let Some((session_id, remote_path)) = info {
-                                let app_inner = app_clone.clone();
-                                let path_inner = path.clone();
+                            let Some(watched_file) = watched_file else {
+                                continue;
+                            };
+                            if watched_file.upload_paused_for_conflict {
+                                continue;
+                            }
 
-                                tokio::spawn(async move {
-                                    info!("Uploading modified file {:?} to remote {}", path_inner, remote_path);
+                            let app_inner = app_clone.clone();
+                            let path_inner = path.clone();
+                            let watched_files_inner = watched_files_clone.clone();
 
-                                    let permit = if let Some(state) =
-                                        app_inner.try_state::<Arc<AppState>>()
-                                    {
-                                        match state
-                                            .operation_coordinator
-                                            .try_acquire(
-                                                crate::updater::OperationCategory::SftpEditUpload,
-                                            )
-                                            .await
+                            tokio::spawn(async move {
+                                let session_id = watched_file.session_id.clone();
+                                let remote_path = watched_file.remote_path.clone();
+                                info!("Uploading modified file {:?} to remote {}", path_inner, remote_path);
+
+                                let Some(state) = app_inner.try_state::<Arc<AppState>>() else {
+                                    error!("Skipping SFTP edit auto-upload: application state is unavailable");
+                                    return;
+                                };
+                                let permit = match state
+                                    .operation_coordinator
+                                    .try_acquire(crate::updater::OperationCategory::SftpEditUpload)
+                                    .await
+                                {
+                                    Ok(permit) => permit,
+                                    Err(error_message) => {
+                                        warn!(
+                                            "Skipping SFTP edit auto-upload (restart barrier): {}",
+                                            error_message
+                                        );
+                                        Self::emit_transfer_result(
+                                            &app_inner,
+                                            Uuid::new_v4().to_string(),
+                                            &session_id,
+                                            &path_inner,
+                                            &remote_path,
+                                            0,
+                                            "failed",
+                                            Some(error_message),
+                                        );
+                                        return;
+                                    }
+                                };
+
+                                let task_id = Uuid::new_v4().to_string();
+                                let initial_total_bytes = tokio::fs::metadata(&path_inner)
+                                    .await
+                                    .map(|metadata| metadata.len())
+                                    .unwrap_or(0);
+                                Self::emit_transfer_result(
+                                    &app_inner,
+                                    task_id.clone(),
+                                    &session_id,
+                                    &path_inner,
+                                    &remote_path,
+                                    initial_total_bytes,
+                                    "transferring",
+                                    None,
+                                );
+
+                                let path_lock = state
+                                    .sftp_edit_manager
+                                    .acquire_remote_path_lock(&session_id, &remote_path)
+                                    .await;
+                                // A second filesystem event may have been queued while an
+                                // earlier upload for this path was in flight. Re-read the
+                                // shared state after acquiring the path lock so it compares
+                                // with that earlier upload's newly established baseline,
+                                // rather than the stale state captured by this task.
+                                let current_watched_file = {
+                                    let files = watched_files_inner.lock().unwrap();
+                                    files.get(&path_inner).cloned()
+                                };
+                                let Some(current_watched_file) = current_watched_file else {
+                                    drop(path_lock);
+                                    permit.release().await;
+                                    return;
+                                };
+                                if current_watched_file.upload_paused_for_conflict
+                                    || current_watched_file.session_id != session_id
+                                    || current_watched_file.remote_path != remote_path
+                                {
+                                    drop(path_lock);
+                                    permit.release().await;
+                                    return;
+                                }
+
+                                let current_revision = match read_remote_revision(&session_id, &remote_path).await {
+                                    Ok(revision) => revision,
+                                    Err(error_message) => {
+                                        permit.release().await;
+                                        error!("SFTP edit pre-save stat failed: {}", error_message);
+                                        Self::emit_transfer_result(
+                                            &app_inner,
+                                            task_id,
+                                            &session_id,
+                                            &path_inner,
+                                            &remote_path,
+                                            initial_total_bytes,
+                                            "failed",
+                                            Some(error_message),
+                                        );
+                                        drop(path_lock);
+                                        return;
+                                    }
+                                };
+
+                                let result = match compare_remote_metadata(
+                                    &current_watched_file.baseline_revision,
+                                    &current_revision,
+                                ) {
+                                    RemoteRevisionComparison::MetadataUnchanged => Self::upload_modified_file(
+                                        &session_id,
+                                        &path_inner,
+                                        &remote_path,
+                                    )
+                                    .await
+                                    .map(WatchedUploadResult::Saved),
+                                    RemoteRevisionComparison::MetadataChanged => Ok(
+                                        WatchedUploadResult::Conflict {
+                                            reason: "metadataChanged",
+                                            current_revision,
+                                        },
+                                    ),
+                                    RemoteRevisionComparison::Deleted => Ok(WatchedUploadResult::Conflict {
+                                        reason: "deleted",
+                                        current_revision,
+                                    }),
+                                };
+                                drop(path_lock);
+
+                                match result {
+                                    Ok(WatchedUploadResult::Saved(revision)) => {
                                         {
-                                            Ok(p) => Some(p),
-                                            Err(e) => {
-                                                warn!(
-                                                    "Skipping SFTP edit auto-upload (restart barrier): {}",
-                                                    e
-                                                );
-                                                let task_id = Uuid::new_v4().to_string();
-                                                let file_name = path_inner
-                                                    .file_name()
-                                                    .unwrap_or_default()
-                                                    .to_string_lossy()
-                                                    .to_string();
-                                                let _ = app_inner.emit(
-                                                    "transfer-progress",
-                                                    TransferProgress {
-                                                        task_id,
-                                                        type_: "upload".to_string(),
-                                                        session_id: session_id.clone(),
-                                                        file_name,
-                                                        source: path_inner
-                                                            .to_string_lossy()
-                                                            .to_string(),
-                                                        destination: remote_path.clone(),
-                                                        total_bytes: 0,
-                                                        transferred_bytes: 0,
-                                                        speed: 0.0,
-                                                        eta: None,
-                                                        status: "failed".to_string(),
-                                                        error: Some(e),
-                                                    },
-                                                );
-                                                return;
+                                            let mut files = watched_files_inner.lock().unwrap();
+                                            if let Some(current) = files.get_mut(&path_inner) {
+                                                if current.session_id == session_id
+                                                    && current.remote_path == remote_path
+                                                    && !current.upload_paused_for_conflict
+                                                {
+                                                    current.baseline_revision = revision;
+                                                }
                                             }
                                         }
-                                    } else {
-                                        None
-                                    };
-
-                                    let task_id = Uuid::new_v4().to_string();
-                                    let file_name = path_inner.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                    let initial_total_bytes = tokio::fs::metadata(&path_inner).await.map(|m| m.len()).unwrap_or(0);
-
-                                    // 1. Emit Initial Progress
-                                    let _ = app_inner.emit("transfer-progress", TransferProgress {
-                                        task_id: task_id.clone(),
-                                        type_: "upload".to_string(),
-                                        session_id: session_id.clone(),
-                                        file_name: file_name.clone(),
-                                        source: path_inner.to_string_lossy().to_string(),
-                                        destination: remote_path.clone(),
-                                        total_bytes: initial_total_bytes,
-                                        transferred_bytes: 0,
-                                        speed: 0.0,
-                                        eta: None,
-                                        status: "transferring".to_string(),
-                                        error: None,
-                                    });
-
-                                    // Perform upload
-                                    let result = Self::upload_modified_file(&session_id, &path_inner, &remote_path).await;
-
-                                    // 2. Emit Final Progress
-                                    let (final_status, final_error, total_bytes, transferred_bytes) = match result {
-                                        Ok(bytes) => ("completed".to_string(), None, bytes, bytes),
-                                        Err(e) => {
-                                            error!("Upload failed: {}", e);
-                                            ("failed".to_string(), Some(e), initial_total_bytes, 0)
-                                        }
-                                    };
-
-                                    let _ = app_inner.emit("transfer-progress", TransferProgress {
-                                        task_id,
-                                        type_: "upload".to_string(),
-                                        session_id,
-                                        file_name,
-                                        source: path_inner.to_string_lossy().to_string(),
-                                        destination: remote_path,
-                                        total_bytes,
-                                        transferred_bytes,
-                                        speed: 0.0,
-                                        eta: None,
-                                        status: final_status,
-                                        error: final_error,
-                                    });
-
-                                    if let Some(permit) = permit {
-                                        permit.release().await;
+                                        Self::emit_transfer_result(
+                                            &app_inner,
+                                            task_id,
+                                            &session_id,
+                                            &path_inner,
+                                            &remote_path,
+                                            initial_total_bytes,
+                                            "completed",
+                                            None,
+                                        );
                                     }
-                                });
-                            }
+                                    Ok(WatchedUploadResult::Conflict {
+                                        reason,
+                                        current_revision,
+                                    }) => {
+                                        {
+                                            let mut files = watched_files_inner.lock().unwrap();
+                                            if let Some(current) = files.get_mut(&path_inner) {
+                                                if current.session_id == session_id
+                                                    && current.remote_path == remote_path
+                                                {
+                                                    current.upload_paused_for_conflict = true;
+                                                }
+                                            }
+                                        }
+                                        let _ = app_inner.emit(
+                                            "sftp-edit-conflict",
+                                            SftpEditConflictEvent {
+                                                session_id: session_id.clone(),
+                                                remote_path: remote_path.clone(),
+                                                local_path: path_inner.to_string_lossy().to_string(),
+                                                reason: reason.to_string(),
+                                                expected_revision: current_watched_file.baseline_revision,
+                                                current_revision,
+                                            },
+                                        );
+                                        Self::emit_transfer_result(
+                                            &app_inner,
+                                            task_id,
+                                            &session_id,
+                                            &path_inner,
+                                            &remote_path,
+                                            initial_total_bytes,
+                                            "failed",
+                                            Some("Remote file changed; automatic upload is paused".to_string()),
+                                        );
+                                    }
+                                    Err(error_message) => {
+                                        error!("SFTP edit auto-upload failed: {}", error_message);
+                                        Self::emit_transfer_result(
+                                            &app_inner,
+                                            task_id,
+                                            &session_id,
+                                            &path_inner,
+                                            &remote_path,
+                                            initial_total_bytes,
+                                            "failed",
+                                            Some(error_message),
+                                        );
+                                    }
+                                }
+
+                                permit.release().await;
+                            });
                         }
                     }
                 }
@@ -202,10 +340,65 @@ impl SftpEditManager {
         SftpEditManager {
             watched_files,
             watched_directories: Arc::new(Mutex::new(HashMap::new())),
+            remote_write_locks: Arc::new(Mutex::new(HashMap::new())),
             watcher: Arc::new(Mutex::new(watcher)),
             _tx: tx,
             _app: app,
         }
+    }
+
+    pub async fn acquire_remote_path_lock(
+        &self,
+        session_id: &str,
+        remote_path: &str,
+    ) -> OwnedMutexGuard<()> {
+        let lock = {
+            let mut locks = self.remote_write_locks.lock().unwrap();
+            locks
+                .entry((session_id.to_string(), remote_path.to_string()))
+                .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+                .clone()
+        };
+        lock.lock_owned().await
+    }
+
+    fn emit_transfer_result(
+        app: &AppHandle,
+        task_id: String,
+        session_id: &str,
+        local_path: &Path,
+        remote_path: &str,
+        total_bytes: u64,
+        status: &str,
+        error: Option<String>,
+    ) {
+        let file_name = local_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let transferred_bytes = if status == "completed" {
+            total_bytes
+        } else {
+            0
+        };
+        let _ = app.emit(
+            "transfer-progress",
+            TransferProgress {
+                task_id,
+                type_: "upload".to_string(),
+                session_id: session_id.to_string(),
+                file_name,
+                source: local_path.to_string_lossy().to_string(),
+                destination: remote_path.to_string(),
+                total_bytes,
+                transferred_bytes,
+                speed: 0.0,
+                eta: None,
+                status: status.to_string(),
+                error,
+            },
+        );
     }
 
     pub fn watch_file(
@@ -213,12 +406,21 @@ impl SftpEditManager {
         local_path: PathBuf,
         session_id: String,
         remote_path: String,
+        baseline_revision: RemoteFileRevision,
     ) -> Result<(), String> {
         let mut files = self.watched_files.lock().unwrap();
 
-        // If already watching, just update info
+        // If already watching, refresh the baseline and resume automatic uploads.
         let is_new = !files.contains_key(&local_path);
-        files.insert(local_path.clone(), (session_id, remote_path));
+        files.insert(
+            local_path.clone(),
+            WatchedFile {
+                session_id,
+                remote_path,
+                baseline_revision,
+                upload_paused_for_conflict: false,
+            },
+        );
 
         if is_new {
             if let Some(parent) = local_path.parent() {
@@ -232,7 +434,6 @@ impl SftpEditManager {
                         info!("Starting to watch directory: {:?}", parent);
                         if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
                             error!("Failed to watch directory {:?}: {}", parent, e);
-                            // Cleanup if failed
                             *count -= 1;
                             if *count == 0 {
                                 dirs.remove(parent);
@@ -275,7 +476,9 @@ impl SftpEditManager {
             let files = self.watched_files.lock().unwrap();
             files
                 .iter()
-                .filter(|(_, (sid, rp))| sid == session_id && rp == remote_path)
+                .filter(|(_, watched)| {
+                    watched.session_id == session_id && watched.remote_path == remote_path
+                })
                 .map(|(lp, _)| lp.clone())
                 .collect::<Vec<_>>()
         };
@@ -300,7 +503,7 @@ impl SftpEditManager {
             let files = self.watched_files.lock().unwrap();
             files
                 .iter()
-                .filter(|(_, (sid, _))| sid == session_id)
+                .filter(|(_, watched)| watched.session_id == session_id)
                 .map(|(lp, _)| lp.clone())
                 .collect::<Vec<_>>()
         };
@@ -321,14 +524,14 @@ impl SftpEditManager {
         session_id: &str,
         local_path: &Path,
         remote_path: &str,
-    ) -> Result<u64, String> {
+    ) -> Result<RemoteFileRevision, String> {
         let mut local_file = tokio::fs::File::open(local_path)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         let total_bytes = local_file
             .metadata()
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|error| error.to_string())?
             .len();
         let sftp = SftpManager::get_session(session_id).await?;
         let handle = sftp
@@ -340,11 +543,12 @@ impl SftpEditManager {
                 russh_sftp::protocol::FileAttributes::default(),
             )
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|error| error.to_string())?
             .handle;
 
-        let upload_result: Result<(), String> = async {
+        let upload_result: Result<String, String> = async {
             let mut offset = 0u64;
+            let mut hasher = Sha256::new();
 
             while offset < total_bytes {
                 let chunk_size =
@@ -353,7 +557,8 @@ impl SftpEditManager {
                 local_file
                     .read_exact(&mut chunk)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|error| error.to_string())?;
+                hasher.update(&chunk);
 
                 let write_result = tokio::time::timeout(
                     Duration::from_secs(EDIT_UPLOAD_CHUNK_TIMEOUT_SECS),
@@ -362,8 +567,8 @@ impl SftpEditManager {
                 .await;
 
                 match write_result {
-                    Ok(res) => {
-                        let _ = res.map_err(|e| e.to_string())?;
+                    Ok(result) => {
+                        result.map_err(|error| error.to_string())?;
                     }
                     Err(_) => {
                         return Err(format!(
@@ -376,11 +581,20 @@ impl SftpEditManager {
                 offset += chunk_size as u64;
             }
 
-            Ok(())
+            Ok(format!("{:x}", hasher.finalize()))
         }
         .await;
 
         let _ = sftp.close(handle).await;
-        upload_result.map(|_| total_bytes)
+        let sha256 = upload_result?;
+        let revision = read_remote_revision(session_id, remote_path).await?;
+        if !revision.exists || revision.size != Some(total_bytes) {
+            return Err(format!(
+                "Remote save verification failed: expected {} bytes, got {:?}",
+                total_bytes, revision.size
+            ));
+        }
+
+        Ok(revision.with_sha256(sha256))
     }
 }

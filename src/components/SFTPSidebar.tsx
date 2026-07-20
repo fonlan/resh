@@ -868,6 +868,7 @@ export const SFTPSidebar: React.FC<SFTPSidebarProps> = ({
             content: opened.content,
             encoding: opened.encoding,
             language: opened.languageHint || "plaintext",
+            revision: opened.revision,
             dirty: false,
             label: entry.name,
           },

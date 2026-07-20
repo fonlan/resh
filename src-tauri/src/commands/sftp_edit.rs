@@ -1,7 +1,12 @@
 use crate::commands::AppState;
+use crate::sftp_manager::edit_revision::{
+    compare_remote_metadata, metadata_matches, read_remote_revision, read_remote_snapshot,
+    sha256_hex, RemoteFileRevision, RemoteRevisionComparison,
+};
 use crate::sftp_manager::{SftpManager, TransferProgress};
 use russh_sftp::protocol::{OpenFlags, StatusCode};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
@@ -11,6 +16,9 @@ use uuid::Uuid;
 
 const SFTP_EDIT_DOWNLOAD_CHUNK_SIZE: u32 = 255 * 1024;
 const SFTP_TEXT_SAVE_UPLOAD_CHUNK_SIZE: usize = 32 * 1024;
+/// Small editor files get a post-write content hash verification; large files
+/// retain the mandatory size verification without an extra full download.
+const SFTP_TEXT_SAVE_HASH_VERIFY_MAX_BYTES: usize = 1024 * 1024;
 const UTF8_BOM: &[u8; 3] = b"\xEF\xBB\xBF";
 const UTF16LE_BOM: &[u8; 2] = b"\xFF\xFE";
 const UTF16BE_BOM: &[u8; 2] = b"\xFE\xFF";
@@ -24,16 +32,36 @@ pub struct SftpOpenTextFileResult {
     pub content: String,
     pub encoding: String,
     pub language_hint: Option<String>,
+    pub revision: RemoteFileRevision,
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SftpSaveTextFileResult {
-    pub session_id: String,
-    pub remote_path: String,
-    pub local_path: String,
-    pub bytes_written: u64,
-    pub encoding: String,
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum SftpSaveTextFileOutcome {
+    Saved {
+        session_id: String,
+        remote_path: String,
+        local_path: String,
+        bytes_written: u64,
+        encoding: String,
+        revision: RemoteFileRevision,
+    },
+    Conflict {
+        session_id: String,
+        remote_path: String,
+        reason: String,
+        expected_revision: RemoteFileRevision,
+        current_revision: RemoteFileRevision,
+        remote_content: Option<String>,
+        remote_encoding: Option<String>,
+        snapshot_error: Option<String>,
+    },
+}
+
+#[derive(Debug)]
+struct DownloadedRemoteFile {
+    bytes_written: u64,
+    sha256: String,
 }
 
 fn infer_language_hint(remote_path: &str) -> Option<String> {
@@ -194,7 +222,7 @@ async fn download_remote_file_to_local(
     remote_path: &str,
     local_path: &Path,
     expected_size: u64,
-) -> Result<u64, String> {
+) -> Result<DownloadedRemoteFile, String> {
     let sftp = SftpManager::get_session(session_id).await?;
     let handle = sftp
         .open(
@@ -210,8 +238,9 @@ async fn download_remote_file_to_local(
         .await
         .map_err(|e| e.to_string())?;
 
-    let download_result: Result<u64, String> = async {
+    let download_result: Result<DownloadedRemoteFile, String> = async {
         let mut offset = 0u64;
+        let mut hasher = Sha256::new();
         loop {
             let read_len = if expected_size > 0 {
                 let remaining = expected_size.saturating_sub(offset);
@@ -235,6 +264,7 @@ async fn download_remote_file_to_local(
                         ));
                     }
 
+                    hasher.update(&data.data);
                     local_file
                         .write_all(&data.data)
                         .await
@@ -261,7 +291,10 @@ async fn download_remote_file_to_local(
         local_file.flush().await.map_err(|e| e.to_string())?;
         local_file.sync_all().await.map_err(|e| e.to_string())?;
         drop(local_file);
-        Ok(offset)
+        Ok(DownloadedRemoteFile {
+            bytes_written: offset,
+            sha256: format!("{:x}", hasher.finalize()),
+        })
     }
     .await;
 
@@ -334,7 +367,8 @@ async fn upload_text_bytes_to_remote(
     session_id: &str,
     remote_path: &str,
     bytes: &[u8],
-) -> Result<(), String> {
+) -> Result<RemoteFileRevision, String> {
+    let expected_sha256 = sha256_hex(bytes);
     let sftp = SftpManager::get_session(session_id).await?;
     let handle = sftp
         .open(
@@ -343,7 +377,7 @@ async fn upload_text_bytes_to_remote(
             russh_sftp::protocol::FileAttributes::default(),
         )
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|error| error.to_string())?
         .handle;
 
     let upload_result: Result<(), String> = async {
@@ -351,7 +385,7 @@ async fn upload_text_bytes_to_remote(
         for chunk in bytes.chunks(SFTP_TEXT_SAVE_UPLOAD_CHUNK_SIZE) {
             sftp.write(&handle, offset, chunk.to_vec())
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(|error| error.to_string())?;
             offset += chunk.len() as u64;
         }
         Ok(())
@@ -361,17 +395,95 @@ async fn upload_text_bytes_to_remote(
     let _ = sftp.close(handle).await;
     upload_result?;
 
-    let remote_metadata = SftpManager::metadata(session_id, remote_path).await?;
-    let remote_size = remote_metadata.attrs.size.unwrap_or(0);
+    let revision = read_remote_revision(session_id, remote_path).await?;
     let expected_size = bytes.len() as u64;
-    if remote_size != expected_size {
+    if !revision.exists || revision.size != Some(expected_size) {
         return Err(format!(
-            "Remote save verification failed: expected {} bytes, got {} bytes",
-            expected_size, remote_size
+            "Remote save verification failed: expected {} bytes, got {:?}",
+            expected_size, revision.size
         ));
     }
 
-    Ok(())
+    if bytes.len() <= SFTP_TEXT_SAVE_HASH_VERIFY_MAX_BYTES {
+        let snapshot = read_remote_snapshot(session_id, remote_path).await?;
+        if !snapshot.revision.exists
+            || snapshot.revision.sha256.as_deref() != Some(&expected_sha256)
+        {
+            return Err("Remote save content verification failed after write".to_string());
+        }
+        return Ok(snapshot.revision);
+    }
+
+    Ok(revision.with_sha256(expected_sha256))
+}
+
+async fn build_save_conflict_outcome(
+    session_id: String,
+    remote_path: String,
+    expected_revision: RemoteFileRevision,
+    reason: &str,
+    current_revision: RemoteFileRevision,
+) -> SftpSaveTextFileOutcome {
+    if !current_revision.exists {
+        return SftpSaveTextFileOutcome::Conflict {
+            session_id,
+            remote_path,
+            reason: "deleted".to_string(),
+            expected_revision,
+            current_revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: None,
+        };
+    }
+
+    match read_remote_snapshot(&session_id, &remote_path).await {
+        Ok(snapshot) if !snapshot.revision.exists => SftpSaveTextFileOutcome::Conflict {
+            session_id,
+            remote_path,
+            reason: "deleted".to_string(),
+            expected_revision,
+            current_revision: snapshot.revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: None,
+        },
+        Ok(snapshot) => match decode_text_bytes(&snapshot.bytes) {
+            Ok((content, encoding)) => SftpSaveTextFileOutcome::Conflict {
+                session_id,
+                remote_path,
+                reason: reason.to_string(),
+                expected_revision,
+                current_revision: snapshot.revision,
+                remote_content: Some(content),
+                remote_encoding: Some(encoding),
+                snapshot_error: None,
+            },
+            Err(error) => SftpSaveTextFileOutcome::Conflict {
+                session_id,
+                remote_path,
+                reason: reason.to_string(),
+                expected_revision,
+                current_revision: snapshot.revision,
+                remote_content: None,
+                remote_encoding: None,
+                snapshot_error: Some(error),
+            },
+        },
+        Err(error) => SftpSaveTextFileOutcome::Conflict {
+            session_id,
+            remote_path,
+            reason: reason.to_string(),
+            expected_revision,
+            current_revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: Some(format!(
+                "Failed to load remote conflict snapshot: {}",
+                error
+            )),
+        },
+    }
 }
 
 #[tauri::command]
@@ -384,13 +496,16 @@ pub async fn sftp_open_text_file(
         return Err("Not a file (is a directory)".to_string());
     }
     let total_bytes = metadata.attrs.size.unwrap_or(0);
+    let mut revision = RemoteFileRevision::from_attrs(&metadata.attrs);
 
     let local_path = create_temp_local_path(&session_id, &remote_path).await?;
-    download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes).await?;
+    let downloaded =
+        download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes).await?;
+    revision.sha256 = Some(downloaded.sha256);
 
     let file_bytes = fs::read(&local_path)
         .await
-        .map_err(|e| format!("Failed to read downloaded local file: {}", e))?;
+        .map_err(|error| format!("Failed to read downloaded local file: {}", error))?;
     let (content, encoding) = decode_text_bytes(&file_bytes)?;
     let language_hint = infer_language_hint(&remote_path);
 
@@ -401,6 +516,7 @@ pub async fn sftp_open_text_file(
         content,
         encoding,
         language_hint,
+        revision,
     })
 }
 
@@ -412,45 +528,82 @@ pub async fn sftp_save_text_file(
     local_path: String,
     content: String,
     encoding: String,
-) -> Result<SftpSaveTextFileResult, String> {
+    expected_revision: RemoteFileRevision,
+    save_mode: Option<String>,
+    conflict_revision: Option<RemoteFileRevision>,
+) -> Result<SftpSaveTextFileOutcome, String> {
     use crate::updater::OperationCategory;
+
+    let local_path_buf = PathBuf::from(&local_path);
+    if local_path_buf.file_name().is_none() {
+        return Err("Invalid local path".to_string());
+    }
+    let encoded_bytes = encode_text_content(&content, &encoding)?;
+    let save_mode = save_mode.unwrap_or_else(|| "safe".to_string());
 
     let permit = state
         .operation_coordinator
         .try_acquire(OperationCategory::SftpEditUpload)
         .await?;
+    let result: Result<SftpSaveTextFileOutcome, String> = async {
+        let _path_lock = state
+            .sftp_edit_manager
+            .acquire_remote_path_lock(&session_id, &remote_path)
+            .await;
+        let current_revision = read_remote_revision(&session_id, &remote_path).await?;
 
-    let local_path_buf = PathBuf::from(&local_path);
-    if local_path_buf.file_name().is_none() {
-        permit.release().await;
-        return Err("Invalid local path".to_string());
-    }
+        let conflict = match save_mode.as_str() {
+            "safe" => match compare_remote_metadata(&expected_revision, &current_revision) {
+                RemoteRevisionComparison::MetadataUnchanged => None,
+                RemoteRevisionComparison::MetadataChanged => {
+                    Some(("metadataChanged", current_revision))
+                }
+                RemoteRevisionComparison::Deleted => Some(("deleted", current_revision)),
+            },
+            "overwrite" => {
+                let confirmed_revision = conflict_revision.ok_or(
+                    "Explicit overwrite requires the conflictRevision returned by the server",
+                )?;
+                if metadata_matches(&confirmed_revision, &current_revision) {
+                    None
+                } else if current_revision.exists {
+                    Some(("metadataChanged", current_revision))
+                } else {
+                    Some(("deleted", current_revision))
+                }
+            }
+            other => return Err(format!("Unsupported SFTP text save mode: {}", other)),
+        };
 
-    let encoded_bytes = match encode_text_content(&content, &encoding) {
-        Ok(b) => b,
-        Err(e) => {
-            permit.release().await;
-            return Err(e);
+        if let Some((reason, current_revision)) = conflict {
+            return Ok(build_save_conflict_outcome(
+                session_id.clone(),
+                remote_path.clone(),
+                expected_revision,
+                reason,
+                current_revision,
+            )
+            .await);
         }
-    };
-    if let Err(e) = write_local_file_atomically(&local_path_buf, &encoded_bytes).await {
-        permit.release().await;
-        return Err(e);
-    }
-    if let Err(e) = upload_text_bytes_to_remote(&session_id, &remote_path, &encoded_bytes).await {
-        permit.release().await;
-        return Err(e);
-    }
 
-    let result = SftpSaveTextFileResult {
-        session_id,
-        remote_path,
-        local_path,
-        bytes_written: encoded_bytes.len() as u64,
-        encoding,
-    };
+        // Do not update the local editor backing file until the remote revision
+        // gate has passed. A conflict must leave the local saved baseline intact.
+        write_local_file_atomically(&local_path_buf, &encoded_bytes).await?;
+        let revision =
+            upload_text_bytes_to_remote(&session_id, &remote_path, &encoded_bytes).await?;
+
+        Ok(SftpSaveTextFileOutcome::Saved {
+            session_id,
+            remote_path,
+            local_path,
+            bytes_written: encoded_bytes.len() as u64,
+            encoding,
+            revision,
+        })
+    }
+    .await;
     permit.release().await;
-    Ok(result)
+    result
 }
 
 #[tauri::command]
@@ -501,17 +654,34 @@ pub async fn sftp_edit_file(
         },
     );
 
-    let result =
-        download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes).await;
-
-    // Emit Final Progress
-    let final_status = if result.is_ok() {
-        "completed"
-    } else {
-        "failed"
-    };
-    let downloaded_bytes = result.as_ref().copied().unwrap_or(0);
-    let final_error = result.err();
+    let mut baseline_revision = RemoteFileRevision::from_attrs(&metadata.attrs);
+    let downloaded =
+        match download_remote_file_to_local(&session_id, &remote_path, &local_path, total_bytes)
+            .await
+        {
+            Ok(downloaded) => downloaded,
+            Err(error_message) => {
+                let _ = app.emit(
+                    "transfer-progress",
+                    TransferProgress {
+                        task_id,
+                        type_: "download".to_string(),
+                        session_id: session_id.clone(),
+                        file_name: file_name_str,
+                        source: remote_path.clone(),
+                        destination: local_path.to_string_lossy().to_string(),
+                        total_bytes,
+                        transferred_bytes: 0,
+                        speed: 0.0,
+                        eta: None,
+                        status: "failed".to_string(),
+                        error: Some(error_message.clone()),
+                    },
+                );
+                return Err(error_message);
+            }
+        };
+    baseline_revision.sha256 = Some(downloaded.sha256);
 
     let _ = app.emit(
         "transfer-progress",
@@ -523,23 +693,21 @@ pub async fn sftp_edit_file(
             source: remote_path.clone(),
             destination: local_path.to_string_lossy().to_string(),
             total_bytes,
-            transferred_bytes: downloaded_bytes,
+            transferred_bytes: downloaded.bytes_written,
             speed: 0.0,
             eta: None,
-            status: final_status.to_string(),
-            error: final_error.clone(),
+            status: "completed".to_string(),
+            error: None,
         },
     );
 
-    if final_status == "failed" {
-        return Err(final_error.unwrap_or_else(|| "Unknown error during download".to_string()));
-    }
-
-    // 4. Register watcher
-    state
-        .sftp_edit_manager
-        .watch_file(local_path.clone(), session_id, remote_path)
-        .map_err(|e| e.to_string())?;
+    // 4. Register watcher with the same revision contract as the built-in editor.
+    state.sftp_edit_manager.watch_file(
+        local_path.clone(),
+        session_id,
+        remote_path,
+        baseline_revision,
+    )?;
 
     Ok(local_path.to_string_lossy().to_string())
 }

@@ -1,6 +1,13 @@
 import type { Config } from "../../types"
 import type { SplitLayout } from "../SplitViewButton"
 
+export interface RemoteFileRevision {
+  exists: boolean
+  size?: number | null
+  mtime?: number | null
+  sha256?: string | null
+}
+
 export type TabKind = "terminal" | "editor"
 
 export interface BaseTab {
@@ -40,6 +47,7 @@ export interface OpenEditorTabPayload {
   content: string
   encoding: string
   language: string
+  revision: RemoteFileRevision
   dirty?: boolean
   label?: string
 }
@@ -48,6 +56,7 @@ export interface EditorDocumentState {
   content: string
   savedContent: string
   encoding: string
+  revision: RemoteFileRevision
   isSaving: boolean
 }
 

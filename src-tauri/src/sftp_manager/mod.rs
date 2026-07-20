@@ -25,6 +25,7 @@ use uuid::Uuid;
 mod cache;
 mod copy;
 pub mod edit;
+pub mod edit_revision;
 mod tuning;
 mod types;
 
