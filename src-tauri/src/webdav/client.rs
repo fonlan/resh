@@ -1,7 +1,7 @@
 use crate::config::types::Proxy;
 use reqwest::{
     header::{ETAG, IF_MATCH, IF_NONE_MATCH},
-    Client, StatusCode,
+    Client, Method, StatusCode,
 };
 use std::error::Error;
 use std::fmt;
@@ -13,7 +13,7 @@ pub struct WebDAVClient {
     client: Client,
 }
 
-/// A downloaded WebDAV resource together with the entity tag observed during the GET.
+/// A downloaded WebDAV resource together with the entity tag observed during the GET or PROPFIND.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadedResource {
     pub content: Vec<u8>,
@@ -112,7 +112,12 @@ impl WebDAVClient {
 
         let response = request.send().await.map_err(|_| WebDavError::Request)?;
         let status = response.status();
-        if status == StatusCode::PRECONDITION_FAILED {
+        // Some WebDAV implementations use 409 rather than the HTTP-standard 412 for a failed
+        // conditional PUT. Both mean another writer changed or created the resource.
+        if matches!(
+            status,
+            StatusCode::PRECONDITION_FAILED | StatusCode::CONFLICT
+        ) {
             return Err(WebDavError::PreconditionFailed);
         }
         if !status.is_success() {
@@ -120,11 +125,7 @@ impl WebDAVClient {
             return Err(WebDavError::Http(status));
         }
 
-        Ok(response
-            .headers()
-            .get(ETAG)
-            .and_then(|value| value.to_str().ok())
-            .map(ToOwned::to_owned))
+        Ok(response_etag(response.headers()))
     }
 
     pub async fn download(
@@ -152,22 +153,114 @@ impl WebDAVClient {
             return Err(WebDavError::Http(status));
         }
 
-        let etag = response
-            .headers()
-            .get(ETAG)
-            .and_then(|value| value.to_str().ok())
-            .map(ToOwned::to_owned);
+        let etag = response_etag(response.headers());
         let content = response.bytes().await.map_err(|_| WebDavError::Request)?;
+        let etag = match etag {
+            Some(etag) => Some(etag),
+            None => self.fetch_etag_with_propfind(filename).await,
+        };
+
         Ok(Some(DownloadedResource {
             content: content.to_vec(),
             etag,
         }))
     }
+
+    /// Some WebDAV servers omit ETag on GET but expose it through a depth-zero PROPFIND.
+    /// Failure to retrieve an ETag here is intentionally non-fatal: the sync layer will refuse an
+    /// unsafe overwrite and return a diagnosable SafeSyncUnavailable result instead.
+    async fn fetch_etag_with_propfind(&self, filename: &str) -> Option<String> {
+        let method = Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid HTTP method");
+        let response = match self
+            .client
+            .request(method, self.resource_url(filename))
+            .basic_auth(&self.username, Some(&self.password))
+            .header("Depth", "0")
+            .header("Content-Type", "application/xml; charset=utf-8")
+            .body(
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:"><d:prop><d:getetag /></d:prop></d:propfind>"#,
+            )
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(_) => return None,
+        };
+
+        if !response.status().is_success() {
+            tracing::debug!(status = %response.status(), "WebDAV PROPFIND did not provide an ETag");
+            return None;
+        }
+
+        if let Some(etag) = response_etag(response.headers()) {
+            return Some(etag);
+        }
+
+        let body = response.bytes().await.ok()?;
+        extract_getetag_from_propfind(&body)
+    }
+}
+
+fn response_etag(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(ETAG)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned)
+}
+
+fn extract_getetag_from_propfind(body: &[u8]) -> Option<String> {
+    let document = std::str::from_utf8(body).ok()?;
+    let lowercase = document.to_ascii_lowercase();
+    let mut search_from = 0;
+
+    while let Some(relative_match) = lowercase[search_from..].find("getetag") {
+        let match_index = search_from + relative_match;
+        let open_start = lowercase[..match_index].rfind('<')?;
+        let open_end = lowercase[match_index..].find('>')? + match_index;
+        let open_name = xml_local_name(&lowercase[open_start + 1..open_end]);
+        if open_name != Some("getetag") {
+            search_from = open_end + 1;
+            continue;
+        }
+
+        let content_start = open_end + 1;
+        let Some(relative_close_start) = lowercase[content_start..].find("</") else {
+            return None;
+        };
+        let close_start = content_start + relative_close_start;
+        let close_end = lowercase[close_start..].find('>')? + close_start;
+        let close_name = xml_local_name(&lowercase[close_start + 2..close_end]);
+        if close_name != Some("getetag") {
+            search_from = close_end + 1;
+            continue;
+        }
+
+        let etag = document[content_start..close_start].trim();
+        if !etag.is_empty() {
+            return Some(etag.to_string());
+        }
+        search_from = close_end + 1;
+    }
+
+    None
+}
+
+fn xml_local_name(tag: &str) -> Option<&str> {
+    let tag = tag.trim().trim_start_matches('/');
+    let name = tag
+        .split(|character: char| character.is_ascii_whitespace())
+        .next()?;
+    name.rsplit(':').next().filter(|name| !name.is_empty())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
 
     #[tokio::test]
     async fn test_webdav_client_creation() {
@@ -189,5 +282,156 @@ mod tests {
             WebDavError::PreconditionFailed.to_string(),
             "WebDAV resource changed concurrently"
         );
+    }
+
+    #[test]
+    fn extracts_namespaced_propfind_etag() {
+        let body = br#"<d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop><d:getetag>"v2"</d:getetag></d:prop></d:propstat></d:response></d:multistatus>"#;
+        assert_eq!(
+            extract_getetag_from_propfind(body).as_deref(),
+            Some("\"v2\"")
+        );
+    }
+
+    #[tokio::test]
+    async fn download_uses_get_etag_when_available() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut stream, request) = read_request(stream).await;
+            write_response(&mut stream, "200 OK", &["ETag: \"v1\""], b"{}").await;
+            request
+        });
+
+        let client = test_client(address.port());
+        let resource = client.download("sync.json").await.unwrap().unwrap();
+
+        assert_eq!(resource.content, b"{}");
+        assert_eq!(resource.etag.as_deref(), Some("\"v1\""));
+        assert!(server.await.unwrap().starts_with("GET /sync.json HTTP/1.1"));
+    }
+
+    #[tokio::test]
+    async fn download_falls_back_to_depth_zero_propfind_for_etag() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut stream, get_request) = read_request(stream).await;
+            write_response(&mut stream, "200 OK", &[], b"{}").await;
+
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut stream, propfind_request) = read_request(stream).await;
+            write_response(
+                &mut stream,
+                "207 Multi-Status",
+                &[],
+                br#"<d:multistatus xmlns:d="DAV:"><d:response><d:propstat><d:prop><d:getetag>"v2"</d:getetag></d:prop></d:propstat></d:response></d:multistatus>"#,
+            )
+            .await;
+            (get_request, propfind_request)
+        });
+
+        let resource = test_client(address.port())
+            .download("sync.json")
+            .await
+            .unwrap()
+            .unwrap();
+        let (get_request, propfind_request) = server.await.unwrap();
+
+        assert_eq!(resource.etag.as_deref(), Some("\"v2\""));
+        assert!(get_request.starts_with("GET /sync.json HTTP/1.1"));
+        let lowercase = propfind_request.to_ascii_lowercase();
+        assert!(lowercase.starts_with("propfind /sync.json http/1.1"));
+        assert!(lowercase.contains("depth: 0"));
+    }
+
+    #[tokio::test]
+    async fn conditional_upload_sets_preconditions_and_maps_create_races() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut stream, request) = read_request(stream).await;
+            write_response(&mut stream, "412 Precondition Failed", &[], b"").await;
+            request
+        });
+
+        let error = test_client(address.port())
+            .upload_conditionally("sync.json", b"{}", UploadCondition::CreateOnly)
+            .await
+            .unwrap_err();
+        let request = server.await.unwrap().to_ascii_lowercase();
+
+        assert_eq!(error, WebDavError::PreconditionFailed);
+        assert!(request.starts_with("put /sync.json http/1.1"));
+        assert!(request.contains("if-none-match: *"));
+    }
+
+    #[tokio::test]
+    async fn conditional_upload_sets_if_match_and_recognizes_409_and_412() {
+        for status in ["409 Conflict", "412 Precondition Failed"] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let status = status.to_string();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let (mut stream, request) = read_request(stream).await;
+                write_response(&mut stream, &status, &[], b"").await;
+                request
+            });
+
+            let error = test_client(address.port())
+                .upload_conditionally(
+                    "sync.json",
+                    b"{}",
+                    UploadCondition::IfMatch("\"v1\"".to_string()),
+                )
+                .await
+                .unwrap_err();
+            let request = server.await.unwrap().to_ascii_lowercase();
+
+            assert_eq!(error, WebDavError::PreconditionFailed);
+            assert!(request.contains("if-match: \"v1\""));
+        }
+    }
+
+    fn test_client(port: u16) -> WebDAVClient {
+        WebDAVClient::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".to_string(),
+            "password".to_string(),
+            None,
+        )
+    }
+
+    async fn read_request(mut stream: TcpStream) -> (TcpStream, String) {
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        loop {
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert!(read > 0, "test HTTP client closed before sending headers");
+            request.extend_from_slice(&buffer[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        (stream, String::from_utf8_lossy(&request).into_owned())
+    }
+
+    async fn write_response(stream: &mut TcpStream, status: &str, headers: &[&str], body: &[u8]) {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+        for header in headers {
+            response.push_str(header);
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.write_all(body).await.unwrap();
+        stream.shutdown().await.unwrap();
     }
 }

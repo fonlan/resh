@@ -209,6 +209,15 @@ pub struct BackendSmokeCheck {
     pub app_data_dir_name: &'static str,
 }
 
+/// Structured result for manual and startup WebDAV sync. Expected remote conflicts and concurrent
+/// changes remain successful IPC calls so callers can inspect their safe, actionable outcome.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TriggerSyncResult {
+    pub config: Option<Config>,
+    pub outcome: crate::config::sync_protocol::SyncOutcome,
+}
+
 #[tauri::command]
 pub async fn backend_smoke_check() -> Result<BackendSmokeCheck, String> {
     Ok(BackendSmokeCheck {
@@ -263,6 +272,9 @@ pub async fn save_config(
     let local_path = state.config_manager.local_config_path();
     state.config_manager.save_config(&config, &local_path)?;
     let sync_generation = state.next_config_sync_generation();
+    // Do not hold the shared config mutex while acquiring a WebDAV permit or waiting on network.
+    // The generation captured above protects the later background projection instead.
+    drop(current_config);
     tracing::debug!("Local config saved to {:?}", local_path);
 
     // Update log level
@@ -318,7 +330,9 @@ pub async fn save_config(
                 Ok(outcome) => match outcome {
                     crate::config::SyncOutcome::Applied { .. } => {
                         let mut in_memory = app_state.config.lock().await;
-                        if config_matches_snapshot(&in_memory, &sync_snapshot) {
+                        if app_state.is_current_config_sync_generation(sync_generation)
+                            && config_matches_snapshot(&in_memory, &sync_snapshot)
+                        {
                             if let Err(e) = app_state
                                 .config_manager
                                 .save_config(&local_copy, &sync_path)
@@ -411,7 +425,11 @@ pub async fn record_server_connection(
 }
 
 #[tauri::command]
-pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, String> {
+pub async fn trigger_sync(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+) -> Result<TriggerSyncResult, String> {
+    use crate::config::sync_protocol::{SyncError, SyncErrorKind, SyncOutcome};
     use crate::updater::OperationCategory;
 
     // Full-lifecycle sync permit so restart wait covers the whole call.
@@ -420,73 +438,99 @@ pub async fn trigger_sync(state: State<'_, Arc<AppState>>) -> Result<Config, Str
         .try_acquire(OperationCategory::WebdavSync)
         .await?;
 
-    // Manual and background syncs share one GET→merge→conditional-PUT critical section. Bump the
-    // generation so any earlier background snapshot queued behind this operation is discarded.
-    let _sync_gate = state.config_sync_gate.lock().await;
-    let _manual_sync_generation = state.next_config_sync_generation();
+    let result = async {
+        // Manual and background syncs share one GET→merge→conditional-PUT critical section. Bump
+        // the generation so any older background snapshot queued behind this operation is stale.
+        let _sync_gate = state.config_sync_gate.lock().await;
+        let sync_generation = state.next_config_sync_generation();
 
-    let mut config = state.config.lock().await;
-    if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
-        sync_permit.release().await;
-        return Err("WebDAV sync is not enabled or configured".to_string());
+        // Snapshot under the mutex, but do not keep the mutex while the network operation runs.
+        // A save that arrives meanwhile advances the generation and owns the eventual projection.
+        let (sync_manager, mut sync_candidate, sync_snapshot, local_path) = {
+            let config = state.config.lock().await;
+            if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
+                return Err("WebDAV sync is not enabled or configured".to_string());
+            }
+
+            let proxy = config
+                .general
+                .webdav
+                .proxy_id
+                .as_ref()
+                .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+            let sync_manager = SyncManager::new(
+                config.general.webdav.url.clone(),
+                config.general.webdav.username.clone(),
+                config.general.webdav.password.clone(),
+                proxy,
+            )
+            .with_state_store(state.config_manager.app_data_dir().to_path_buf());
+            let snapshot = serde_json::to_vec(&*config)
+                .map_err(|error| format!("Failed to snapshot config for sync: {error}"))?;
+            (
+                sync_manager,
+                config.clone(),
+                snapshot,
+                state.config_manager.local_config_path(),
+            )
+        };
+
+        let outcome = sync_manager.sync(&mut sync_candidate, vec![]).await?;
+        let (config, outcome) = match outcome {
+            outcome @ SyncOutcome::Applied { .. } => {
+                if sync_candidate.normalize_legacy_defaults() {
+                    tracing::info!(
+                        transfer_profile = %sync_candidate.general.sftp.transfer_profile,
+                        migrated_download_max_inflight = sync_candidate.general.sftp.download_max_inflight,
+                        migrated_chunk_size_min = sync_candidate.general.sftp.chunk_size_min,
+                        "normalized legacy SFTP throughput defaults after sync merge"
+                    );
+                }
+
+                let mut in_memory = state.config.lock().await;
+                if !state.is_current_config_sync_generation(sync_generation)
+                    || !config_matches_snapshot(&in_memory, &sync_snapshot)
+                {
+                    (
+                        None,
+                        SyncOutcome::Failed {
+                            error: SyncError {
+                                kind: SyncErrorKind::ConcurrentLocalChange,
+                                message: "Local configuration changed while synchronization was running; the newer save will be synchronized instead".into(),
+                            },
+                        },
+                    )
+                } else {
+                    state.config_manager.save_config(&sync_candidate, &local_path)?;
+                    *in_memory = sync_candidate.clone();
+                    (Some(sync_candidate), outcome)
+                }
+            }
+            outcome => (None, outcome),
+        };
+
+        emit_sync_outcome(&app, &outcome);
+        Ok(TriggerSyncResult { config, outcome })
     }
+    .await;
 
-    let proxy = config
-        .general
-        .webdav
-        .proxy_id
-        .as_ref()
-        .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
-
-    let sync_manager = SyncManager::new(
-        config.general.webdav.url.clone(),
-        config.general.webdav.username.clone(),
-        config.general.webdav.password.clone(),
-        proxy,
-    )
-    .with_state_store(state.config_manager.app_data_dir().to_path_buf());
-
-    let sync_result = sync_manager.sync(&mut config, vec![]).await;
-    match sync_result {
-        Ok(crate::config::SyncOutcome::Applied { .. }) => {}
-        Ok(crate::config::SyncOutcome::Conflicts { conflicts }) => {
-            sync_permit.release().await;
-            return Err(format!(
-                "Sync conflicts: {} item(s) need resolution",
-                conflicts.len()
-            ));
-        }
-        Ok(crate::config::SyncOutcome::ConcurrentRemoteChange { message }) => {
-            sync_permit.release().await;
-            return Err(format!("Concurrent remote change: {}", message));
-        }
-        Ok(crate::config::SyncOutcome::Failed { error }) => {
-            sync_permit.release().await;
-            return Err(error.message);
-        }
-        Err(e) => {
-            sync_permit.release().await;
-            return Err(e);
-        }
-    }
-    if config.normalize_legacy_defaults() {
-        tracing::info!(
-            transfer_profile = %config.general.sftp.transfer_profile,
-            migrated_download_max_inflight = config.general.sftp.download_max_inflight,
-            migrated_chunk_size_min = config.general.sftp.chunk_size_min,
-            "normalized legacy SFTP throughput defaults after sync merge"
-        );
-    }
-
-    let local_path = state.config_manager.local_config_path();
-    if let Err(e) = state.config_manager.save_config(&config, &local_path) {
-        sync_permit.release().await;
-        return Err(e);
-    }
-
-    let result = config.clone();
     sync_permit.release().await;
-    Ok(result)
+    result
+}
+
+fn emit_sync_outcome(app: &AppHandle, outcome: &crate::config::sync_protocol::SyncOutcome) {
+    match outcome {
+        crate::config::sync_protocol::SyncOutcome::Applied { .. } => {}
+        crate::config::sync_protocol::SyncOutcome::Conflicts { conflicts } => {
+            let _ = app.emit("sync-conflicts", conflicts);
+        }
+        crate::config::sync_protocol::SyncOutcome::ConcurrentRemoteChange { message } => {
+            let _ = app.emit("sync-failed", message);
+        }
+        crate::config::sync_protocol::SyncOutcome::Failed { error } => {
+            let _ = app.emit("sync-failed", &error.message);
+        }
+    }
 }
 
 fn config_matches_snapshot(config: &Config, snapshot: &[u8]) -> bool {

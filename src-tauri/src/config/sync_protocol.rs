@@ -189,6 +189,7 @@ pub enum SyncErrorKind {
     Network,
     Format,
     ReferenceIntegrity,
+    ConcurrentLocalChange,
     ConcurrentRemoteChange,
     SafeSyncUnavailable,
     Internal,

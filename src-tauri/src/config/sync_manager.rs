@@ -7,6 +7,10 @@ use crate::config::types::{Config, SyncConfig};
 use crate::webdav::client::{UploadCondition, WebDAVClient, WebDavError};
 use std::path::PathBuf;
 
+/// One retry lets us recompute against a changed remote without allowing a permanently busy
+/// endpoint to keep a config save or manual sync in flight indefinitely.
+const MAX_REMOTE_CONCURRENCY_RETRIES: usize = 1;
+
 pub struct SyncManager {
     client: WebDAVClient,
     account_key: String,
@@ -51,7 +55,44 @@ impl SyncManager {
         self.sync_with_resolutions(local_config, &[]).await
     }
 
+    /// Re-run the complete GET → merge → conditional PUT sequence once if the server reports a
+    /// failed write precondition. Each retry re-downloads the document and re-evaluates conflicts
+    /// against the same local snapshot and baseline; it never falls back to an unconditional PUT.
     pub async fn sync_with_resolutions(
+        &self,
+        local_config: &mut Config,
+        resolutions: &[SyncResolution],
+    ) -> Result<SyncOutcome, String> {
+        for attempt in 0..=MAX_REMOTE_CONCURRENCY_RETRIES {
+            let outcome = self
+                .sync_once_with_resolutions(local_config, resolutions)
+                .await?;
+            match outcome {
+                SyncOutcome::ConcurrentRemoteChange { .. }
+                    if attempt < MAX_REMOTE_CONCURRENCY_RETRIES =>
+                {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_retries = MAX_REMOTE_CONCURRENCY_RETRIES,
+                        "WebDAV sync.json changed during conditional upload; recomputing sync"
+                    );
+                }
+                SyncOutcome::ConcurrentRemoteChange { .. } => {
+                    return Ok(SyncOutcome::ConcurrentRemoteChange {
+                        message: format!(
+                            "sync.json kept changing during conditional upload after {} retry; retry synchronization",
+                            MAX_REMOTE_CONCURRENCY_RETRIES
+                        ),
+                    });
+                }
+                outcome => return Ok(outcome),
+            }
+        }
+
+        unreachable!("retry loop always returns");
+    }
+
+    async fn sync_once_with_resolutions(
         &self,
         local_config: &mut Config,
         resolutions: &[SyncResolution],
@@ -287,7 +328,13 @@ impl SyncManager {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::config::types::*;
+    use tempfile::tempdir;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
+    };
 
     #[test]
     fn test_deserialize_sync_config_robustness() {
@@ -335,5 +382,127 @@ mod tests {
         let c: SyncConfig = serde_json::from_str(json).unwrap();
         assert_eq!(c.tombstones.len(), 1);
         assert_eq!(c.removed_ids, vec!["s1".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn retries_once_after_a_failed_if_match_and_uses_the_fresh_etag() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_script(
+                listener,
+                vec![
+                    ("200 OK", vec!["ETag: \"v1\""], b"{\"version\":\"1.0\"}"),
+                    ("412 Precondition Failed", vec![], b""),
+                    ("200 OK", vec!["ETag: \"v2\""], b"{\"version\":\"1.0\"}"),
+                    ("204 No Content", vec!["ETag: \"v3\""], b""),
+                ],
+            )
+            .await
+        });
+
+        let state_dir = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".to_string(),
+            "password".to_string(),
+            None,
+        )
+        .with_state_store(state_dir.path().to_path_buf());
+        let mut local = Config::empty();
+
+        let outcome = manager.sync(&mut local, vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(matches!(outcome, SyncOutcome::Applied { .. }));
+        assert_eq!(requests.len(), 4);
+        assert!(requests[0].starts_with("GET /sync.json HTTP/1.1"));
+        assert!(requests[1]
+            .to_ascii_lowercase()
+            .contains("if-match: \"v1\""));
+        assert!(requests[3]
+            .to_ascii_lowercase()
+            .contains("if-match: \"v2\""));
+    }
+
+    #[tokio::test]
+    async fn stops_after_the_bounded_remote_concurrency_retry() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_script(
+                listener,
+                vec![
+                    ("200 OK", vec!["ETag: \"v1\""], b"{\"version\":\"1.0\"}"),
+                    ("412 Precondition Failed", vec![], b""),
+                    ("200 OK", vec!["ETag: \"v2\""], b"{\"version\":\"1.0\"}"),
+                    ("409 Conflict", vec![], b""),
+                ],
+            )
+            .await
+        });
+
+        let state_dir = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".to_string(),
+            "password".to_string(),
+            None,
+        )
+        .with_state_store(state_dir.path().to_path_buf());
+        let mut local = Config::empty();
+
+        let outcome = manager.sync(&mut local, vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(matches!(
+            outcome,
+            SyncOutcome::ConcurrentRemoteChange { ref message }
+                if message.contains("after 1 retry")
+        ));
+        assert_eq!(requests.len(), 4, "must not retry indefinitely");
+    }
+
+    async fn serve_script(
+        listener: TcpListener,
+        script: Vec<(&'static str, Vec<&'static str>, &'static [u8])>,
+    ) -> Vec<String> {
+        let mut requests = Vec::with_capacity(script.len());
+        for (status, headers, body) in script {
+            let (stream, _) = listener.accept().await.unwrap();
+            let (mut stream, request) = read_request(stream).await;
+            write_response(&mut stream, status, &headers, body).await;
+            requests.push(request);
+        }
+        requests
+    }
+
+    async fn read_request(mut stream: TcpStream) -> (TcpStream, String) {
+        let mut request = Vec::new();
+        let mut buffer = [0; 1024];
+        loop {
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert!(read > 0, "test HTTP client closed before sending headers");
+            request.extend_from_slice(&buffer[..read]);
+            if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                break;
+            }
+        }
+        (stream, String::from_utf8_lossy(&request).into_owned())
+    }
+
+    async fn write_response(stream: &mut TcpStream, status: &str, headers: &[&str], body: &[u8]) {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+        for header in headers {
+            response.push_str(header);
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.write_all(body).await.unwrap();
+        stream.shutdown().await.unwrap();
     }
 }

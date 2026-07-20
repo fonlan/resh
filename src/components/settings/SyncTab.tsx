@@ -1,6 +1,6 @@
 import React, { useState } from "react"
 import { RefreshCw, Check, AlertCircle, Loader2 } from "lucide-react"
-import { GeneralSettings } from "../../types"
+import { GeneralSettings, SyncOutcome } from "../../types"
 import { useTranslation } from "../../i18n"
 import { useConfig } from "../../hooks/useConfig"
 import { CustomSelect } from "../CustomSelect"
@@ -8,6 +8,19 @@ import { CustomSelect } from "../CustomSelect"
 export interface SyncTabProps {
   general: GeneralSettings
   onGeneralUpdate: (general: GeneralSettings) => void
+}
+
+function syncOutcomeMessage(outcome: SyncOutcome): string {
+  switch (outcome.status) {
+    case "applied":
+      return ""
+    case "conflicts":
+      return `${outcome.conflicts.length} sync item(s) need your resolution`
+    case "concurrentRemoteChange":
+      return outcome.message
+    case "failed":
+      return outcome.error.message
+  }
 }
 
 export const SyncTab: React.FC<SyncTabProps> = ({
@@ -37,9 +50,15 @@ export const SyncTab: React.FC<SyncTabProps> = ({
     try {
       setSyncStatus("syncing")
       setSyncError(null)
-      await triggerSync()
-      setSyncStatus("success")
-      setTimeout(() => setSyncStatus("idle"), 3000)
+      const result = await triggerSync()
+      if (result.outcome.status === "applied") {
+        setSyncStatus("success")
+        setTimeout(() => setSyncStatus("idle"), 3000)
+      } else {
+        setSyncStatus("error")
+        setSyncError(syncOutcomeMessage(result.outcome))
+        setTimeout(() => setSyncStatus("idle"), 5000)
+      }
     } catch (err) {
       setSyncStatus("error")
       setSyncError(err instanceof Error ? err.message : String(err))

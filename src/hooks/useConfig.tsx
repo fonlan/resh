@@ -9,7 +9,7 @@ import React, {
 } from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
-import { Config } from "../types"
+import { Config, TriggerSyncResult } from "../types"
 import { logger } from "../utils/logger"
 
 interface ConfigContextType {
@@ -19,7 +19,7 @@ interface ConfigContextType {
   loadConfig: () => Promise<void>
   saveConfig: (config: Config) => Promise<void>
   recordServerConnection: (serverId: string) => Promise<void>
-  triggerSync: () => Promise<Config>
+  triggerSync: () => Promise<TriggerSyncResult>
   /**
    * 同步取出当前 Provider 内最新的 Config 引用。
    * 用于 useCallback 闭包：避免依赖里漏写 `config` 时拿到 stale 快照，
@@ -70,10 +70,14 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
       loadedConfig?.general?.webdav?.url
     ) {
       logger.info("[ConfigProvider] Initiating background startup sync...")
-      invoke<Config>("trigger_sync")
-        .then((syncedConfig) => {
-          logger.info("[ConfigProvider] Startup sync completed")
-          setConfigSafe(syncedConfig)
+      invoke<TriggerSyncResult>("trigger_sync")
+        .then((result) => {
+          if (result.config) {
+            logger.info("[ConfigProvider] Startup sync applied")
+            setConfigSafe(result.config)
+          } else {
+            logger.warn("[ConfigProvider] Startup sync did not apply", result.outcome)
+          }
         })
         .catch((err) => {
           logger.warn("[ConfigProvider] Startup sync failed", err)
@@ -117,10 +121,12 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
   const triggerSync = useCallback(async () => {
     try {
       logger.info("[ConfigProvider] Triggering sync...")
-      const cfg = await invoke<Config>("trigger_sync")
-      logger.info("[ConfigProvider] Sync successful")
-      setConfigSafe(cfg)
-      return cfg
+      const result = await invoke<TriggerSyncResult>("trigger_sync")
+      if (result.config) {
+        setConfigSafe(result.config)
+      }
+      logger.info("[ConfigProvider] Sync completed", result.outcome)
+      return result
     } catch (err) {
       logger.error("[ConfigProvider] Sync failed", err)
       throw err
