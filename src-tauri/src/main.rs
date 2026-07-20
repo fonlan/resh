@@ -333,6 +333,7 @@ async fn main() {
             commands::sftp::sftp_copy,
             commands::sftp::sftp_copy_streaming,
             commands::sftp_edit::sftp_open_text_file,
+            commands::sftp_edit::sftp_check_text_file,
             commands::sftp_edit::sftp_save_text_file,
             commands::sftp_edit::sftp_edit_file,
             commands::sftp_edit::open_local_editor,

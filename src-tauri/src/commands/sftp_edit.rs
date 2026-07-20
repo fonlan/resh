@@ -58,6 +58,21 @@ pub enum SftpSaveTextFileOutcome {
     },
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum SftpCheckTextFileOutcome {
+    Unchanged {
+        revision: RemoteFileRevision,
+    },
+    Changed {
+        reason: String,
+        current_revision: RemoteFileRevision,
+        remote_content: Option<String>,
+        remote_encoding: Option<String>,
+        snapshot_error: Option<String>,
+    },
+}
+
 #[derive(Debug)]
 struct DownloadedRemoteFile {
     bytes_written: u64,
@@ -518,6 +533,67 @@ pub async fn sftp_open_text_file(
         language_hint,
         revision,
     })
+}
+
+#[tauri::command]
+pub async fn sftp_check_text_file(
+    session_id: String,
+    remote_path: String,
+    expected_revision: RemoteFileRevision,
+) -> Result<SftpCheckTextFileOutcome, String> {
+    let current_revision = read_remote_revision(&session_id, &remote_path).await?;
+    let reason = match compare_remote_metadata(&expected_revision, &current_revision) {
+        RemoteRevisionComparison::MetadataUnchanged => {
+            return Ok(SftpCheckTextFileOutcome::Unchanged {
+                revision: current_revision,
+            });
+        }
+        RemoteRevisionComparison::MetadataChanged => "metadataChanged",
+        RemoteRevisionComparison::Deleted => "deleted",
+    };
+
+    if !current_revision.exists {
+        return Ok(SftpCheckTextFileOutcome::Changed {
+            reason: reason.to_string(),
+            current_revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: None,
+        });
+    }
+
+    match read_remote_snapshot(&session_id, &remote_path).await {
+        Ok(snapshot) if !snapshot.revision.exists => Ok(SftpCheckTextFileOutcome::Changed {
+            reason: "deleted".to_string(),
+            current_revision: snapshot.revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: None,
+        }),
+        Ok(snapshot) => match decode_text_bytes(&snapshot.bytes) {
+            Ok((content, encoding)) => Ok(SftpCheckTextFileOutcome::Changed {
+                reason: reason.to_string(),
+                current_revision: snapshot.revision,
+                remote_content: Some(content),
+                remote_encoding: Some(encoding),
+                snapshot_error: None,
+            }),
+            Err(error) => Ok(SftpCheckTextFileOutcome::Changed {
+                reason: reason.to_string(),
+                current_revision: snapshot.revision,
+                remote_content: None,
+                remote_encoding: None,
+                snapshot_error: Some(error),
+            }),
+        },
+        Err(error) => Ok(SftpCheckTextFileOutcome::Changed {
+            reason: reason.to_string(),
+            current_revision,
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: Some(format!("Failed to load remote change snapshot: {}", error)),
+        }),
+    }
 }
 
 #[tauri::command]

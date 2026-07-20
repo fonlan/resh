@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import MonacoEditor, { OnMount } from "@monaco-editor/react"
 import type * as Monaco from "monaco-editor"
-import { Save, Undo2, Redo2, TextWrap } from "lucide-react"
+import { AlertTriangle, Save, Undo2, Redo2, TextWrap } from "lucide-react"
 import { useTranslation } from "../i18n"
 import type { Theme } from "../types"
 
@@ -16,8 +16,10 @@ interface EditorTabProps {
   terminalFontSize: number
   appTheme: Theme
   isSaving: boolean
+  hasRemoteConflict: boolean
   onChange: (value: string) => void
   onSave: () => Promise<boolean>
+  onResolveConflict: () => void
   onLanguageChange: (languageId: string) => void
 }
 
@@ -226,8 +228,10 @@ export const EditorTab: React.FC<EditorTabProps> = ({
   terminalFontSize,
   appTheme,
   isSaving,
+  hasRemoteConflict,
   onChange,
   onSave,
+  onResolveConflict,
   onLanguageChange,
 }) => {
   const { t } = useTranslation()
@@ -641,11 +645,24 @@ export const EditorTab: React.FC<EditorTabProps> = ({
             ) : null}
           </div>
         </div>
-        <div
-          className="min-w-0 flex-1 text-[12px] text-[var(--text-secondary)] truncate text-right"
-          title={remotePath}
-        >
-          {remotePath}
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+          {hasRemoteConflict ? (
+            <button
+              type="button"
+              className="inline-flex h-7 shrink-0 items-center gap-1 rounded border border-amber-500/50 bg-amber-500/10 px-2 text-[11px] text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+              onClick={onResolveConflict}
+              title={t.editorTab.remoteChanged}
+            >
+              <AlertTriangle size={13} aria-hidden="true" />
+              {t.editorTab.remoteChanged}
+            </button>
+          ) : null}
+          <div
+            className="min-w-0 truncate text-right text-[12px] text-[var(--text-secondary)]"
+            title={remotePath}
+          >
+            {remotePath}
+          </div>
         </div>
       </div>
       <div className="flex-1 min-h-0">
@@ -674,8 +691,20 @@ export const EditorTab: React.FC<EditorTabProps> = ({
           {t.editorTab.encoding.replace("{encoding}", encoding)}
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          <span className={dirty ? "text-[var(--danger)]" : ""}>
-            {dirty ? t.editorTab.dirty : t.editorTab.saved}
+          <span
+            className={
+              hasRemoteConflict
+                ? "text-amber-700 dark:text-amber-300"
+                : dirty
+                  ? "text-[var(--danger)]"
+                  : ""
+            }
+          >
+            {hasRemoteConflict
+              ? t.editorTab.remoteChanged
+              : dirty
+                ? t.editorTab.dirty
+                : t.editorTab.saved}
           </span>
           <span>
             {t.editorTab.lineColumn

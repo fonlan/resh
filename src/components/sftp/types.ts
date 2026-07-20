@@ -42,6 +42,42 @@ export interface SftpOpenTextFileResult {
   revision: RemoteFileRevision
 }
 
+export interface SftpSaveTextFileSavedOutcome {
+  status: "saved"
+  revision: RemoteFileRevision
+}
+
+export interface SftpSaveTextFileConflictOutcome {
+  status: "conflict"
+  reason: "metadataChanged" | "deleted" | string
+  currentRevision: RemoteFileRevision
+  remoteContent: string | null
+  remoteEncoding: string | null
+  snapshotError: string | null
+}
+
+export type SftpSaveTextFileOutcome =
+  | SftpSaveTextFileSavedOutcome
+  | SftpSaveTextFileConflictOutcome
+
+export interface SftpCheckTextFileUnchangedOutcome {
+  status: "unchanged"
+  revision: RemoteFileRevision
+}
+
+export interface SftpCheckTextFileChangedOutcome {
+  status: "changed"
+  reason: "metadataChanged" | "deleted" | string
+  currentRevision: RemoteFileRevision
+  remoteContent: string | null
+  remoteEncoding: string | null
+  snapshotError: string | null
+}
+
+export type SftpCheckTextFileOutcome =
+  | SftpCheckTextFileUnchangedOutcome
+  | SftpCheckTextFileChangedOutcome
+
 export interface CopyFallbackModalState {
   isOpen: boolean
   sessionId: string

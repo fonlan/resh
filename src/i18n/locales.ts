@@ -344,6 +344,31 @@ export const locales = {
         documentMissing: "Editor document not found.",
         saveFailed: "Failed to save editor file: {error}",
       },
+      editorConflict: {
+        title: "Remote file changed",
+        description:
+          "The remote file changed while you were editing {path}. Your local edits have been kept and were not saved.",
+        remoteChanged: "The remote file metadata changed.",
+        remoteDeleted: "The remote file was deleted.",
+        remotePath: "Remote path",
+        remoteSize: "Remote size",
+        remoteModified: "Remote modified",
+        notAvailable: "Not available",
+        snapshotUnavailable: "The current remote text could not be loaded: {error}",
+        snapshotUnavailableShort: "The current remote text is unavailable.",
+        localVersion: "Your local edits",
+        remoteVersion: "Current remote version",
+        viewDiff: "View diff",
+        hideDiff: "Hide diff",
+        adoptRemote: "Use remote version",
+        overwriteRemote: "Overwrite remote",
+        overwriteConfirm:
+          "This will replace the current remote file with your local edits. This cannot be undone.",
+        overwriteConfirmAction: "Overwrite remote now",
+        adopted: "Replaced the editor contents with the current remote version.",
+        conflictStillCurrent:
+          "The remote file changed again. Review the latest version before overwriting.",
+      },
     },
     windowControls: {
       minimize: "Minimize",
@@ -371,6 +396,7 @@ export const locales = {
       encoding: "Encoding: {encoding}",
       dirty: "Modified",
       saved: "Saved",
+      remoteChanged: "Remote changed",
       lineColumn: "Ln {line}, Col {column}",
     },
     newTabButton: {
@@ -963,6 +989,30 @@ export const locales = {
         documentMissing: "未找到编辑器文档。",
         saveFailed: "保存编辑器文件失败: {error}",
       },
+      editorConflict: {
+        title: "远程文件已变化",
+        description:
+          "编辑 {path} 期间远程文件已变化。你的本地修改已保留，且尚未保存到远程。",
+        remoteChanged: "远程文件元数据已变化。",
+        remoteDeleted: "远程文件已被删除。",
+        remotePath: "远程路径",
+        remoteSize: "远程大小",
+        remoteModified: "远程修改时间",
+        notAvailable: "不可用",
+        snapshotUnavailable: "无法读取当前远程文本: {error}",
+        snapshotUnavailableShort: "当前远程文本不可用。",
+        localVersion: "你的本地修改",
+        remoteVersion: "当前远程版本",
+        viewDiff: "查看差异",
+        hideDiff: "隐藏差异",
+        adoptRemote: "采用远程版本",
+        overwriteRemote: "覆盖远程文件",
+        overwriteConfirm:
+          "这会用你的本地修改替换当前远程文件，且无法撤销。",
+        overwriteConfirmAction: "立即覆盖远程文件",
+        adopted: "已用当前远程版本替换编辑器内容。",
+        conflictStillCurrent: "远程文件再次变化，请先查看最新版本再覆盖。",
+      },
     },
     windowControls: {
       minimize: "最小化",
@@ -990,6 +1040,7 @@ export const locales = {
       encoding: "编码: {encoding}",
       dirty: "已修改",
       saved: "已保存",
+      remoteChanged: "远程已变化",
       lineColumn: "行 {line}, 列 {column}",
     },
     newTabButton: {

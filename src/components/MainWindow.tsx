@@ -44,6 +44,11 @@ const TerminalTab = React.lazy(() =>
 const EditorTab = React.lazy(() =>
   import("./EditorTab").then((module) => ({ default: module.EditorTab })),
 )
+const EditorConflictDialog = React.lazy(() =>
+  import("./EditorConflictDialog").then((module) => ({
+    default: module.EditorConflictDialog,
+  })),
+)
 import { WindowControls } from "./WindowControls"
 import { WelcomeScreen } from "./WelcomeScreen"
 import { NewTabButton } from "./NewTabButton"
@@ -109,18 +114,14 @@ import {
 import { useTabLayoutMeasurement } from "./main/useTabLayoutMeasurement"
 import { isMacOS } from "../utils/platform"
 
-type RememberedSplitViews = Record<string, SplitViewState>
+import type {
+  SftpCheckTextFileOutcome,
+  SftpSaveTextFileOutcome,
+} from "./sftp/types"
 
-type SftpSaveTextFileOutcome =
-  | {
-      status: "saved"
-      revision: RemoteFileRevision
-    }
-  | {
-      status: "conflict"
-      reason: string
-      snapshotError?: string | null
-    }
+const EDITOR_REMOTE_CHECK_THROTTLE_MS = 3_000
+
+type RememberedSplitViews = Record<string, SplitViewState>
 
 const isRememberedSplitViewValid = (
   splitView: SplitViewState,
@@ -270,8 +271,13 @@ export const MainWindow: React.FC = () => {
   const [editorDocuments, setEditorDocuments] = useState<
     Record<string, EditorDocumentState>
   >({})
+  const editorRemoteCheckInFlightRef = useRef(new Set<string>())
+  const editorRemoteCheckLastAtRef = useRef(new Map<string, number>())
   const [pendingDirtyAction, setPendingDirtyAction] =
     useState<PendingDirtyEditorAction | null>(null)
+  const [editorConflictTabId, setEditorConflictTabId] = useState<string | null>(
+    null,
+  )
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [rememberedSplitViews, setRememberedSplitViews] =
     useState<RememberedSplitViews>({})
@@ -657,6 +663,7 @@ export const MainWindow: React.FC = () => {
                 localPath: opened.localPath,
                 dirty: false,
                 language,
+                revision: opened.revision,
               },
             ])
             setEditorDocuments((prev) => ({
@@ -666,6 +673,7 @@ export const MainWindow: React.FC = () => {
                 savedContent: opened.content,
                 encoding: opened.encoding,
                 revision: opened.revision,
+                conflict: null,
                 isSaving: false,
               },
             }))
@@ -1049,6 +1057,100 @@ export const MainWindow: React.FC = () => {
   )
 
   useEffect(() => {
+    if (!activeTabId) {
+      return
+    }
+    const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    if (!activeTab || !isEditorTab(activeTab)) {
+      return
+    }
+    const document = editorDocuments[activeTab.id]
+    if (
+      !document ||
+      activeTab.dirty ||
+      document.isSaving ||
+      document.conflict ||
+      editorRemoteCheckInFlightRef.current.has(activeTab.id)
+    ) {
+      return
+    }
+
+    const now = Date.now()
+    const lastCheckedAt = editorRemoteCheckLastAtRef.current.get(activeTab.id) || 0
+    if (now - lastCheckedAt < EDITOR_REMOTE_CHECK_THROTTLE_MS) {
+      return
+    }
+    editorRemoteCheckLastAtRef.current.set(activeTab.id, now)
+    editorRemoteCheckInFlightRef.current.add(activeTab.id)
+    const expectedRevision = document.revision
+
+    void invoke<SftpCheckTextFileOutcome>("sftp_check_text_file", {
+      sessionId: activeTab.sessionId,
+      remotePath: activeTab.remotePath,
+      expectedRevision,
+    })
+      .then((outcome) => {
+        if (outcome.status === "unchanged") {
+          return
+        }
+        setEditorDocuments((prev) => {
+          const current = prev[activeTab.id]
+          if (!current || current.revision !== expectedRevision || current.isSaving) {
+            return prev
+          }
+          const conflict = {
+            reason: outcome.reason,
+            currentRevision: outcome.currentRevision,
+            remoteContent: outcome.remoteContent,
+            remoteEncoding: outcome.remoteEncoding,
+            snapshotError: outcome.snapshotError,
+          }
+          if (current.content !== current.savedContent || outcome.remoteContent === null) {
+            return {
+              ...prev,
+              [activeTab.id]: { ...current, conflict },
+            }
+          }
+          return {
+            ...prev,
+            [activeTab.id]: {
+              ...current,
+              content: outcome.remoteContent,
+              savedContent: outcome.remoteContent,
+              encoding: outcome.remoteEncoding || current.encoding,
+              revision: outcome.currentRevision,
+              conflict: null,
+            },
+          }
+        })
+        setTabs((prev) =>
+          prev.map((tab) => {
+            if (
+              !isEditorTab(tab) ||
+              tab.id !== activeTab.id ||
+              tab.dirty ||
+              tab.revision !== expectedRevision ||
+              outcome.remoteContent === null
+            ) {
+              return tab
+            }
+            return {
+              ...tab,
+              revision: outcome.currentRevision,
+              dirty: false,
+            }
+          }),
+        )
+      })
+      .catch((error) => {
+        console.warn("Failed to check the active editor remote revision", error)
+      })
+      .finally(() => {
+        editorRemoteCheckInFlightRef.current.delete(activeTab.id)
+      })
+  }, [activeTabId, tabs, editorDocuments])
+
+  useEffect(() => {
     if (tabs.length === 0) {
       if (splitView) {
         setSplitView(null)
@@ -1350,6 +1452,7 @@ export const MainWindow: React.FC = () => {
         localPath,
         dirty: nextDirty,
         language,
+        revision,
       }
       setTabs((prev) => [...prev, newTab])
       setEditorDocuments((prev) => ({
@@ -1359,6 +1462,7 @@ export const MainWindow: React.FC = () => {
           savedContent: content,
           encoding,
           revision,
+          conflict: null,
           isSaving: false,
         },
       }))
@@ -1446,20 +1550,17 @@ export const MainWindow: React.FC = () => {
       if (currentDocument.isSaving) {
         return false
       }
+
       const savingContent = currentDocument.content
       setEditorDocuments((prev) => {
         const doc = prev[tabId]
-        if (!doc) {
-          return prev
-        }
+        if (!doc) return prev
         return {
           ...prev,
-          [tabId]: {
-            ...doc,
-            isSaving: true,
-          },
+          [tabId]: { ...doc, isSaving: true },
         }
       })
+
       try {
         const outcome = await invoke<SftpSaveTextFileOutcome>(
           "sftp_save_text_file",
@@ -1472,19 +1573,35 @@ export const MainWindow: React.FC = () => {
             expectedRevision: currentDocument.revision,
           },
         )
-        if (outcome.status !== "saved") {
-          throw new Error(
-            outcome.snapshotError ||
-              `Remote file conflict (${outcome.reason}); local changes were not saved`,
-          )
+        if (outcome.status === "conflict") {
+          setPendingDirtyAction(null)
+          setEditorDocuments((prev) => {
+            const doc = prev[tabId]
+            if (!doc) return prev
+            return {
+              ...prev,
+              [tabId]: {
+                ...doc,
+                isSaving: false,
+                conflict: {
+                  reason: outcome.reason,
+                  currentRevision: outcome.currentRevision,
+                  remoteContent: outcome.remoteContent,
+                  remoteEncoding: outcome.remoteEncoding,
+                  snapshotError: outcome.snapshotError,
+                },
+              },
+            }
+          })
+          setEditorConflictTabId(tabId)
+          return false
         }
+
         const savedRevision = outcome.revision
         let nextDirtyAfterSave = false
         setEditorDocuments((prev) => {
           const doc = prev[tabId]
-          if (!doc) {
-            return prev
-          }
+          if (!doc) return prev
           nextDirtyAfterSave = doc.content !== savingContent
           return {
             ...prev,
@@ -1492,6 +1609,7 @@ export const MainWindow: React.FC = () => {
               ...doc,
               savedContent: savingContent,
               revision: savedRevision,
+              conflict: null,
               isSaving: false,
             },
           }
@@ -1499,7 +1617,11 @@ export const MainWindow: React.FC = () => {
         setTabs((prev) =>
           prev.map((tab) =>
             isEditorTab(tab) && tab.id === tabId
-              ? { ...tab, dirty: nextDirtyAfterSave }
+              ? {
+                  ...tab,
+                  dirty: nextDirtyAfterSave,
+                  revision: savedRevision,
+                }
               : tab,
           ),
         )
@@ -1513,15 +1635,10 @@ export const MainWindow: React.FC = () => {
         )
         setEditorDocuments((prev) => {
           const doc = prev[tabId]
-          if (!doc) {
-            return prev
-          }
+          if (!doc) return prev
           return {
             ...prev,
-            [tabId]: {
-              ...doc,
-              isSaving: false,
-            },
+            [tabId]: { ...doc, isSaving: false },
           }
         })
         return false
@@ -1536,6 +1653,151 @@ export const MainWindow: React.FC = () => {
       t.mainWindow.editor.saveFailed,
     ],
   )
+
+  const handleAdoptRemoteEditorConflict = useCallback(() => {
+    const tabId = editorConflictTabId
+    if (!tabId) return
+    const document = editorDocuments[tabId]
+    const conflict = document?.conflict
+    if (!document || !conflict || conflict.remoteContent === null) return
+
+    const revision = conflict.currentRevision
+    setEditorDocuments((prev) => {
+      const current = prev[tabId]
+      const currentConflict = current?.conflict
+      if (!current || !currentConflict || currentConflict.remoteContent === null) {
+        return prev
+      }
+      return {
+        ...prev,
+        [tabId]: {
+          ...current,
+          content: currentConflict.remoteContent,
+          savedContent: currentConflict.remoteContent,
+          encoding: currentConflict.remoteEncoding || current.encoding,
+          revision: currentConflict.currentRevision,
+          conflict: null,
+          isSaving: false,
+        },
+      }
+    })
+    setTabs((prev) =>
+      prev.map((tab) =>
+        isEditorTab(tab) && tab.id === tabId
+          ? { ...tab, dirty: false, revision }
+          : tab,
+      ),
+    )
+    setEditorConflictTabId(null)
+    showToast(t.mainWindow.editorConflict.adopted, "success")
+  }, [editorConflictTabId, editorDocuments, showToast, t.mainWindow.editorConflict.adopted])
+
+  const handleOverwriteEditorConflict = useCallback(async () => {
+    const tabId = editorConflictTabId
+    if (!tabId) return
+    const targetTab = tabs.find(
+      (tab): tab is EditorTabState => tab.id === tabId && isEditorTab(tab),
+    )
+    const document = editorDocuments[tabId]
+    const conflict = document?.conflict
+    if (!targetTab || !document || !conflict || document.isSaving) return
+
+    const savingContent = document.content
+    setEditorDocuments((prev) => {
+      const current = prev[tabId]
+      if (!current) return prev
+      return { ...prev, [tabId]: { ...current, isSaving: true } }
+    })
+
+    try {
+      const outcome = await invoke<SftpSaveTextFileOutcome>(
+        "sftp_save_text_file",
+        {
+          sessionId: targetTab.sessionId,
+          remotePath: targetTab.remotePath,
+          localPath: targetTab.localPath,
+          content: savingContent,
+          encoding: document.encoding,
+          expectedRevision: document.revision,
+          saveMode: "overwrite",
+          conflictRevision: conflict.currentRevision,
+        },
+      )
+      if (outcome.status === "conflict") {
+        setEditorDocuments((prev) => {
+          const current = prev[tabId]
+          if (!current) return prev
+          return {
+            ...prev,
+            [tabId]: {
+              ...current,
+              isSaving: false,
+              conflict: {
+                reason: outcome.reason,
+                currentRevision: outcome.currentRevision,
+                remoteContent: outcome.remoteContent,
+                remoteEncoding: outcome.remoteEncoding,
+                snapshotError: outcome.snapshotError,
+              },
+            },
+          }
+        })
+        showToast(t.mainWindow.editorConflict.conflictStillCurrent, "error")
+        return
+      }
+
+      const savedRevision = outcome.revision
+      let nextDirtyAfterSave = false
+      setEditorDocuments((prev) => {
+        const current = prev[tabId]
+        if (!current) return prev
+        nextDirtyAfterSave = current.content !== savingContent
+        return {
+          ...prev,
+          [tabId]: {
+            ...current,
+            savedContent: savingContent,
+            revision: savedRevision,
+            conflict: null,
+            isSaving: false,
+          },
+        }
+      })
+      setTabs((prev) =>
+        prev.map((tab) =>
+          isEditorTab(tab) && tab.id === tabId
+            ? {
+                ...tab,
+                dirty: nextDirtyAfterSave,
+                revision: savedRevision,
+              }
+            : tab,
+        ),
+      )
+      setEditorConflictTabId(null)
+      showToast(t.saveStatus.saved, "success")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      showToast(
+        t.mainWindow.editor.saveFailed.replace("{error}", message),
+        "error",
+      )
+      setEditorDocuments((prev) => {
+        const current = prev[tabId]
+        if (!current) return prev
+        return { ...prev, [tabId]: { ...current, isSaving: false } }
+      })
+    }
+  }, [
+    editorConflictTabId,
+    tabs,
+    editorDocuments,
+    showToast,
+    t.saveStatus.saved,
+    t.mainWindow.editor.saveFailed,
+    t.mainWindow.editorConflict.conflictStillCurrent,
+  ])
+
   useEffect(() => {
     const handleOpenEditorTab = (event: Event) => {
       const detail = (event as CustomEvent<OpenEditorTabPayload>).detail
@@ -1580,6 +1842,7 @@ export const MainWindow: React.FC = () => {
             localPath: sourceTab.localPath,
             dirty: sourceTab.dirty,
             language: sourceTab.language,
+            revision: sourceTab.revision,
           }
 
       const newTabs = [...tabs]
@@ -1593,6 +1856,7 @@ export const MainWindow: React.FC = () => {
             savedContent: sourceDocument.savedContent,
             encoding: sourceDocument.encoding,
             revision: sourceDocument.revision,
+            conflict: sourceDocument.conflict,
             isSaving: false,
           },
         }))
@@ -2034,6 +2298,15 @@ export const MainWindow: React.FC = () => {
   const contextMenuTab = contextMenu
     ? tabs.find((tab) => tab.id === contextMenu.tabId) || null
     : null
+  const editorConflictTab = editorConflictTabId
+    ? tabs.find(
+        (tab): tab is EditorTabState =>
+          tab.id === editorConflictTabId && isEditorTab(tab),
+      ) || null
+    : null
+  const editorConflictDocument = editorConflictTab
+    ? editorDocuments[editorConflictTab.id]
+    : null
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden animate-[fadeIn_0.4s_ease-out]">
@@ -2399,10 +2672,12 @@ export const MainWindow: React.FC = () => {
                             }
                             appTheme={config?.general.theme || "dark"}
                             isSaving={editorDocument.isSaving}
+                            hasRemoteConflict={editorDocument.conflict !== null}
                             onChange={(value) =>
                               handleEditorContentChange(tab.id, value)
                             }
                             onSave={() => handleSaveEditorTab(tab.id)}
+                            onResolveConflict={() => setEditorConflictTabId(tab.id)}
                             onLanguageChange={(languageId) =>
                               handleEditorLanguageChange(tab.id, languageId)
                             }
@@ -2462,6 +2737,21 @@ export const MainWindow: React.FC = () => {
         onCancel={() => setPendingSplitLayout(null)}
         onConfirm={handleConfirmSplitSelection}
       />
+
+      <Suspense fallback={null}>
+        {editorConflictTab && editorConflictDocument?.conflict ? (
+          <EditorConflictDialog
+            conflict={editorConflictDocument.conflict}
+            remotePath={editorConflictTab.remotePath}
+            localContent={editorConflictDocument.content}
+            language={editorConflictTab.language}
+            isSaving={editorConflictDocument.isSaving}
+            onAdoptRemote={handleAdoptRemoteEditorConflict}
+            onOverwrite={handleOverwriteEditorConflict}
+            onClose={() => setEditorConflictTabId(null)}
+          />
+        ) : null}
+      </Suspense>
 
       {/* Settings Modal */}
       <Suspense fallback={null}>

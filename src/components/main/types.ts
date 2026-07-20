@@ -29,6 +29,7 @@ export interface EditorTabState extends BaseTab {
   localPath: string
   dirty: boolean
   language: string
+  revision: RemoteFileRevision
 }
 
 export type Tab = TerminalTabState | EditorTabState
@@ -52,11 +53,20 @@ export interface OpenEditorTabPayload {
   label?: string
 }
 
+export interface EditorConflictState {
+  reason: "metadataChanged" | "deleted" | string
+  currentRevision: RemoteFileRevision
+  remoteContent: string | null
+  remoteEncoding: string | null
+  snapshotError: string | null
+}
+
 export interface EditorDocumentState {
   content: string
   savedContent: string
   encoding: string
   revision: RemoteFileRevision
+  conflict: EditorConflictState | null
   isSaving: boolean
 }
 
