@@ -49,6 +49,11 @@ const EditorConflictDialog = React.lazy(() =>
     default: module.EditorConflictDialog,
   })),
 )
+const ExternalEditConflictDialog = React.lazy(() =>
+  import("./ExternalEditConflictDialog").then((module) => ({
+    default: module.ExternalEditConflictDialog,
+  })),
+)
 import { WindowControls } from "./WindowControls"
 import { WelcomeScreen } from "./WelcomeScreen"
 import { NewTabButton } from "./NewTabButton"
@@ -94,9 +99,11 @@ import {
   isTerminalTab,
   type EditorDocumentState,
   type EditorTabState,
+  type ExternalEditConflictState,
   type OpenEditorTabPayload,
   type PendingDirtyEditorAction,
   type RemoteFileRevision,
+  type SftpResolveEditConflictOutcome,
   type SplitViewState,
   type Tab,
 } from "./main/types"
@@ -236,6 +243,42 @@ export const MainWindow: React.FC = () => {
     }
   }, [showToast])
 
+  // Global external-editor auto-upload conflicts (works even if SFTP sidebar is closed).
+  useEffect(() => {
+    let isMounted = true
+
+    const conflictListener = listen<ExternalEditConflictState>(
+      "sftp-edit-conflict",
+      (event) => {
+        if (!isMounted) return
+        const payload = event.payload
+        if (!payload?.editId || !payload?.conflictId) return
+
+        setExternalEditConflicts((prev) => ({
+          ...prev,
+          [payload.conflictId]: {
+            editId: payload.editId,
+            conflictId: payload.conflictId,
+            sessionId: payload.sessionId,
+            remotePath: payload.remotePath,
+            localPath: payload.localPath,
+            reason: payload.reason,
+            expectedRevision: payload.expectedRevision,
+            currentRevision: payload.currentRevision,
+            pendingLocalChanges: Boolean(payload.pendingLocalChanges),
+            snapshotError: payload.snapshotError ?? null,
+          },
+        }))
+        setActiveExternalEditConflictId((current) => current ?? payload.conflictId)
+      },
+    )
+
+    return () => {
+      isMounted = false
+      conflictListener.then((unlisten) => unlisten())
+    }
+  }, [])
+
   const removeToast = (id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }
@@ -278,6 +321,13 @@ export const MainWindow: React.FC = () => {
   const [editorConflictTabId, setEditorConflictTabId] = useState<string | null>(
     null,
   )
+  const [externalEditConflicts, setExternalEditConflicts] = useState<
+    Record<string, ExternalEditConflictState>
+  >({})
+  const [activeExternalEditConflictId, setActiveExternalEditConflictId] =
+    useState<string | null>(null)
+  const [externalEditConflictResolving, setExternalEditConflictResolving] =
+    useState(false)
   const [splitView, setSplitView] = useState<SplitViewState | null>(null)
   const [rememberedSplitViews, setRememberedSplitViews] =
     useState<RememberedSplitViews>({})
@@ -948,16 +998,46 @@ export const MainWindow: React.FC = () => {
 
   const handleTabSessionChange = (tabId: string, sessionId: string | null) => {
     const normalizedSessionId = sessionId || ""
+    const previousSessionId = tabSessions[tabId] || ""
+    if (previousSessionId === normalizedSessionId) {
+      return
+    }
+
     setTabSessions((prev) => {
-      if (prev[tabId] === normalizedSessionId) {
+      if ((prev[tabId] || "") === normalizedSessionId) {
         return prev
       }
-
       return {
         ...prev,
         [tabId]: normalizedSessionId,
       }
     })
+
+    // Backend cleanup_session drops watchers/temp dirs; mirror that in the UI map.
+    if (previousSessionId && !normalizedSessionId) {
+      const removedIds = new Set(
+        Object.values(externalEditConflicts)
+          .filter((conflict) => conflict.sessionId === previousSessionId)
+          .map((conflict) => conflict.conflictId),
+      )
+      if (removedIds.size === 0) {
+        return
+      }
+      setExternalEditConflicts((prev) => {
+        const next = { ...prev }
+        let changed = false
+        for (const id of removedIds) {
+          if (id in next) {
+            delete next[id]
+            changed = true
+          }
+        }
+        return changed ? next : prev
+      })
+      setActiveExternalEditConflictId((current) =>
+        current && removedIds.has(current) ? null : current,
+      )
+    }
   }
 
   const triggerTerminalResize = useCallback(() => {
@@ -1798,6 +1878,110 @@ export const MainWindow: React.FC = () => {
     t.mainWindow.editorConflict.conflictStillCurrent,
   ])
 
+  const applyExternalEditConflictOutcome = useCallback(
+    (outcome: SftpResolveEditConflictOutcome) => {
+      if (outcome.status === "conflict") {
+        setExternalEditConflicts((prev) => ({
+          ...prev,
+          [outcome.conflictId]: {
+            editId: outcome.editId,
+            conflictId: outcome.conflictId,
+            sessionId: outcome.sessionId,
+            remotePath: outcome.remotePath,
+            localPath: outcome.localPath,
+            reason: outcome.reason,
+            expectedRevision: outcome.expectedRevision,
+            currentRevision: outcome.currentRevision,
+            pendingLocalChanges: Boolean(outcome.pendingLocalChanges),
+            snapshotError: outcome.snapshotError ?? null,
+          },
+        }))
+        setActiveExternalEditConflictId(outcome.conflictId)
+        showToast(t.mainWindow.externalEditConflict.conflictStillCurrent, "error")
+        return
+      }
+
+      setExternalEditConflicts((prev) => {
+        const next = { ...prev }
+        delete next[outcome.conflictId]
+        return next
+      })
+      setActiveExternalEditConflictId((current) =>
+        current === outcome.conflictId ? null : current,
+      )
+
+      if (outcome.action === "adoptRemote") {
+        showToast(t.mainWindow.externalEditConflict.adopted, "success")
+      } else {
+        showToast(t.mainWindow.externalEditConflict.overwrote, "success")
+      }
+    },
+    [
+      showToast,
+      t.mainWindow.externalEditConflict.adopted,
+      t.mainWindow.externalEditConflict.conflictStillCurrent,
+      t.mainWindow.externalEditConflict.overwrote,
+    ],
+  )
+
+  const resolveExternalEditConflict = useCallback(
+    async (
+      conflict: ExternalEditConflictState,
+      action:
+        | "adoptRemote"
+        | "overwriteRemote"
+        | "recreateRemote"
+        | "keepPaused",
+    ) => {
+      setExternalEditConflictResolving(true)
+      try {
+        const outcome = await invoke<SftpResolveEditConflictOutcome>(
+          "resolve_sftp_edit_conflict",
+          {
+            editId: conflict.editId,
+            conflictId: conflict.conflictId,
+            action,
+          },
+        )
+        if (action === "keepPaused") {
+          setActiveExternalEditConflictId(null)
+          showToast(t.mainWindow.externalEditConflict.keptPaused, "info")
+          return
+        }
+        applyExternalEditConflictOutcome(outcome)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (
+          /not found|No pending external edit conflict|stale/i.test(message)
+        ) {
+          setExternalEditConflicts((prev) => {
+            const next = { ...prev }
+            delete next[conflict.conflictId]
+            return next
+          })
+          setActiveExternalEditConflictId((current) =>
+            current === conflict.conflictId ? null : current,
+          )
+        }
+        showToast(
+          t.mainWindow.externalEditConflict.resolveFailed.replace(
+            "{error}",
+            message,
+          ),
+          "error",
+        )
+      } finally {
+        setExternalEditConflictResolving(false)
+      }
+    },
+    [
+      applyExternalEditConflictOutcome,
+      showToast,
+      t.mainWindow.externalEditConflict.keptPaused,
+      t.mainWindow.externalEditConflict.resolveFailed,
+    ],
+  )
+
   useEffect(() => {
     const handleOpenEditorTab = (event: Event) => {
       const detail = (event as CustomEvent<OpenEditorTabPayload>).detail
@@ -2307,6 +2491,14 @@ export const MainWindow: React.FC = () => {
   const editorConflictDocument = editorConflictTab
     ? editorDocuments[editorConflictTab.id]
     : null
+  const activeExternalEditConflict = activeExternalEditConflictId
+    ? externalEditConflicts[activeExternalEditConflictId] || null
+    : null
+  const externalEditConflictBannerItems = Object.values(
+    externalEditConflicts,
+  ).filter(
+    (conflict) => conflict.conflictId !== activeExternalEditConflictId,
+  )
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden animate-[fadeIn_0.4s_ease-out]">
@@ -2751,7 +2943,65 @@ export const MainWindow: React.FC = () => {
             onClose={() => setEditorConflictTabId(null)}
           />
         ) : null}
+        {activeExternalEditConflict ? (
+          <ExternalEditConflictDialog
+            key={activeExternalEditConflict.conflictId}
+            conflict={activeExternalEditConflict}
+            isResolving={externalEditConflictResolving}
+            onAdoptRemote={() =>
+              resolveExternalEditConflict(
+                activeExternalEditConflict,
+                "adoptRemote",
+              )
+            }
+            onOverwrite={() =>
+              resolveExternalEditConflict(
+                activeExternalEditConflict,
+                "overwriteRemote",
+              )
+            }
+            onRecreate={() =>
+              resolveExternalEditConflict(
+                activeExternalEditConflict,
+                "recreateRemote",
+              )
+            }
+            onKeepPaused={() =>
+              resolveExternalEditConflict(
+                activeExternalEditConflict,
+                "keepPaused",
+              )
+            }
+          />
+        ) : null}
       </Suspense>
+
+      {externalEditConflictBannerItems.length > 0 ? (
+        <div className="pointer-events-none fixed bottom-4 left-1/2 z-[1250] flex w-[min(640px,94vw)] -translate-x-1/2 flex-col gap-2">
+          {externalEditConflictBannerItems.map((conflict) => (
+            <div
+              key={conflict.conflictId}
+              className="pointer-events-auto flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-amber-500/40 bg-[var(--bg-secondary)] px-3 py-2 shadow-[0_12px_32px_rgba(0,0,0,0.35)]"
+            >
+              <div className="min-w-0">
+                <p className="text-[12px] font-medium text-[var(--text-primary)]">
+                  {t.mainWindow.externalEditConflict.bannerTitle}
+                </p>
+                <p className="truncate text-[11px] text-[var(--text-secondary)]">
+                  {conflict.remotePath}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="h-8 shrink-0 rounded border border-amber-500/50 bg-amber-500/15 px-3 text-[12px] text-[var(--text-primary)] hover:bg-amber-500/25"
+                onClick={() => setActiveExternalEditConflictId(conflict.conflictId)}
+              >
+                {t.mainWindow.externalEditConflict.bannerAction}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {/* Settings Modal */}
       <Suspense fallback={null}>

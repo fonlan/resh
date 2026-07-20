@@ -369,6 +369,46 @@ export const locales = {
         conflictStillCurrent:
           "The remote file changed again. Review the latest version before overwriting.",
       },
+      externalEditConflict: {
+        title: "External edit auto-upload paused",
+        description:
+          "Automatic upload for {path} is paused because the remote file changed while you edited it locally.",
+        autoUploadPaused: "Automatic upload is paused for this file.",
+        remoteChanged: "The remote file metadata changed.",
+        remoteDeleted: "The remote file was deleted.",
+        pendingLocal:
+          "Your latest local save is kept as the pending version to upload.",
+        remotePath: "Remote path",
+        localPath: "Local temp file",
+        remoteSize: "Remote size",
+        remoteModified: "Remote modified",
+        notAvailable: "Not available",
+        snapshotUnavailable:
+          "The current remote revision could not be fully loaded: {error}",
+        changedHint:
+          "Use the remote version to replace the local temp file, or overwrite remote with your local file. Keep paused leaves auto-upload off until you decide.",
+        deletedHint:
+          "The remote file no longer exists. Keep paused, or explicitly recreate it from your local temp file.",
+        keepPaused: "Keep paused",
+        adoptRemote: "Use remote version",
+        overwriteRemote: "Overwrite remote",
+        recreateRemote: "Recreate remote file",
+        overwriteConfirm:
+          "This will replace the current remote file with your local temp file. This cannot be undone.",
+        overwriteConfirmAction: "Overwrite remote now",
+        recreateConfirm:
+          "This will create the remote file again from your local temp file.",
+        recreateConfirmAction: "Recreate remote now",
+        adopted:
+          "Replaced the local temp file with the remote version. Auto-upload resumed.",
+        overwrote: "Uploaded the local temp file and resumed auto-upload.",
+        keptPaused: "Auto-upload stays paused for this file.",
+        conflictStillCurrent:
+          "The remote file changed again. Review the latest conflict before overwriting.",
+        resolveFailed: "Failed to resolve external edit conflict: {error}",
+        bannerTitle: "External edit upload paused",
+        bannerAction: "Review",
+      },
     },
     windowControls: {
       minimize: "Minimize",
@@ -1012,6 +1052,41 @@ export const locales = {
         overwriteConfirmAction: "立即覆盖远程文件",
         adopted: "已用当前远程版本替换编辑器内容。",
         conflictStillCurrent: "远程文件再次变化，请先查看最新版本再覆盖。",
+      },
+      externalEditConflict: {
+        title: "外部编辑自动上传已暂停",
+        description:
+          "本地编辑 {path} 时远程文件已变化，自动上传已暂停。",
+        autoUploadPaused: "该文件的自动上传已暂停。",
+        remoteChanged: "远程文件元数据已变化。",
+        remoteDeleted: "远程文件已被删除。",
+        pendingLocal: "你的最新本地保存已合并为待上传版本。",
+        remotePath: "远程路径",
+        localPath: "本地临时文件",
+        remoteSize: "远程大小",
+        remoteModified: "远程修改时间",
+        notAvailable: "不可用",
+        snapshotUnavailable: "无法完整加载当前远程 revision: {error}",
+        changedHint:
+          "可采用远程版本覆盖本地临时文件，或用本地文件覆盖远程。保持暂停会维持自动上传关闭，直到你决定。",
+        deletedHint:
+          "远程文件已不存在。可保持暂停，或明确选择从本地临时文件重新创建远程文件。",
+        keepPaused: "保持暂停",
+        adoptRemote: "采用远程版本",
+        overwriteRemote: "覆盖远程文件",
+        recreateRemote: "重新创建远程文件",
+        overwriteConfirm:
+          "这会用本地临时文件替换当前远程文件，且无法撤销。",
+        overwriteConfirmAction: "立即覆盖远程文件",
+        recreateConfirm: "这会根据本地临时文件重新创建远程文件。",
+        recreateConfirmAction: "立即重新创建",
+        adopted: "已用远程版本替换本地临时文件，并恢复自动上传。",
+        overwrote: "已上传本地临时文件，并恢复自动上传。",
+        keptPaused: "该文件的自动上传仍保持暂停。",
+        conflictStillCurrent: "远程文件再次变化，请先查看最新冲突再覆盖。",
+        resolveFailed: "处理外部编辑冲突失败: {error}",
+        bannerTitle: "外部编辑上传已暂停",
+        bannerAction: "处理",
       },
     },
     windowControls: {

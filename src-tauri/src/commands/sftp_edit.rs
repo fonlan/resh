@@ -778,7 +778,7 @@ pub async fn sftp_edit_file(
     );
 
     // 4. Register watcher with the same revision contract as the built-in editor.
-    state.sftp_edit_manager.watch_file(
+    let _edit_id = state.sftp_edit_manager.watch_file(
         local_path.clone(),
         session_id,
         remote_path,
@@ -786,6 +786,22 @@ pub async fn sftp_edit_file(
     )?;
 
     Ok(local_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn resolve_sftp_edit_conflict(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    edit_id: String,
+    conflict_id: String,
+    action: String,
+) -> Result<crate::sftp_manager::edit::SftpResolveEditConflictOutcome, String> {
+    let state = state.inner().clone();
+    let state_for_args = state.clone();
+    state
+        .sftp_edit_manager
+        .resolve_edit_conflict(&app, state_for_args.as_ref(), edit_id, conflict_id, action)
+        .await
 }
 
 #[tauri::command]

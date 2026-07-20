@@ -61,6 +61,44 @@ export interface EditorConflictState {
   snapshotError: string | null
 }
 
+export interface ExternalEditConflictState {
+  editId: string
+  conflictId: string
+  sessionId: string
+  remotePath: string
+  localPath: string
+  reason: "metadataChanged" | "deleted" | string
+  expectedRevision: RemoteFileRevision
+  currentRevision: RemoteFileRevision
+  pendingLocalChanges: boolean
+  snapshotError: string | null
+}
+
+export type SftpResolveEditConflictOutcome =
+  | {
+      status: "resolved"
+      editId: string
+      conflictId: string
+      sessionId: string
+      remotePath: string
+      localPath: string
+      action: string
+      revision?: RemoteFileRevision | null
+    }
+  | {
+      status: "conflict"
+      editId: string
+      conflictId: string
+      sessionId: string
+      remotePath: string
+      localPath: string
+      reason: string
+      expectedRevision: RemoteFileRevision
+      currentRevision: RemoteFileRevision
+      pendingLocalChanges: boolean
+      snapshotError?: string | null
+    }
+
 export interface EditorDocumentState {
   content: string
   savedContent: string
