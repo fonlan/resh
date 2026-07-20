@@ -1508,6 +1508,271 @@ mod tests {
         }
     }
 
+    fn full_sync_config() -> Config {
+        let mut config = Config::empty();
+        config.authentications.push(Authentication {
+            id: "auth".into(),
+            name: "Authentication base".into(),
+            auth_type: "password".into(),
+            key_content: None,
+            passphrase: None,
+            password: Some("secret".into()),
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        config.proxies.push(Proxy {
+            id: "proxy".into(),
+            name: "Proxy base".into(),
+            proxy_type: "http".into(),
+            host: "proxy.example".into(),
+            port: 8080,
+            username: None,
+            password: None,
+            ignore_ssl_errors: false,
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        let mut server = sample_server("server", "Server base");
+        server.auth_id = Some("auth".into());
+        server.proxy_id = Some("proxy".into());
+        config.servers.push(server);
+        config.snippets.push(Snippet {
+            id: "snippet".into(),
+            name: "Snippet base".into(),
+            content: "echo base".into(),
+            description: None,
+            group: None,
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        config.ai_channels.push(AiChannel {
+            id: "channel".into(),
+            name: "Channel base".into(),
+            provider: "openai".into(),
+            endpoint: Some("https://api.example".into()),
+            api_key: Some("key".into()),
+            proxy_id: Some("proxy".into()),
+            is_active: true,
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        config.ai_models.push(AiModel {
+            id: "model".into(),
+            name: "Model base".into(),
+            channel_id: "channel".into(),
+            context_window: None,
+            response_reserve: None,
+            enabled: true,
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        config.sftp_custom_commands.push(SftpCustomCommand {
+            id: "command".into(),
+            name: "Command base".into(),
+            pattern: "*.log".into(),
+            command: "tail -f".into(),
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        });
+        config.additional_prompt = Some("Prompt base".into());
+        config
+    }
+
+    fn remote_from_config(config: &Config) -> SyncConfig {
+        SyncConfig {
+            version: config.version.clone(),
+            sync_schema: Some(SYNC_SCHEMA_VERSION),
+            revision: None,
+            servers: config.servers.clone(),
+            authentications: config.authentications.clone(),
+            proxies: config.proxies.clone(),
+            snippets: config.snippets.clone(),
+            ai_channels: config.ai_channels.clone(),
+            ai_models: config.ai_models.clone(),
+            sftp_custom_commands: config.sftp_custom_commands.clone(),
+            additional_prompt: config.additional_prompt.clone(),
+            additional_prompt_updated_at: config.additional_prompt_updated_at.clone(),
+            tombstones: vec![],
+            removed_ids: vec![],
+        }
+    }
+
+    fn baseline_for_config(config: &Config) -> AccountSyncBaseline {
+        let mut baseline = AccountSyncBaseline::default();
+        for (key, hash) in local_synced_hashes(config) {
+            baseline.set_entity_hash(&key, hash);
+        }
+        baseline.sync_schema = SYNC_SCHEMA_VERSION;
+        baseline
+    }
+
+    fn renamed_full_config(mut config: Config, suffix: &str) -> Config {
+        config.servers[0].name = format!("Server {suffix}");
+        config.authentications[0].name = format!("Authentication {suffix}");
+        config.proxies[0].name = format!("Proxy {suffix}");
+        config.snippets[0].name = format!("Snippet {suffix}");
+        config.snippets[0].content = format!("echo {suffix}");
+        config.ai_channels[0].name = format!("Channel {suffix}");
+        config.ai_models[0].name = format!("Model {suffix}");
+        config.sftp_custom_commands[0].name = format!("Command {suffix}");
+        config.additional_prompt = Some(format!("Prompt {suffix}"));
+        config
+    }
+
+    fn assert_all_entity_values(config: &Config, suffix: &str) {
+        assert_eq!(config.servers[0].name, format!("Server {suffix}"));
+        assert_eq!(
+            config.authentications[0].name,
+            format!("Authentication {suffix}")
+        );
+        assert_eq!(config.proxies[0].name, format!("Proxy {suffix}"));
+        assert_eq!(config.snippets[0].content, format!("echo {suffix}"));
+        assert_eq!(config.ai_channels[0].name, format!("Channel {suffix}"));
+        assert_eq!(config.ai_models[0].name, format!("Model {suffix}"));
+        assert_eq!(
+            config.sftp_custom_commands[0].name,
+            format!("Command {suffix}")
+        );
+        let expected_prompt = format!("Prompt {suffix}");
+        assert_eq!(
+            config.additional_prompt.as_deref(),
+            Some(expected_prompt.as_str())
+        );
+    }
+
+    fn assert_all_remote_entity_values(config: &SyncConfig, suffix: &str) {
+        assert_eq!(config.servers[0].name, format!("Server {suffix}"));
+        assert_eq!(
+            config.authentications[0].name,
+            format!("Authentication {suffix}")
+        );
+        assert_eq!(config.proxies[0].name, format!("Proxy {suffix}"));
+        assert_eq!(config.snippets[0].content, format!("echo {suffix}"));
+        assert_eq!(config.ai_channels[0].name, format!("Channel {suffix}"));
+        assert_eq!(config.ai_models[0].name, format!("Model {suffix}"));
+        assert_eq!(
+            config.sftp_custom_commands[0].name,
+            format!("Command {suffix}")
+        );
+        let expected_prompt = format!("Prompt {suffix}");
+        assert_eq!(
+            config.additional_prompt.as_deref(),
+            Some(expected_prompt.as_str())
+        );
+    }
+
+    #[test]
+    fn every_sync_entity_type_follows_the_three_way_merge_matrix() {
+        let base = full_sync_config();
+        let baseline = baseline_for_config(&base);
+
+        let unchanged = merge_configs(&base, &remote_from_config(&base), Some(&baseline), &[]);
+        assert!(unchanged.conflicts.is_empty());
+        assert_all_entity_values(&unchanged.merged_local.unwrap(), "base");
+
+        let local_changed = renamed_full_config(base.clone(), "local");
+        let local_only = merge_configs(
+            &local_changed,
+            &remote_from_config(&base),
+            Some(&baseline),
+            &[],
+        );
+        assert!(local_only.conflicts.is_empty());
+        assert_all_remote_entity_values(&local_only.merged_remote.unwrap(), "local");
+
+        let identical_both_sides = merge_configs(
+            &local_changed,
+            &remote_from_config(&local_changed),
+            Some(&baseline),
+            &[],
+        );
+        assert!(identical_both_sides.conflicts.is_empty());
+        assert_all_entity_values(&identical_both_sides.merged_local.unwrap(), "local");
+
+        let remote_changed = renamed_full_config(base.clone(), "remote");
+        let remote_only = merge_configs(
+            &base,
+            &remote_from_config(&remote_changed),
+            Some(&baseline),
+            &[],
+        );
+        assert!(remote_only.conflicts.is_empty());
+        assert_all_entity_values(&remote_only.merged_local.unwrap(), "remote");
+
+        let all_entity_types = BTreeSet::from([
+            SyncEntityType::Server,
+            SyncEntityType::Authentication,
+            SyncEntityType::Proxy,
+            SyncEntityType::Snippet,
+            SyncEntityType::AiChannel,
+            SyncEntityType::AiModel,
+            SyncEntityType::SftpCustomCommand,
+            SyncEntityType::AdditionalPrompt,
+        ]);
+        let delete_vs_modify = merge_configs(
+            &Config::empty(),
+            &remote_from_config(&remote_changed),
+            Some(&baseline),
+            &[],
+        );
+        assert_eq!(
+            delete_vs_modify
+                .conflicts
+                .iter()
+                .map(|conflict| conflict.entity_type)
+                .collect::<BTreeSet<_>>(),
+            all_entity_types
+        );
+
+        let conflicted = merge_configs(
+            &local_changed,
+            &remote_from_config(&remote_changed),
+            Some(&baseline),
+            &[],
+        );
+        let entity_types: BTreeSet<_> = conflicted
+            .conflicts
+            .iter()
+            .map(|conflict| conflict.entity_type)
+            .collect();
+        assert_eq!(
+            entity_types,
+            BTreeSet::from([
+                SyncEntityType::Server,
+                SyncEntityType::Authentication,
+                SyncEntityType::Proxy,
+                SyncEntityType::Snippet,
+                SyncEntityType::AiChannel,
+                SyncEntityType::AiModel,
+                SyncEntityType::SftpCustomCommand,
+                SyncEntityType::AdditionalPrompt,
+            ])
+        );
+        assert!(conflicted
+            .conflicts
+            .iter()
+            .all(|conflict| conflict.kind == SyncConflictKind::BothModified));
+
+        let resolutions = conflicted
+            .conflicts
+            .iter()
+            .map(|conflict| SyncResolution {
+                entity_type: conflict.entity_type,
+                id: conflict.id.clone(),
+                choice: SyncResolutionChoice::KeepLocal,
+                resolution_token: conflict.resolution_token.clone(),
+            })
+            .collect::<Vec<_>>();
+        let resolved = merge_configs(
+            &local_changed,
+            &remote_from_config(&remote_changed),
+            Some(&baseline),
+            &resolutions,
+        );
+        assert!(resolved.conflicts.is_empty());
+        assert_all_remote_entity_values(&resolved.merged_remote.unwrap(), "local");
+    }
+
     #[test]
     fn three_way_table_core_cases() {
         assert_eq!(

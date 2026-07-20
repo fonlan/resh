@@ -192,6 +192,7 @@ pub enum SyncErrorKind {
     ConcurrentLocalChange,
     ConcurrentRemoteChange,
     SafeSyncUnavailable,
+    IncompatibleSchema,
     Internal,
 }
 

@@ -6,11 +6,22 @@ use crate::config::sync_protocol::{
 use crate::config::sync_state::{AccountSyncBaseline, SyncStateStore};
 use crate::config::types::{Config, SyncConfig};
 use crate::webdav::client::{UploadCondition, WebDAVClient, WebDavError};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// One retry lets us recompute against a changed remote without allowing a permanently busy
 /// endpoint to keep a config save or manual sync in flight indefinitely.
 const MAX_REMOTE_CONCURRENCY_RETRIES: usize = 1;
+
+/// Persists the fact that a WebDAV account has adopted conflict-safe sync metadata. Legacy
+/// clients only write `sync.json`, so they cannot erase this separate resource.
+const SYNC_SCHEMA_SENTINEL_FILE: &str = ".resh-sync-schema.json";
+
+#[derive(Debug, Deserialize, Serialize)]
+struct SyncSchemaSentinel {
+    #[serde(rename = "syncSchema")]
+    sync_schema: u32,
+}
 
 pub struct SyncManager {
     client: WebDAVClient,
@@ -165,6 +176,51 @@ impl SyncManager {
                 });
             }
         };
+        let remote_is_legacy = remote_existed
+            && remote_sync_config.sync_schema.unwrap_or_default() < SYNC_SCHEMA_VERSION;
+        let baseline_has_current_schema = baseline.as_ref().is_some_and(|baseline| {
+            baseline.has_sync_history() && baseline.sync_schema >= SYNC_SCHEMA_VERSION
+        });
+        let sentinel_schema = if remote_is_legacy && !baseline_has_current_schema {
+            match self.client.download(SYNC_SCHEMA_SENTINEL_FILE).await {
+                Ok(Some(document)) => {
+                    match serde_json::from_slice::<SyncSchemaSentinel>(&document.content) {
+                        Ok(sentinel) => Some(sentinel.sync_schema),
+                        Err(error) => {
+                            return Ok(SyncOutcome::Failed {
+                            error: SyncError {
+                                kind: SyncErrorKind::Format,
+                                message: format!(
+                                    "Remote sync schema sentinel has an invalid format at line {}, column {}",
+                                    error.line(),
+                                    error.column()
+                                ),
+                            },
+                        });
+                        }
+                    }
+                }
+                Ok(None) => None,
+                Err(error) => {
+                    return Ok(SyncOutcome::Failed {
+                        error: SyncError {
+                            kind: SyncErrorKind::Network,
+                            message: format!("Could not read remote sync schema sentinel: {error}"),
+                        },
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        if let Some(error) = validate_remote_schema(
+            &remote_sync_config,
+            remote_existed,
+            baseline.as_ref(),
+            sentinel_schema,
+        ) {
+            return Ok(SyncOutcome::Failed { error });
+        }
         // Conflict tokens are keyed with an account-local random secret, persisted before the
         // first conflict is returned so a subsequent resolution command can validate it without
         // exposing raw credential-derived content hashes to the frontend.
@@ -326,6 +382,37 @@ impl SyncManager {
             }
         };
 
+        // A legacy client only knows sync.json and can silently discard typed tombstones. Once a
+        // legacy document is migrated, retain an independent marker so a fresh device can detect
+        // a later downgrade even without a local sync-state baseline.
+        if remote_is_legacy {
+            let sentinel = serde_json::to_vec(&SyncSchemaSentinel {
+                sync_schema: SYNC_SCHEMA_VERSION,
+            })
+            .expect("schema sentinel serialization is infallible");
+            match self
+                .client
+                .upload_conditionally(
+                    SYNC_SCHEMA_SENTINEL_FILE,
+                    &sentinel,
+                    UploadCondition::CreateOnly,
+                )
+                .await
+            {
+                Ok(_) | Err(WebDavError::PreconditionFailed) => {}
+                Err(error) => {
+                    return Ok(SyncOutcome::Failed {
+                        error: SyncError {
+                            kind: SyncErrorKind::Network,
+                            message: format!(
+                                "Could not persist remote sync schema sentinel: {error}"
+                            ),
+                        },
+                    });
+                }
+            }
+        }
+
         tracing::info!(
             "Uploaded updated sync.json: {} servers, {} snippets",
             merged_remote.servers.len(),
@@ -370,14 +457,73 @@ impl SyncManager {
     }
 }
 
+fn validate_remote_schema(
+    remote: &SyncConfig,
+    remote_existed: bool,
+    baseline: Option<&AccountSyncBaseline>,
+    sentinel_schema: Option<u32>,
+) -> Option<SyncError> {
+    if !remote_existed {
+        return None;
+    }
+
+    let schema = remote.sync_schema.unwrap_or_default();
+    if schema > SYNC_SCHEMA_VERSION {
+        return Some(SyncError {
+            kind: SyncErrorKind::IncompatibleSchema,
+            message: format!(
+                "Remote sync.json uses schema {schema}, which is newer than this Resh version supports ({SYNC_SCHEMA_VERSION}); upgrade Resh before syncing"
+            ),
+        });
+    }
+
+    if let Some(sentinel_schema) = sentinel_schema {
+        if sentinel_schema > SYNC_SCHEMA_VERSION {
+            return Some(SyncError {
+                kind: SyncErrorKind::IncompatibleSchema,
+                message: format!(
+                    "Remote sync schema sentinel uses schema {sentinel_schema}, which is newer than this Resh version supports ({SYNC_SCHEMA_VERSION}); upgrade Resh before syncing"
+                ),
+            });
+        }
+        if sentinel_schema >= SYNC_SCHEMA_VERSION && schema < SYNC_SCHEMA_VERSION {
+            return Some(SyncError {
+                kind: SyncErrorKind::IncompatibleSchema,
+                message: format!(
+                    "Remote sync.json is legacy but this WebDAV account has a conflict-safe schema sentinel. An older Resh client may have overwritten synchronization metadata; syncing is blocked to prevent tombstone loss. Upgrade every syncing device before retrying"
+                ),
+            });
+        }
+    }
+
+    let previously_used_current_schema = baseline.is_some_and(|baseline| {
+        baseline.has_sync_history() && baseline.sync_schema >= SYNC_SCHEMA_VERSION
+    });
+    if schema < SYNC_SCHEMA_VERSION && previously_used_current_schema {
+        return Some(SyncError {
+            kind: SyncErrorKind::IncompatibleSchema,
+            message: format!(
+                "Remote sync.json reverted from conflict-safe schema {SYNC_SCHEMA_VERSION} to legacy schema {schema}. An older Resh client may have overwritten synchronization metadata; syncing is blocked to prevent tombstone loss. Upgrade every syncing device before retrying"
+            ),
+        });
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::types::*;
+    use crate::config::{
+        sync_protocol::{hash_server, EntityKey, SyncConflictKind, SyncEntityType},
+        sync_state::{AccountSyncBaseline, SyncStateStore},
+        types::*,
+    };
     use tempfile::tempdir;
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
+        time::{timeout, Duration},
     };
 
     #[test]
@@ -436,9 +582,17 @@ mod tests {
             serve_script(
                 listener,
                 vec![
-                    ("200 OK", vec!["ETag: \"v1\""], b"{\"version\":\"1.0\"}"),
+                    (
+                        "200 OK",
+                        vec!["ETag: \"v1\""],
+                        b"{\"version\":\"1.0\",\"syncSchema\":2}",
+                    ),
                     ("412 Precondition Failed", vec![], b""),
-                    ("200 OK", vec!["ETag: \"v2\""], b"{\"version\":\"1.0\"}"),
+                    (
+                        "200 OK",
+                        vec!["ETag: \"v2\""],
+                        b"{\"version\":\"1.0\",\"syncSchema\":2}",
+                    ),
                     ("204 No Content", vec!["ETag: \"v3\""], b""),
                 ],
             )
@@ -477,9 +631,17 @@ mod tests {
             serve_script(
                 listener,
                 vec![
-                    ("200 OK", vec!["ETag: \"v1\""], b"{\"version\":\"1.0\"}"),
+                    (
+                        "200 OK",
+                        vec!["ETag: \"v1\""],
+                        b"{\"version\":\"1.0\",\"syncSchema\":2}",
+                    ),
                     ("412 Precondition Failed", vec![], b""),
-                    ("200 OK", vec!["ETag: \"v2\""], b"{\"version\":\"1.0\"}"),
+                    (
+                        "200 OK",
+                        vec!["ETag: \"v2\""],
+                        b"{\"version\":\"1.0\",\"syncSchema\":2}",
+                    ),
                     ("409 Conflict", vec![], b""),
                 ],
             )
@@ -507,15 +669,293 @@ mod tests {
         assert_eq!(requests.len(), 4, "must not retry indefinitely");
     }
 
+    #[tokio::test]
+    async fn legacy_remote_is_migrated_on_first_sync() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_script(
+                listener,
+                vec![
+                    ("200 OK", vec!["ETag: \"legacy\""], b"{\"version\":\"1.0\"}"),
+                    ("404 Not Found", vec![], b""),
+                    ("204 No Content", vec!["ETag: \"current\""], b""),
+                    ("201 Created", vec!["ETag: \"sentinel\""], b""),
+                ],
+            )
+            .await
+        });
+
+        let state_dir = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".to_string(),
+            "password".to_string(),
+            None,
+        )
+        .with_state_store(state_dir.path().to_path_buf());
+        let mut local = Config::empty();
+
+        let outcome = manager.sync(&mut local, vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+        let baseline = SyncStateStore::new(state_dir.path())
+            .load_account(manager.account_key())
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(outcome, SyncOutcome::Applied { .. }));
+        assert_eq!(requests.len(), 4);
+        assert!(requests[1].starts_with("GET /.resh-sync-schema.json HTTP/1.1"));
+        let uploaded: SyncConfig = serde_json::from_str(
+            requests[2]
+                .split_once("\r\n\r\n")
+                .expect("PUT request must contain a JSON body")
+                .1,
+        )
+        .unwrap();
+        assert_eq!(uploaded.sync_schema, Some(SYNC_SCHEMA_VERSION));
+        assert_eq!(baseline.sync_schema, SYNC_SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn legacy_schema_after_a_current_sync_is_blocked_before_put() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_script(
+                listener,
+                vec![("200 OK", vec!["ETag: \"legacy\""], b"{\"version\":\"1.0\"}")],
+            )
+            .await
+        });
+
+        let state_dir = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".to_string(),
+            "password".to_string(),
+            None,
+        )
+        .with_state_store(state_dir.path().to_path_buf());
+        let mut baseline = AccountSyncBaseline::default();
+        baseline.sync_schema = SYNC_SCHEMA_VERSION;
+        baseline.remote_etag = Some("\"current\"".to_string());
+        SyncStateStore::new(state_dir.path())
+            .save_account(manager.account_key(), baseline)
+            .unwrap();
+
+        let outcome = manager.sync(&mut Config::empty(), vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(matches!(
+            outcome,
+            SyncOutcome::Failed {
+                error: SyncError {
+                    kind: SyncErrorKind::IncompatibleSchema,
+                    ..
+                }
+            }
+        ));
+        assert_eq!(
+            requests.len(),
+            1,
+            "unsafe legacy document must not be overwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_schema_with_conflict_safe_sentinel_is_blocked_on_a_fresh_device() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            serve_script(
+                listener,
+                vec![
+                    ("200 OK", vec!["ETag: \"legacy\""], b"{\"version\":\"1.0\"}"),
+                    ("200 OK", vec!["ETag: \"sentinel\""], b"{\"syncSchema\":2}"),
+                ],
+            )
+            .await
+        });
+
+        let state_dir = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "new-device".to_string(),
+            "password".to_string(),
+            None,
+        )
+        .with_state_store(state_dir.path().to_path_buf());
+
+        let outcome = manager.sync(&mut Config::empty(), vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(matches!(
+            outcome,
+            SyncOutcome::Failed {
+                error: SyncError {
+                    kind: SyncErrorKind::IncompatibleSchema,
+                    ..
+                }
+            }
+        ));
+        assert_eq!(
+            requests.len(),
+            2,
+            "fresh devices must not overwrite a downgrade"
+        );
+        assert!(requests.iter().all(|request| request.starts_with("GET ")));
+    }
+
+    #[tokio::test]
+    async fn offline_two_device_edits_require_manual_resolution_without_a_second_put() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let base_remote = remote_with_server("Base");
+        let expected_device_a_remote = remote_with_server("Device A");
+        let device_a_remote = expected_device_a_remote.clone();
+        let server = tokio::spawn(async move {
+            serve_owned_script(
+                listener,
+                vec![
+                    ("200 OK".into(), vec!["ETag: \"v1\"".into()], base_remote),
+                    ("204 No Content".into(), vec!["ETag: \"v2\"".into()], vec![]),
+                    (
+                        "200 OK".into(),
+                        vec!["ETag: \"v2\"".into()],
+                        device_a_remote,
+                    ),
+                ],
+            )
+            .await
+        });
+
+        let device_a_state = tempdir().unwrap();
+        let device_b_state = tempdir().unwrap();
+        let base_url = format!("http://127.0.0.1:{port}");
+        let manager_a = SyncManager::new(base_url.clone(), "user".into(), "password".into(), None)
+            .with_state_store(device_a_state.path().to_path_buf());
+        let manager_b = SyncManager::new(base_url, "user".into(), "password".into(), None)
+            .with_state_store(device_b_state.path().to_path_buf());
+        let baseline = server_baseline();
+        SyncStateStore::new(device_a_state.path())
+            .save_account(manager_a.account_key(), baseline.clone())
+            .unwrap();
+        SyncStateStore::new(device_b_state.path())
+            .save_account(manager_b.account_key(), baseline)
+            .unwrap();
+
+        let mut device_a = config_with_server("Device A");
+        let mut device_b = config_with_server("Device B");
+        let a_outcome = manager_a.sync(&mut device_a, vec![]).await.unwrap();
+        let b_outcome = manager_b.sync(&mut device_b, vec![]).await.unwrap();
+        let requests = server.await.unwrap();
+
+        assert!(matches!(a_outcome, SyncOutcome::Applied { .. }));
+        assert!(matches!(
+            b_outcome,
+            SyncOutcome::Conflicts { ref conflicts, .. }
+                if conflicts.len() == 1 && conflicts[0].kind == SyncConflictKind::BothModified
+        ));
+        assert_eq!(
+            requests.len(),
+            3,
+            "device B must not overwrite device A's edit"
+        );
+        assert!(requests[1]
+            .to_ascii_lowercase()
+            .contains("if-match: \"v1\""));
+        let uploaded: SyncConfig = serde_json::from_str(
+            requests[1]
+                .split_once("\r\n\r\n")
+                .expect("device A PUT must contain a JSON body")
+                .1,
+        )
+        .unwrap();
+        assert_eq!(uploaded.servers[0].name, "Device A");
+        assert_eq!(
+            serde_json::to_vec(&uploaded).unwrap(),
+            expected_device_a_remote,
+            "the simulated remote state must come from device A's actual PUT"
+        );
+    }
+
+    fn sample_server(id: &str, name: &str) -> Server {
+        Server {
+            id: id.into(),
+            name: name.into(),
+            group: "group".into(),
+            host: "example.test".into(),
+            port: 22,
+            username: "user".into(),
+            auth_id: None,
+            proxy_id: None,
+            jumphost_id: None,
+            port_forwards: vec![],
+            keep_alive: 0,
+            auto_exec_commands: vec![],
+            snippets: vec![],
+            ai_models: vec![],
+            sftp_custom_commands: vec![],
+            sftp_favorite_paths: vec![],
+            additional_prompt: None,
+            synced: true,
+            created_at: None,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn config_with_server(name: &str) -> Config {
+        let mut config = Config::empty();
+        config.servers.push(sample_server("server", name));
+        config
+    }
+
+    fn remote_with_server(name: &str) -> Vec<u8> {
+        let mut remote = SyncConfig::empty("1.0");
+        remote.servers.push(sample_server("server", name));
+        serde_json::to_vec(&remote).unwrap()
+    }
+
+    fn server_baseline() -> AccountSyncBaseline {
+        let mut baseline = AccountSyncBaseline::default();
+        baseline.set_entity_hash(
+            &EntityKey::new(SyncEntityType::Server, "server"),
+            hash_server(&sample_server("server", "Base")),
+        );
+        baseline.sync_schema = SYNC_SCHEMA_VERSION;
+        baseline
+    }
+
     async fn serve_script(
         listener: TcpListener,
         script: Vec<(&'static str, Vec<&'static str>, &'static [u8])>,
     ) -> Vec<String> {
         let mut requests = Vec::with_capacity(script.len());
         for (status, headers, body) in script {
-            let (stream, _) = listener.accept().await.unwrap();
+            let (stream, _) = timeout(Duration::from_secs(2), listener.accept())
+                .await
+                .expect("timed out waiting for scripted WebDAV request")
+                .unwrap();
             let (mut stream, request) = read_request(stream).await;
             write_response(&mut stream, status, &headers, body).await;
+            requests.push(request);
+        }
+        requests
+    }
+
+    async fn serve_owned_script(
+        listener: TcpListener,
+        script: Vec<(String, Vec<String>, Vec<u8>)>,
+    ) -> Vec<String> {
+        let mut requests = Vec::with_capacity(script.len());
+        for (status, headers, body) in script {
+            let (stream, _) = timeout(Duration::from_secs(2), listener.accept())
+                .await
+                .expect("timed out waiting for scripted WebDAV request")
+                .unwrap();
+            let (mut stream, request) = read_request(stream).await;
+            write_owned_response(&mut stream, &status, &headers, &body).await;
             requests.push(request);
         }
         requests
@@ -524,18 +964,53 @@ mod tests {
     async fn read_request(mut stream: TcpStream) -> (TcpStream, String) {
         let mut request = Vec::new();
         let mut buffer = [0; 1024];
-        loop {
+        let headers_end = loop {
             let read = stream.read(&mut buffer).await.unwrap();
             assert!(read > 0, "test HTTP client closed before sending headers");
             request.extend_from_slice(&buffer[..read]);
-            if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                break;
+            if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break position + 4;
             }
+        };
+        let headers = String::from_utf8_lossy(&request[..headers_end]);
+        let content_length = headers
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while request.len() < headers_end + content_length {
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert!(
+                read > 0,
+                "test HTTP client closed before sending request body"
+            );
+            request.extend_from_slice(&buffer[..read]);
         }
         (stream, String::from_utf8_lossy(&request).into_owned())
     }
 
     async fn write_response(stream: &mut TcpStream, status: &str, headers: &[&str], body: &[u8]) {
+        let mut response = format!(
+            "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+        for header in headers {
+            response.push_str(header);
+            response.push_str("\r\n");
+        }
+        response.push_str("\r\n");
+        stream.write_all(response.as_bytes()).await.unwrap();
+        stream.write_all(body).await.unwrap();
+        stream.shutdown().await.unwrap();
+    }
+
+    async fn write_owned_response(
+        stream: &mut TcpStream,
+        status: &str,
+        headers: &[String],
+        body: &[u8],
+    ) {
         let mut response = format!(
             "HTTP/1.1 {status}\r\nConnection: close\r\nContent-Length: {}\r\n",
             body.len()
