@@ -221,7 +221,12 @@ pub enum SyncOutcome {
         changed_entity_count: usize,
     },
     /// Manual resolution required; local config and remote file left unchanged.
-    Conflicts { conflicts: Vec<SyncConflict> },
+    Conflicts {
+        conflicts: Vec<SyncConflict>,
+        /// Opaque token bound to the current remote ETag and conflict set. A resolution command
+        /// must present it; any local/remote change requires a fresh sync attempt.
+        attempt_token: String,
+    },
     /// Remote changed under us (e.g. ETag 412); caller should re-download and recompute.
     ConcurrentRemoteChange { message: String },
     /// Non-conflict failure.
@@ -236,7 +241,7 @@ impl SyncOutcome {
     pub fn into_result(self) -> Result<(), String> {
         match self {
             Self::Applied { .. } => Ok(()),
-            Self::Conflicts { conflicts } => Err(format!(
+            Self::Conflicts { conflicts, .. } => Err(format!(
                 "Sync conflicts: {} item(s) need resolution",
                 conflicts.len()
             )),
@@ -475,12 +480,7 @@ pub fn summary_ai_channel(c: &AiChannel) -> EntitySummary {
     };
     EntitySummary {
         display_name: c.name.clone(),
-        details: format!(
-            "type={} · endpoint={} · {}",
-            c.provider,
-            c.endpoint.as_deref().unwrap_or("-"),
-            key
-        ),
+        details: format!("type={} · {}", c.provider, key),
         content_hash: Some(hash_ai_channel(c)),
         present: true,
     }
@@ -498,7 +498,7 @@ pub fn summary_ai_model(m: &AiModel) -> EntitySummary {
 pub fn summary_sftp_command(c: &SftpCustomCommand) -> EntitySummary {
     EntitySummary {
         display_name: c.name.clone(),
-        details: format!("pattern={}", c.pattern),
+        details: format!("patternChars={}", c.pattern.chars().count()),
         content_hash: Some(hash_sftp_command(c)),
         present: true,
     }
@@ -541,6 +541,28 @@ pub fn make_resolution_token(
         local_hash.unwrap_or("-"),
         remote_hash.unwrap_or("-"),
         kind
+    );
+    hex_sha256(material.as_bytes())
+}
+
+/// Build an opaque token for one complete resolution attempt. It is intentionally bound to the
+/// downloaded ETag as well as each conflict's token, so an otherwise identical remote document
+/// with a new ETag must be refreshed before a user choice can be committed.
+pub fn make_conflict_attempt_token(
+    token_secret: &str,
+    remote_etag: Option<&str>,
+    conflicts: &[SyncConflict],
+) -> String {
+    let mut conflict_tokens: Vec<&str> = conflicts
+        .iter()
+        .map(|conflict| conflict.resolution_token.as_str())
+        .collect();
+    conflict_tokens.sort_unstable();
+    let material = format!(
+        "{}|{}|{}",
+        token_secret,
+        remote_etag.unwrap_or("<missing-etag>"),
+        conflict_tokens.join("|")
     );
     hex_sha256(material.as_bytes())
 }
@@ -815,5 +837,35 @@ mod tests {
                 SyncConflictKind::BothModified,
             )
         );
+    }
+
+    #[test]
+    fn conflict_attempt_token_is_bound_to_remote_etag_and_conflict_set() {
+        let conflict = SyncConflict {
+            entity_type: SyncEntityType::Snippet,
+            id: "snippet-1".into(),
+            display_name: "Deploy".into(),
+            kind: SyncConflictKind::BothModified,
+            local: EntitySummary {
+                display_name: "Deploy".into(),
+                details: "len=12".into(),
+                content_hash: None,
+                present: true,
+            },
+            remote: EntitySummary {
+                display_name: "Deploy".into(),
+                details: "len=15".into(),
+                content_hash: None,
+                present: true,
+            },
+            resolution_token: "item-token".into(),
+        };
+
+        let v1 = make_conflict_attempt_token("account-secret", Some("\"v1\""), &[conflict.clone()]);
+        let v2 = make_conflict_attempt_token("account-secret", Some("\"v2\""), &[conflict.clone()]);
+        let changed_set = make_conflict_attempt_token("account-secret", Some("\"v1\""), &[]);
+
+        assert_ne!(v1, v2);
+        assert_ne!(v1, changed_set);
     }
 }

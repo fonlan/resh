@@ -4,6 +4,7 @@ import { GeneralSettings, SyncOutcome } from "../../types"
 import { useTranslation } from "../../i18n"
 import { useConfig } from "../../hooks/useConfig"
 import { CustomSelect } from "../CustomSelect"
+import { SyncConflictDialog } from "./SyncConflictDialog"
 
 export interface SyncTabProps {
   general: GeneralSettings
@@ -28,11 +29,17 @@ export const SyncTab: React.FC<SyncTabProps> = ({
   onGeneralUpdate,
 }) => {
   const { t } = useTranslation()
-  const { triggerSync, config } = useConfig()
+  const {
+    triggerSync,
+    resolveSyncConflicts,
+    syncConflictAttempt,
+    config,
+  } = useConfig()
   const [syncStatus, setSyncStatus] = useState<
     "idle" | "syncing" | "success" | "error"
   >("idle")
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [isConflictDialogOpen, setIsConflictDialogOpen] = useState(false)
 
   const handleWebDAVUpdate = (
     field: keyof typeof general.webdav,
@@ -54,6 +61,9 @@ export const SyncTab: React.FC<SyncTabProps> = ({
       if (result.outcome.status === "applied") {
         setSyncStatus("success")
         setTimeout(() => setSyncStatus("idle"), 3000)
+      } else if (result.outcome.status === "conflicts") {
+        setSyncStatus("idle")
+        setIsConflictDialogOpen(true)
       } else {
         setSyncStatus("error")
         setSyncError(syncOutcomeMessage(result.outcome))
@@ -123,6 +133,27 @@ export const SyncTab: React.FC<SyncTabProps> = ({
           <div className="flex items-center gap-2 p-3 my-3 bg-red-500/10 border border-red-500/30 rounded-md text-red-400 text-sm">
             <AlertCircle size={14} className="mt-0.5 shrink-0" />
             <span>{syncError}</span>
+          </div>
+        )}
+
+        {syncConflictAttempt && (
+          <div className="my-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+            <div className="flex min-w-0 items-center gap-2">
+              <AlertCircle size={15} className="shrink-0" />
+              <span>
+                {t.syncConflictsPending.replace(
+                  "{count}",
+                  String(syncConflictAttempt.conflicts.length),
+                )}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsConflictDialogOpen(true)}
+              className="shrink-0 rounded border border-amber-300/40 px-2.5 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-400/10"
+            >
+              {t.syncConflictsReview}
+            </button>
           </div>
         )}
 
@@ -200,6 +231,31 @@ export const SyncTab: React.FC<SyncTabProps> = ({
           </div>
         </div>
       </div>
+
+      <SyncConflictDialog
+        isOpen={isConflictDialogOpen}
+        attempt={syncConflictAttempt}
+        onClose={() => setIsConflictDialogOpen(false)}
+        onResolve={async (resolutions) => {
+          if (!syncConflictAttempt) {
+            throw new Error(t.syncConflictsRefreshRequired)
+          }
+          const result = await resolveSyncConflicts(
+            syncConflictAttempt.attemptToken,
+            resolutions,
+          )
+          if (
+            result.outcome.status !== "applied" &&
+            result.outcome.status !== "conflicts"
+          ) {
+            setSyncStatus("error")
+            setSyncError(syncOutcomeMessage(result.outcome))
+            setIsConflictDialogOpen(false)
+            setTimeout(() => setSyncStatus("idle"), 5000)
+          }
+          return result
+        }}
+      />
     </div>
   )
 }

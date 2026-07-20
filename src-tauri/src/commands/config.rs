@@ -125,14 +125,27 @@ impl AiRunRegistry {
     }
 }
 
+/// Opaque resolution attempt retained only for the current app process. The token itself is
+/// cryptographically bound to remote ETag and conflict hashes; this record adds the local config
+/// generation guard so a save invalidates any open conflict dialog.
+#[derive(Clone, Debug)]
+pub struct PendingSyncConflictAttempt {
+    pub token: String,
+    pub config_generation: u64,
+}
+
 pub struct AppState {
     pub config_manager: ConfigManager,
     pub db_manager: DatabaseManager,
     pub config: Mutex<Config>,
-    /// Serializes locally-originated WebDAV syncs. Together with `config_sync_generation`, this
-    /// prevents a queued stale save from uploading after a newer save has already synced.
+    /// Serializes local config mutations with the full locally-originated WebDAV sync lifecycle.
+    /// A save waits for an in-flight GET→merge→conditional-PUT so it cannot invalidate a conflict
+    /// attempt after its final generation check but before the remote write.
     pub config_sync_gate: Mutex<()>,
     pub config_sync_generation: AtomicU64,
+    /// The only resolution attempt currently eligible to commit. It is cleared by any local
+    /// config generation change and revalidated against a freshly downloaded remote document.
+    pub pending_sync_conflict_attempt: Mutex<Option<PendingSyncConflictAttempt>>,
     /// session_id -> current AI run (request_id + token). At most one run per session.
     pub ai_cancellation_tokens: AiRunRegistry,
     pub ai_manager: AiManager,
@@ -265,6 +278,13 @@ pub async fn save_config(
         );
     }
 
+    // Serialize a local mutation with the full remote sync lifecycle. In particular, conflict
+    // resolution verifies a generation before its conditional PUT; allowing a save to advance the
+    // generation while that request is in flight could still commit stale choices remotely.
+    // Holding this gate only covers the local write here, while sync paths hold it through their
+    // GET→merge→conditional-PUT sequence.
+    let _sync_gate = state.config_sync_gate.lock().await;
+
     let mut current_config = state.config.lock().await;
 
     *current_config = config.clone();
@@ -275,6 +295,8 @@ pub async fn save_config(
     // Do not hold the shared config mutex while acquiring a WebDAV permit or waiting on network.
     // The generation captured above protects the later background projection instead.
     drop(current_config);
+    *state.pending_sync_conflict_attempt.lock().await = None;
+    drop(_sync_gate);
     tracing::debug!("Local config saved to {:?}", local_path);
 
     // Update log level
@@ -348,12 +370,40 @@ pub async fn save_config(
                             );
                         }
                     }
-                    crate::config::SyncOutcome::Conflicts { conflicts } => {
-                        tracing::info!(
-                            "Background sync has {} conflict(s); waiting for user resolution",
-                            conflicts.len()
-                        );
-                        let _ = window.emit("sync-conflicts", conflicts);
+                    crate::config::SyncOutcome::Conflicts {
+                        conflicts,
+                        attempt_token,
+                    } => {
+                        // A background conflict is only actionable for the exact local snapshot
+                        // that produced it. Do not replace a newer pending attempt or publish an
+                        // inevitably stale token after a local save.
+                        let is_current_attempt =
+                            app_state.is_current_config_sync_generation(sync_generation) && {
+                                let in_memory = app_state.config.lock().await;
+                                config_matches_snapshot(&in_memory, &sync_snapshot)
+                            };
+                        if is_current_attempt {
+                            tracing::info!(
+                                "Background sync has {} conflict(s); waiting for user resolution",
+                                conflicts.len()
+                            );
+                            *app_state.pending_sync_conflict_attempt.lock().await =
+                                Some(PendingSyncConflictAttempt {
+                                    token: attempt_token.clone(),
+                                    config_generation: sync_generation,
+                                });
+                            let _ = window.emit(
+                                "sync-conflicts",
+                                crate::config::SyncOutcome::Conflicts {
+                                    conflicts,
+                                    attempt_token,
+                                },
+                            );
+                        } else {
+                            tracing::info!(
+                                "Discarded stale background sync conflicts; a newer local config is already saved"
+                            );
+                        }
                     }
                     crate::config::SyncOutcome::ConcurrentRemoteChange { message } => {
                         tracing::warn!("Background sync concurrent remote change: {}", message);
@@ -443,6 +493,7 @@ pub async fn trigger_sync(
         // the generation so any older background snapshot queued behind this operation is stale.
         let _sync_gate = state.config_sync_gate.lock().await;
         let sync_generation = state.next_config_sync_generation();
+        *state.pending_sync_conflict_attempt.lock().await = None;
 
         // Snapshot under the mutex, but do not keep the mutex while the network operation runs.
         // A save that arrives meanwhile advances the generation and owns the eventual projection.
@@ -509,6 +560,154 @@ pub async fn trigger_sync(
             outcome => (None, outcome),
         };
 
+        if let SyncOutcome::Conflicts { attempt_token, .. } = &outcome {
+            *state.pending_sync_conflict_attempt.lock().await =
+                Some(PendingSyncConflictAttempt {
+                    token: attempt_token.clone(),
+                    config_generation: sync_generation,
+                });
+        }
+
+        emit_sync_outcome(&app, &outcome);
+        Ok(TriggerSyncResult { config, outcome })
+    }
+    .await;
+
+    sync_permit.release().await;
+    result
+}
+
+#[tauri::command]
+pub async fn resolve_sync_conflicts(
+    app: AppHandle,
+    attempt_token: String,
+    resolutions: Vec<crate::config::sync_protocol::SyncResolution>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<TriggerSyncResult, String> {
+    use crate::config::sync_protocol::{SyncError, SyncErrorKind, SyncOutcome};
+    use crate::updater::OperationCategory;
+
+    let sync_permit = state
+        .operation_coordinator
+        .try_acquire(OperationCategory::WebdavSync)
+        .await?;
+
+    let result = async {
+        let _sync_gate = state.config_sync_gate.lock().await;
+        let pending = state.pending_sync_conflict_attempt.lock().await.clone();
+        let Some(pending) = pending else {
+            return Ok(TriggerSyncResult {
+                config: None,
+                outcome: SyncOutcome::Failed {
+                    error: SyncError {
+                        kind: SyncErrorKind::ConcurrentLocalChange,
+                        message: "This sync conflict attempt is no longer active; refresh synchronization before applying choices".into(),
+                    },
+                },
+            });
+        };
+
+        if pending.token != attempt_token
+            || !state.is_current_config_sync_generation(pending.config_generation)
+        {
+            *state.pending_sync_conflict_attempt.lock().await = None;
+            return Ok(TriggerSyncResult {
+                config: None,
+                outcome: SyncOutcome::Failed {
+                    error: SyncError {
+                        kind: SyncErrorKind::ConcurrentLocalChange,
+                        message: "Local configuration changed after the conflicts were displayed; refresh synchronization before applying choices".into(),
+                    },
+                },
+            });
+        }
+
+        let (sync_manager, mut sync_candidate, sync_snapshot, local_path) = {
+            let config = state.config.lock().await;
+            if !config.general.webdav.enabled || config.general.webdav.url.is_empty() {
+                return Err("WebDAV sync is not enabled or configured".to_string());
+            }
+            let proxy = config
+                .general
+                .webdav
+                .proxy_id
+                .as_ref()
+                .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+            let sync_manager = SyncManager::new(
+                config.general.webdav.url.clone(),
+                config.general.webdav.username.clone(),
+                config.general.webdav.password.clone(),
+                proxy,
+            )
+            .with_state_store(state.config_manager.app_data_dir().to_path_buf());
+            let snapshot = serde_json::to_vec(&*config)
+                .map_err(|error| format!("Failed to snapshot config for sync resolution: {error}"))?;
+            (
+                sync_manager,
+                config.clone(),
+                snapshot,
+                state.config_manager.local_config_path(),
+            )
+        };
+
+        let outcome = sync_manager
+            .resolve_conflicts(&mut sync_candidate, &resolutions, &attempt_token)
+            .await?;
+        let outcome = if matches!(outcome, SyncOutcome::Applied { .. }) {
+            outcome
+        } else {
+            let current_matches_snapshot = {
+                let in_memory = state.config.lock().await;
+                config_matches_snapshot(&in_memory, &sync_snapshot)
+            };
+            if state.is_current_config_sync_generation(pending.config_generation)
+                && current_matches_snapshot
+            {
+                outcome
+            } else {
+                SyncOutcome::Failed {
+                    error: SyncError {
+                        kind: SyncErrorKind::ConcurrentLocalChange,
+                        message: "Local configuration changed while conflict resolutions were being checked; refresh synchronization before applying choices".into(),
+                    },
+                }
+            }
+        };
+        let (config, outcome) = match outcome {
+            outcome @ SyncOutcome::Applied { .. } => {
+                let mut in_memory = state.config.lock().await;
+                if !state.is_current_config_sync_generation(pending.config_generation)
+                    || !config_matches_snapshot(&in_memory, &sync_snapshot)
+                {
+                    (
+                        None,
+                        SyncOutcome::Failed {
+                            error: SyncError {
+                                kind: SyncErrorKind::ConcurrentLocalChange,
+                                message: "Local configuration changed while conflict resolutions were being applied; refresh synchronization before applying choices".into(),
+                            },
+                        },
+                    )
+                } else {
+                    state.config_manager.save_config(&sync_candidate, &local_path)?;
+                    *in_memory = sync_candidate.clone();
+                    (Some(sync_candidate), outcome)
+                }
+            }
+            outcome => (None, outcome),
+        };
+
+        match &outcome {
+            SyncOutcome::Conflicts { attempt_token, .. } => {
+                *state.pending_sync_conflict_attempt.lock().await =
+                    Some(PendingSyncConflictAttempt {
+                        token: attempt_token.clone(),
+                        config_generation: pending.config_generation,
+                    });
+            }
+            _ => *state.pending_sync_conflict_attempt.lock().await = None,
+        }
+
         emit_sync_outcome(&app, &outcome);
         Ok(TriggerSyncResult { config, outcome })
     }
@@ -521,8 +720,8 @@ pub async fn trigger_sync(
 fn emit_sync_outcome(app: &AppHandle, outcome: &crate::config::sync_protocol::SyncOutcome) {
     match outcome {
         crate::config::sync_protocol::SyncOutcome::Applied { .. } => {}
-        crate::config::sync_protocol::SyncOutcome::Conflicts { conflicts } => {
-            let _ = app.emit("sync-conflicts", conflicts);
+        crate::config::sync_protocol::SyncOutcome::Conflicts { .. } => {
+            let _ = app.emit("sync-conflicts", outcome);
         }
         crate::config::sync_protocol::SyncOutcome::ConcurrentRemoteChange { message } => {
             let _ = app.emit("sync-failed", message);

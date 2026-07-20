@@ -1,6 +1,7 @@
 use crate::config::sync_merge::merge_configs_with_token_secret;
 use crate::config::sync_protocol::{
-    sync_account_key, SyncError, SyncErrorKind, SyncOutcome, SyncResolution, SYNC_SCHEMA_VERSION,
+    make_conflict_attempt_token, sync_account_key, SyncError, SyncErrorKind, SyncOutcome,
+    SyncResolution, SYNC_SCHEMA_VERSION,
 };
 use crate::config::sync_state::{AccountSyncBaseline, SyncStateStore};
 use crate::config::types::{Config, SyncConfig};
@@ -65,7 +66,7 @@ impl SyncManager {
     ) -> Result<SyncOutcome, String> {
         for attempt in 0..=MAX_REMOTE_CONCURRENCY_RETRIES {
             let outcome = self
-                .sync_once_with_resolutions(local_config, resolutions)
+                .sync_once_with_resolutions(local_config, resolutions, None)
                 .await?;
             match outcome {
                 SyncOutcome::ConcurrentRemoteChange { .. }
@@ -92,10 +93,24 @@ impl SyncManager {
         unreachable!("retry loop always returns");
     }
 
+    /// Commit user-provided conflict resolutions only when they still correspond to the exact
+    /// conflict attempt that was displayed. Unlike ordinary sync this never retries a failed
+    /// conditional PUT: a new ETag requires the user to review a fresh attempt.
+    pub async fn resolve_conflicts(
+        &self,
+        local_config: &mut Config,
+        resolutions: &[SyncResolution],
+        attempt_token: &str,
+    ) -> Result<SyncOutcome, String> {
+        self.sync_once_with_resolutions(local_config, resolutions, Some(attempt_token))
+            .await
+    }
+
     async fn sync_once_with_resolutions(
         &self,
         local_config: &mut Config,
         resolutions: &[SyncResolution],
+        expected_attempt_token: Option<&str>,
     ) -> Result<SyncOutcome, String> {
         let (remote_sync_config, remote_existed, downloaded_etag) =
             match self.client.download("sync.json").await {
@@ -170,6 +185,29 @@ impl SyncManager {
                 });
             }
         }
+        if let Some(expected_attempt_token) = expected_attempt_token {
+            let unresolved = merge_configs_with_token_secret(
+                local_config,
+                &remote_sync_config,
+                baseline.as_ref(),
+                &[],
+                &token_secret,
+            );
+            if let Some(error) = unresolved.error {
+                return Ok(SyncOutcome::Failed { error });
+            }
+            let expected = make_conflict_attempt_token(
+                &token_secret,
+                downloaded_etag.as_deref(),
+                &unresolved.conflicts,
+            );
+            if unresolved.conflicts.is_empty() || expected != expected_attempt_token {
+                return Ok(SyncOutcome::ConcurrentRemoteChange {
+                    message: "Sync conflicts changed before they were resolved; refresh synchronization before applying choices".into(),
+                });
+            }
+        }
+
         let product = merge_configs_with_token_secret(
             local_config,
             &remote_sync_config,
@@ -187,8 +225,14 @@ impl SyncManager {
                 "Sync paused: {} conflict(s) require resolution",
                 product.conflicts.len()
             );
+            let attempt_token = make_conflict_attempt_token(
+                &token_secret,
+                downloaded_etag.as_deref(),
+                &product.conflicts,
+            );
             return Ok(SyncOutcome::Conflicts {
                 conflicts: product.conflicts,
+                attempt_token,
             });
         }
 
