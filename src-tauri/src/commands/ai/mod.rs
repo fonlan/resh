@@ -1143,7 +1143,7 @@ pub async fn get_ai_messages(
         .run_blocking(move |conn| {
             let mut stmt = conn
                 .prepare(
-                    "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
+                    "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id, is_compaction_summary
                      FROM ai_messages
                      WHERE session_id = ?1
                      ORDER BY created_at ASC, rowid ASC",
@@ -1159,6 +1159,10 @@ pub async fn get_ai_messages(
                     let tool_call_id: Option<String> = row.get(4).ok();
                     let created_at: String = row.get(5)?;
                     let model_id: Option<String> = row.get(6).ok();
+                    let is_compaction_summary: bool = row
+                        .get::<_, i64>(7)
+                        .map(|value| value != 0)
+                        .unwrap_or(false);
 
                     let content = if content_raw.is_empty() {
                         None
@@ -1172,22 +1176,27 @@ pub async fn get_ai_messages(
                         None
                     };
 
-                    Ok(ChatMessage {
-                        role,
-                        content,
-                        reasoning_content: reasoning_raw,
-                        tool_calls,
-                        tool_call_id,
-                        created_at: Some(created_at),
-                        model_id,
-                    })
+                    Ok((
+                        ChatMessage {
+                            role,
+                            content,
+                            reasoning_content: reasoning_raw,
+                            tool_calls,
+                            tool_call_id,
+                            created_at: Some(created_at),
+                            model_id,
+                        },
+                        is_compaction_summary,
+                    ))
                 })
                 .map_err(|e| e.to_string())?;
 
             let mut messages: Vec<ChatMessage> = Vec::new();
             for row in rows {
-                let msg: ChatMessage = row.map_err(|e| e.to_string())?;
-                if msg.role != "system" {
+                let (msg, is_summary) = row.map_err(|e| e.to_string())?;
+                // Compaction summaries are internal history for the model; the
+                // UI keeps showing the original conversation.
+                if msg.role != "system" && !is_summary {
                     messages.push(msg);
                 }
             }

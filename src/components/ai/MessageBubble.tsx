@@ -108,6 +108,18 @@ export const MessageBubble = React.memo(
     const canTriggerRegenerate = msg.role === "assistant" && !!canRegenerate
     const sideOffsetClass = msg.role === "user" ? "-left-8" : "-right-8"
 
+    // System-role messages are compact_boundary-style hints (e.g. "context
+    // compacted"): render them as a centered, muted notice rather than a bubble.
+    if (msg.role === "system") {
+      return (
+        <div className="flex justify-center my-1 w-full">
+          <div className="text-[11px] text-[var(--text-muted)] italic text-center px-3 py-1 rounded-md bg-[var(--bg-tertiary)]/50 border border-zinc-700/30 max-w-[85%] whitespace-pre-wrap">
+            {msg.content}
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div
         className={`flex flex-col gap-1 max-w-full ${msg.role === "user" ? "items-end" : "items-start"}`}

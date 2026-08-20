@@ -357,6 +357,8 @@ export const AITab: React.FC<AITabProps> = ({
         channelId: modelFormData.channelId,
         enabled: modelFormData.enabled ?? true,
         synced: modelFormData.synced ?? true,
+        contextWindow: modelFormData.contextWindow,
+        responseReserve: modelFormData.responseReserve,
         updatedAt: now,
       }
       onAIModelsUpdate(
@@ -369,6 +371,8 @@ export const AITab: React.FC<AITabProps> = ({
         channelId: modelFormData.channelId,
         enabled: modelFormData.enabled ?? true,
         synced: modelFormData.synced ?? true,
+        contextWindow: modelFormData.contextWindow,
+        responseReserve: modelFormData.responseReserve,
         updatedAt: now,
       }
       onAIModelsUpdate([...aiModels, newModel])
@@ -1043,6 +1047,55 @@ export const AITab: React.FC<AITabProps> = ({
               label: channel.name,
             }))}
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="model-context-window"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.ai.modelForm.contextWindow}
+            </label>
+            <input
+              id="model-context-window"
+              type="number"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              value={modelFormData.contextWindow ?? ""}
+              onChange={(e) => {
+                const value = e.target.value
+                setModelFormData({
+                  ...modelFormData,
+                  contextWindow:
+                    value === "" ? undefined : Number(value),
+                })
+              }}
+              placeholder="32768"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="model-response-reserve"
+              className="block text-sm font-medium text-zinc-400 mb-1.5 "
+            >
+              {t.ai.modelForm.responseReserve}
+            </label>
+            <input
+              id="model-response-reserve"
+              type="number"
+              className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
+              value={modelFormData.responseReserve ?? ""}
+              onChange={(e) => {
+                const value = e.target.value
+                setModelFormData({
+                  ...modelFormData,
+                  responseReserve:
+                    value === "" ? undefined : Number(value),
+                })
+              }}
+              placeholder="8192"
+            />
+          </div>
         </div>
       </FormModal>
 

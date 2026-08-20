@@ -195,6 +195,15 @@ pub struct AiReasoningEndPayload {
     pub status: String,
 }
 
+/// Context compaction completion notice for `ai-compacted-*` (the UI shows a
+/// compact_boundary-style hint; the summary message itself stays hidden).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiCompactedPayload {
+    pub request_id: String,
+    pub summary_chars: usize,
+    pub replaced_messages: usize,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DeviceCodeResponse {
     pub device_code: String,

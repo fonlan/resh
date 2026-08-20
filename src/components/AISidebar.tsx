@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useState,
   useEffect,
   useRef,
@@ -37,6 +37,7 @@ import {
   AiToolCallEventPayload,
   AiMessageBatchPayload,
   AiErrorEventPayload,
+  AiCompactedPayload,
 } from "../types/ai"
 import { AIThinkingLevel, EditorAIContext } from "../types"
 import { ConfirmationModal } from "./ConfirmationModal"
@@ -1095,6 +1096,23 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       },
     )
 
+    const compactedListener = listen<AiCompactedPayload>(
+      `ai-compacted-${sessionId}`,
+      (event) => {
+        const { request_id: requestId, replaced_messages: replaced } =
+          event.payload
+        if (!isCurrentRequest(requestId)) return
+        // compact_boundary-style hint: the model's history was summarized, the
+        // original bubbles stay visible.
+        const hint: ChatMessage = {
+          role: "system",
+          content: `[Context compacted: ${replaced} earlier message(s) summarized to keep the model within its context window.]`,
+          created_at: new Date().toISOString(),
+        }
+        addCompleteMessage(sessionId, hint)
+      },
+    )
+
     return () => {
       // Always cancel pending timer so a late flush cannot hit the next session's refs.
       if (streamFlushTimerRef.current) {
@@ -1110,6 +1128,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       toolCallListener.then((unlisten) => unlisten())
       errorListener.then((unlisten) => unlisten())
       doneListener.then((unlisten) => unlisten())
+      compactedListener.then((unlisten) => unlisten())
       cancelledListener.then((unlisten) => unlisten())
     }
   }, [

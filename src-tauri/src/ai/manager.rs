@@ -225,20 +225,17 @@ impl AiManager {
         Ok(token)
     }
 
-    pub async fn stream_chat(
+    /// Build a genai `Client` resolved to the channel endpoint/auth/model.
+    ///
+    /// Shared by `stream_chat` (streaming) and `chat_once` (non-streaming, used
+    /// by context compaction so the summary request never opens a UI stream).
+    async fn build_genai_client(
         &self,
         channel: &AiChannel,
         model: &AiModel,
-        messages: Vec<GenaiMessage>,
-        tools: Option<Vec<Tool>>,
         proxy: Option<Proxy>,
-        thinking_level: Option<&str>,
-    ) -> Result<ChatStream, String> {
+    ) -> Result<Client, String> {
         let http_client = self.build_http_client(proxy, Some(&channel.provider))?;
-        let mut chat_req = ChatRequest::new(messages);
-        if let Some(t) = tools {
-            chat_req = chat_req.with_tools(t);
-        }
 
         let (endpoint, auth, adapter_kind) = if is_provider(channel, "copilot") {
             let oauth_token = channel.api_key.as_deref().unwrap_or_default();
@@ -274,10 +271,28 @@ impl AiManager {
             })
         });
 
-        let genai_client = Client::builder()
+        Ok(Client::builder()
             .with_reqwest(http_client)
             .with_service_target_resolver(resolver)
-            .build();
+            .build())
+    }
+
+    pub async fn stream_chat(
+        &self,
+        channel: &AiChannel,
+        model: &AiModel,
+        messages: Vec<GenaiMessage>,
+        tools: Option<Vec<Tool>>,
+        proxy: Option<Proxy>,
+        thinking_level: Option<&str>,
+    ) -> Result<ChatStream, String> {
+        let genai_client = self
+            .build_genai_client(channel, model, proxy)
+            .await?;
+        let mut chat_req = ChatRequest::new(messages);
+        if let Some(t) = tools {
+            chat_req = chat_req.with_tools(t);
+        }
 
         let options = build_chat_options(channel, model, thinking_level);
 
@@ -286,6 +301,38 @@ impl AiManager {
             .await
             .map_err(|e| e.to_string())?
             .stream)
+    }
+
+    /// Non-streaming chat completion. Used by context compaction where the full
+    /// summary text is needed without streaming events to the UI. `max_tokens`
+    /// caps the response length (the compaction summary budget).
+    pub async fn chat_once(
+        &self,
+        channel: &AiChannel,
+        model: &AiModel,
+        messages: Vec<GenaiMessage>,
+        proxy: Option<Proxy>,
+        thinking_level: Option<&str>,
+        max_tokens: Option<u32>,
+    ) -> Result<String, String> {
+        let genai_client = self
+            .build_genai_client(channel, model, proxy)
+            .await?;
+        let chat_req = ChatRequest::new(messages);
+        let mut options = build_chat_options(channel, model, thinking_level);
+        if let Some(max_tokens) = max_tokens {
+            options = options.with_max_tokens(max_tokens);
+        }
+        let response = genai_client
+            .exec_chat(&model.name, chat_req, Some(&options))
+            .await
+            .map_err(|e| e.to_string())?;
+        let texts = response.into_texts();
+        if texts.is_empty() {
+            Err("No text content in chat response".to_string())
+        } else {
+            Ok(texts.join("\n"))
+        }
     }
 
     pub async fn fetch_models(

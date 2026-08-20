@@ -516,6 +516,8 @@ export const locales = {
         namePlaceholder: "e.g. gpt-4, gpt-3.5-turbo",
         channel: "Channel",
         active: "Enable this model",
+        contextWindow: "Context Window (tokens)",
+        responseReserve: "Response Reserve (tokens)",
       },
       tool: {
         confirmExecution: "Confirm Execution",
@@ -1192,6 +1194,8 @@ export const locales = {
         namePlaceholder: "例如：gpt-4, gpt-3.5-turbo",
         channel: "所属渠道",
         active: "启用此模型",
+        contextWindow: "最大上下文 (tokens)",
+        responseReserve: "响应预留 (tokens)",
       },
       tool: {
         confirmExecution: "确认执行",

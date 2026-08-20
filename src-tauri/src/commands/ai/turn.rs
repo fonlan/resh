@@ -3,14 +3,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use futures::StreamExt;
-use genai::chat::{ChatStreamEvent, Tool};
+use genai::chat::{ChatMessage as GenaiMessage, ChatStreamEvent, Tool};
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::{Emitter, Manager, Window};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::history::{
-    load_history, read_remote_file_via_sftp, to_genai_messages, ProviderCapabilities,
+    build_compaction_prompt, compaction_output_budget, effective_context_window,
+    extract_compaction_summary, load_history, read_remote_file_via_sftp,
+    select_compaction_split, serialize_messages_for_compaction, should_compact_context,
+    to_genai_messages, ProviderCapabilities, COMPACTION_MAX_CONSECUTIVE_FAILURES,
     READ_FILE_MAX_BYTES,
 };
 use super::stream_parsing::{
@@ -2226,6 +2229,430 @@ async fn run_legacy_single_turn(
     result
 }
 
+/// Read the compaction state for a session: whether the next request must
+/// compact first, and the consecutive failure count.
+struct CompactionState {
+    needed: bool,
+    failures: i64,
+}
+
+async fn read_compaction_state(
+    state: &Arc<AppState>,
+    session_id: &str,
+) -> Result<CompactionState, String> {
+    let session_id_owned = session_id.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.query_row(
+                "SELECT compaction_needed, compaction_failures
+                 FROM ai_sessions WHERE id = ?1",
+                params![session_id_owned],
+                |row| {
+                    Ok(CompactionState {
+                        needed: row.get::<_, i64>(0).map(|v| v != 0).unwrap_or(false),
+                        failures: row.get::<_, i64>(1).unwrap_or(0),
+                    })
+                },
+            )
+            .map_err(|e| e.to_string())
+        })
+        .await
+}
+
+/// Persist the "compaction needed" flag set from a response's usage stats.
+async fn set_compaction_needed(
+    state: &Arc<AppState>,
+    session_id: &str,
+    needed: bool,
+) -> Result<(), String> {
+    let session_id_owned = session_id.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "UPDATE ai_sessions SET compaction_needed = ?1 WHERE id = ?2",
+                params![if needed { 1 } else { 0 }, session_id_owned],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+}
+
+/// Increment or reset the consecutive compaction failure counter.
+async fn update_compaction_failures(
+    state: &Arc<AppState>,
+    session_id: &str,
+    failures: i64,
+) -> Result<(), String> {
+    let session_id_owned = session_id.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "UPDATE ai_sessions SET compaction_failures = ?1 WHERE id = ?2",
+                params![failures, session_id_owned],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+}
+
+/// Insert the LLM-generated summary as a hidden user-role message and record
+/// the successful compaction on the session. The summary carries a prefix that
+/// tells the model it is continuation context, not a fresh user message
+/// (mirroring Claude Code's `Ann` summary message framing).
+async fn persist_compaction_result(
+    state: &Arc<AppState>,
+    session_id: &str,
+    summary: &str,
+) -> Result<(), String> {
+    let message_id = Uuid::new_v4().to_string();
+    let session_id_owned = session_id.to_string();
+    let framed = format!(
+        "This session is being continued from a previous conversation that ran out of context. \
+         The summary below covers the earlier portion of the conversation.\n\
+         Summary:\n{summary}\n\
+         Continue the conversation from where it left off. Do not recap or acknowledge the summary.",
+    );
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "INSERT INTO ai_messages
+                     (id, session_id, role, content, is_compaction_summary, turn_index)
+                 VALUES (?1, ?2, 'user', ?3, 1, 0)",
+                params![message_id, session_id_owned, framed],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await?;
+    let session_id_owned = session_id.to_string();
+    let summary_owned = summary.to_string();
+    state
+        .db_manager
+        .run_blocking(move |conn| {
+            conn.execute(
+                "UPDATE ai_sessions
+                 SET compaction_summary = ?1,
+                     compaction_needed = 0,
+                     compaction_failures = 0,
+                     compaction_at = CURRENT_TIMESTAMP
+                 WHERE id = ?2",
+                params![summary_owned, session_id_owned],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(())
+        })
+        .await
+}
+
+/// Run the LLM context compaction for a session.
+///
+/// Mirrors the industry consensus distilled from Claude Code / opencode /
+/// Codex / pi / grok build:
+/// - the compaction request uses the current session model, no tools, and a
+///   structured 9-section prompt;
+/// - the summary replaces everything before it (incremental: the previous
+///   summary is carried forward as authoritative context);
+/// - the cut keeps recent complete turns verbatim (tool pairs never split);
+/// - failures retry up to COMPACTION_MAX_CONSECUTIVE_FAILURES then trip a
+///   circuit breaker that skips auto-compaction for the session.
+#[allow(clippy::too_many_arguments)]
+async fn maybe_compact_context(
+    window: &Window,
+    state: &Arc<AppState>,
+    session_id: &str,
+    model_id: &str,
+    channel_id: &str,
+    _ssh_session_id: Option<&str>,
+    cancellation_token: &CancellationToken,
+    request_id: &str,
+) -> Result<(), String> {
+    if cancellation_token.is_cancelled() {
+        return Err(AI_CANCELLED.to_string());
+    }
+
+    let compaction_state = read_compaction_state(state, session_id).await?;
+    if !compaction_state.needed {
+        return Ok(());
+    }
+    if compaction_state.failures >= COMPACTION_MAX_CONSECUTIVE_FAILURES {
+        tracing::warn!(
+            "[AI] Context compaction circuit breaker open ({} consecutive failures); skipping auto-compaction for session {}",
+            compaction_state.failures,
+            session_id
+        );
+        set_compaction_needed(state, session_id, false).await?;
+        return Ok(());
+    }
+
+    let (channel, model, proxy) = {
+        let config = state.config.lock().await;
+        let model = config
+            .ai_models
+            .iter()
+            .find(|m| m.id == model_id)
+            .cloned()
+            .ok_or("Model not found")?;
+        let channel = config
+            .ai_channels
+            .iter()
+            .find(|c| c.id == channel_id)
+            .cloned()
+            .ok_or("Channel not found")?;
+        let proxy = channel
+            .proxy_id
+            .as_ref()
+            .and_then(|id| config.proxies.iter().find(|p| &p.id == id).cloned());
+        (channel, model, proxy)
+    };
+
+    // Load the full message list (with compaction-summary markers) and find the
+    // span after the last summary: that is the incremental compaction input.
+    let messages: Vec<(ChatMessage, bool)> = {
+        let session_id_owned = session_id.to_string();
+        state
+            .db_manager
+            .run_blocking(move |conn| {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT role, content, reasoning_content, tool_calls, tool_call_id, is_compaction_summary
+                         FROM ai_messages
+                         WHERE session_id = ?1
+                         ORDER BY created_at ASC, rowid ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
+                let rows = stmt
+                    .query_map(params![session_id_owned], |row| {
+                        let role: String = row.get(0)?;
+                        let content_raw: String = row.get(1)?;
+                        let reasoning_raw: Option<String> = row.get(2)?;
+                        let tool_calls_json: Option<String> = row.get(3).ok();
+                        let tool_call_id: Option<String> = row.get(4).ok();
+                        let is_summary: bool = row
+                            .get::<_, i64>(5)
+                            .map(|v| v != 0)
+                            .unwrap_or(false);
+                        let content = if content_raw.is_empty() {
+                            None
+                        } else {
+                            Some(content_raw)
+                        };
+                        let tool_calls = if let Some(json) = tool_calls_json {
+                            serde_json::from_str(&json).unwrap_or(None)
+                        } else {
+                            None
+                        };
+                        Ok((
+                            ChatMessage {
+                                role,
+                                content,
+                                reasoning_content: reasoning_raw,
+                                tool_calls,
+                                tool_call_id,
+                                created_at: None,
+                                model_id: None,
+                            },
+                            is_summary,
+                        ))
+                    })
+                    .map_err(|e| e.to_string())?;
+                let mut all: Vec<(ChatMessage, bool)> = Vec::new();
+                for row in rows {
+                    all.push(row.map_err(|e| e.to_string())?);
+                }
+                Ok(all)
+            })
+            .await?
+    };
+
+    // Span to summarize: after the last summary message (or all messages when
+    // there is no prior summary). The prior summary is carried forward.
+    let mut last_summary_index: Option<usize> = None;
+    let mut previous_summary: Option<String> = None;
+    for (index, (msg, is_summary)) in messages.iter().enumerate() {
+        if *is_summary {
+            last_summary_index = Some(index);
+            if let Some(content) = msg.content.as_deref() {
+                previous_summary = Some(content.to_string());
+            }
+        }
+    }
+    let to_compact: Vec<ChatMessage> = match last_summary_index {
+        Some(index) => messages[index + 1..]
+            .iter()
+            .map(|(msg, _)| msg.clone())
+            .filter(|m| m.role != "system")
+            .collect(),
+        None => messages
+            .iter()
+            .map(|(msg, _)| msg.clone())
+            .filter(|m| m.role != "system")
+            .collect(),
+    };
+    if to_compact.is_empty() {
+        // Nothing new since the last compaction; clear the flag.
+        set_compaction_needed(state, session_id, false).await?;
+        return Ok(());
+    }
+
+    // Keep recent complete turns verbatim, summarize the older span. 20K token
+    // budget mirrors pi's keepRecentTokens default.
+    let (to_summarize, _to_keep) = select_compaction_split(&to_compact, 20_000);
+    if to_summarize.is_empty() {
+        set_compaction_needed(state, session_id, false).await?;
+        return Ok(());
+    }
+
+    let conversation_text = serialize_messages_for_compaction(&to_summarize);
+    let prompt = build_compaction_prompt(previous_summary.as_deref());
+    let user_message = prompt.replace("{conversation}", &conversation_text);
+
+    let system_message = GenaiMessage::system(
+        "You are a helpful AI assistant tasked with summarizing conversations.",
+    );
+    let user_genai = GenaiMessage::user(user_message);
+    let max_output_tokens = compaction_output_budget(
+        model
+            .response_reserve
+            .map(u64::from)
+            .unwrap_or_else(|| effective_context_window(
+                model.context_window.map(u64::from).unwrap_or(32_000),
+                8_192,
+            ) / 4),
+    );
+    tracing::info!(
+        "[AI] Context compaction started: session={}, messages_to_summarize={}, chars={}, output_budget={}",
+        session_id,
+        to_summarize.len(),
+        conversation_text.len(),
+        max_output_tokens
+    );
+
+    // Retry transient failures (up to 3 attempts), mirroring grok build's
+    // FullReplaceConfig { max_attempts: 3, retry_delay_secs: 3 }.
+    let mut last_error: Option<String> = None;
+    let mut summary: Option<String> = None;
+    for attempt in 1..=3 {
+        if cancellation_token.is_cancelled() {
+            return Err(AI_CANCELLED.to_string());
+        }
+        match state
+            .ai_manager
+            .chat_once(
+                &channel,
+                &model,
+                vec![system_message.clone(), user_genai.clone()],
+                proxy.clone(),
+                None,
+                Some(max_output_tokens as u32),
+            )
+            .await
+        {
+            Ok(raw) => {
+                let extracted = extract_compaction_summary(&raw);
+                if extracted.trim().is_empty() {
+                    last_error = Some("compaction response contained no summary text".to_string());
+                } else {
+                    summary = Some(extracted);
+                    break;
+                }
+            }
+            Err(error) => {
+                last_error = Some(error);
+            }
+        }
+        if attempt < 3 {
+            tracing::warn!(
+                "[AI] Context compaction attempt {} failed ({}); retrying in {}s",
+                attempt,
+                last_error.as_deref().unwrap_or("unknown"),
+                3 * attempt
+            );
+            tokio::select! {
+                _ = cancellation_token.cancelled() => return Err(AI_CANCELLED.to_string()),
+                _ = tokio::time::sleep(Duration::from_secs(3 * attempt as u64)) => {}
+            }
+        }
+    }
+
+    let Some(summary) = summary else {
+        let failures = compaction_state.failures + 1;
+        update_compaction_failures(state, session_id, failures).await?;
+        tracing::error!(
+            "[AI] Context compaction failed after 3 attempts: {:?}; consecutive_failures={}",
+            last_error,
+            failures
+        );
+        return Err(format!(
+            "Context compaction failed: {}",
+            last_error.unwrap_or_else(|| "unknown error".to_string())
+        ));
+    };
+
+    persist_compaction_result(state, session_id, &summary).await?;
+    let _ = window.emit(
+        &format!("ai-compacted-{}", session_id),
+        super::types::AiCompactedPayload {
+            request_id: request_id.to_string(),
+            summary_chars: summary.chars().count(),
+            replaced_messages: to_summarize.len(),
+        },
+    );
+    tracing::info!(
+        "[AI] Context compacted: session={}, summary_chars={}, replaced_messages={}, previous_summary_carried={}",
+        session_id,
+        summary.chars().count(),
+        to_summarize.len(),
+        previous_summary.is_some()
+    );
+    Ok(())
+}
+
+/// Check a finished response's usage against the model's effective context
+/// window and mark the session for compaction on the next request.
+async fn check_usage_and_mark_compaction(
+    state: &Arc<AppState>,
+    session_id: &str,
+    model: &crate::config::types::AiModel,
+    total_tokens: Option<u64>,
+) -> Result<(), String> {
+    let Some(total_tokens) = total_tokens else {
+        return Ok(());
+    };
+    let context_window = model
+        .context_window
+        .map(u64::from)
+        .unwrap_or_else(|| {
+            // Conservative provider default matching context_budget_for_model.
+            if model.name.to_ascii_lowercase().contains("deepseek") {
+                64_000
+            } else {
+                32_000
+            }
+        });
+    let response_reserve = model
+        .response_reserve
+        .map(u64::from)
+        .unwrap_or_else(|| context_window.min(8_192) / 4);
+
+    if should_compact_context(total_tokens, context_window, response_reserve) {
+        tracing::info!(
+            "[AI] Context usage {}/{} (effective {}) reached the compaction threshold; marking session {}",
+            total_tokens,
+            context_window,
+            effective_context_window(context_window, response_reserve),
+            session_id
+        );
+        set_compaction_needed(state, session_id, true).await?;
+    }
+    Ok(())
+}
+
 pub fn stream_model_turn(
     window: Window,
     state: Arc<AppState>,
@@ -2271,6 +2698,23 @@ pub fn stream_model_turn(
         if cancellation_token.is_cancelled() {
             return Err(AI_CANCELLED.to_string());
         }
+
+        // Compaction runs before history is loaded: when the previous
+        // response's usage crossed the threshold, summarize the old span now
+        // so this request sends the summary plus recent verbatim turns.
+        // A compaction failure is non-fatal: the request proceeds with the
+        // existing (possibly template-compacted) history.
+        let _ = maybe_compact_context(
+            &window,
+            &state,
+            &session_id,
+            &model_id,
+            &channel_id,
+            ssh_session_id.as_deref(),
+            &cancellation_token,
+            &request_id,
+        )
+        .await;
 
         let history: Vec<ChatMessage> = tokio::select! {
             _ = cancellation_token.cancelled() => {
@@ -2646,6 +3090,20 @@ pub fn stream_model_turn(
                             emitted_tool_calls = tool_calls.len(),
                             "AI model turn completed"
                         );
+
+                        // Track real usage against the configured window and
+                        // mark the session for compaction before the next
+                        // request when the threshold is reached.
+                        let _ = check_usage_and_mark_compaction(
+                            &state,
+                            &session_id,
+                            &model,
+                            captured_usage
+                                .as_ref()
+                                .and_then(|usage| usage.total_tokens)
+                                .map(|value| value as u64),
+                        )
+                        .await;
 
                         if !tool_calls.is_empty() {
                             *final_tool_calls.get_or_insert_with(Vec::new) = tool_calls;

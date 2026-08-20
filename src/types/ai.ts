@@ -81,3 +81,11 @@ export interface AiErrorEventPayload {
   request_id: string
   error: string
 }
+
+/** Context compaction completion notice for `ai-compacted-*`; the UI shows a
+ * compact_boundary-style hint while the summary message stays hidden. */
+export interface AiCompactedPayload {
+  request_id: string
+  summary_chars: number
+  replaced_messages: number
+}

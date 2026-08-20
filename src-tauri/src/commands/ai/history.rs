@@ -782,6 +782,313 @@ pub(super) fn compact_dialog_messages_for_context(
     compacted
 }
 
+/// Ratio of the effective context window at which LLM compaction triggers.
+///
+/// Industry consensus (Claude Code ~83.5%, grok build 85%, pi window−16K):
+/// compaction must fire before the window is full because the compaction
+/// request itself needs room for its input plus the summary output.
+pub(super) const COMPACTION_THRESHOLD_RATIO: f64 = 0.85;
+
+/// Cap on a single compaction summary output (tokens). Kept modest so the
+/// compaction request itself fits inside the window even at the trigger point.
+pub(super) const COMPACTION_OUTPUT_TOKEN_CAP: u64 = 4_096;
+
+/// Consecutive compaction failures after which auto-compaction is skipped for
+/// the session (circuit breaker, mirroring Claude Code's `XLd=3`).
+pub(super) const COMPACTION_MAX_CONSECUTIVE_FAILURES: i64 = 3;
+
+/// Effective context window used for the compaction threshold:
+/// `context_window − response_reserve` (the room a next response needs).
+pub(super) fn effective_context_window(context_window: u64, response_reserve: u64) -> u64 {
+    context_window.saturating_sub(response_reserve).max(1_024)
+}
+
+/// True when the last response's total tokens reached the compaction threshold.
+pub(super) fn should_compact_context(total_tokens: u64, context_window: u64, response_reserve: u64) -> bool {
+    let effective = effective_context_window(context_window, response_reserve);
+    total_tokens as f64 >= effective as f64 * COMPACTION_THRESHOLD_RATIO
+}
+
+/// Max output tokens for the compaction request:
+/// `min(0.8 × response_reserve, COMPACTION_OUTPUT_TOKEN_CAP)` (pi's formula,
+/// capped so even small windows leave the compaction request room to breathe).
+pub(super) fn compaction_output_budget(response_reserve: u64) -> u64 {
+    let from_reserve = (response_reserve as f64 * 0.8) as u64;
+    from_reserve.min(COMPACTION_OUTPUT_TOKEN_CAP).max(256)
+}
+
+/// Serialize dialog messages to plain text for the summarizer, mirroring pi's
+/// `serializeConversation` and opencode's `serialize`: tool calls and results
+/// are rendered inline so the model sees the full exchange without receiving
+/// provider-shaped tool messages.
+pub(super) fn serialize_messages_for_compaction(messages: &[ChatMessage]) -> String {
+    let mut parts = Vec::new();
+    for message in messages {
+        match message.role.as_str() {
+            "user" => {
+                if let Some(content) = message.content.as_deref() {
+                    if !content.is_empty() {
+                        parts.push(format!("[User]: {content}"));
+                    }
+                }
+            }
+            "assistant" => {
+                if let Some(content) = message.content.as_deref() {
+                    if !content.is_empty() {
+                        parts.push(format!("[Assistant]: {content}"));
+                    }
+                }
+                if let Some(reasoning) = message.reasoning_content.as_deref() {
+                    if !reasoning.is_empty() {
+                        parts.push(format!("[Assistant reasoning]: {reasoning}"));
+                    }
+                }
+                if let Some(calls) = message.tool_calls.as_ref() {
+                    for call in calls {
+                        parts.push(format!(
+                            "[Assistant tool call]: {}({})",
+                            call.function.name, call.function.arguments
+                        ));
+                    }
+                }
+            }
+            "tool" => {
+                let content = message.content.as_deref().unwrap_or_default();
+                let mut text = format!("[Tool result]: {content}");
+                if let Some(id) = message.tool_call_id.as_deref() {
+                    text = format!("[Tool result ({id})]: {content}");
+                }
+                parts.push(text);
+            }
+            _ => {
+                if let Some(content) = message.content.as_deref() {
+                    if !content.is_empty() {
+                        parts.push(format!("[{}]: {content}", message.role));
+                    }
+                }
+            }
+        }
+    }
+    parts.join("\n\n")
+}
+
+/// Extract the `<summary>...</summary>` block from a compaction response,
+/// mirroring Claude Code's `formatCompactSummary()`. Falls back to the raw
+/// text with any `<analysis>` scratchpad stripped.
+pub(super) fn extract_compaction_summary(raw: &str) -> String {
+    if let Some(start) = raw.find("<summary>") {
+        let after = &raw[start + "<summary>".len()..];
+        if let Some(end) = after.find("</summary>") {
+            let summary = after[..end].trim();
+            if !summary.is_empty() {
+                return summary.to_string();
+            }
+        }
+    }
+    // No <summary> tags: drop an <analysis> scratchpad if present, keep the rest.
+    let stripped = strip_analysis_block(raw);
+    let trimmed = stripped.trim();
+    if trimmed.is_empty() {
+        raw.trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Remove a `<analysis>...</analysis>` scratchpad block (and the tags
+/// themselves) from a compaction response, keeping any surrounding text.
+fn strip_analysis_block(raw: &str) -> String {
+    let mut result = String::with_capacity(raw.len());
+    let mut rest = raw;
+    loop {
+        match rest.find("<analysis>") {
+            Some(start) => {
+                result.push_str(&rest[..start]);
+                let after = &rest[start + "<analysis>".len()..];
+                match after.find("</analysis>") {
+                    Some(end) => {
+                        rest = &after[end + "</analysis>".len()..];
+                    }
+                    None => {
+                        // Unterminated analysis tag: keep the remainder as-is.
+                        result.push_str(after);
+                        break;
+                    }
+                }
+            }
+            None => {
+                result.push_str(rest);
+                break;
+            }
+        }
+    }
+    result
+}
+
+/// Build the LLM compaction prompt (Claude Code 9-section style). When a
+/// previous summary exists it is passed as authoritative context that must be
+/// carried forward (Codex issue #14347's "progressive amnesia" fix).
+pub(super) fn build_compaction_prompt(previous_summary: Option<&str>) -> String {
+    let mut prompt = String::from(
+        "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\
+         - Do NOT use Read, Bash, Grep, Glob, Edit, Write, or ANY other tool.\n\
+         - You already have all the context you need in the conversation above.\n\
+         - Tool calls will be REJECTED and will waste your only turn — you will fail the task.\n\
+         - Your entire response must be plain text: an <analysis> block followed by a <summary> block.\n\n\
+         Your task is to create a detailed summary of the conversation so far, paying close \
+         attention to the user's explicit requests and your previous actions.\n\
+         This summary should be thorough in capturing technical details, code patterns, and \
+         architectural decisions that would be essential for continuing development work \
+         without losing context.\n\n\
+         Before providing your final summary, wrap your analysis in <analysis> tags to organize \
+         your thoughts and ensure you've covered all necessary points. In your analysis process:\n\
+         1. Chronologically analyze each message and section of the conversation. For each \
+         section thoroughly identify:\n\
+            - The user's explicit requests and intents\n\
+            - Your approach to addressing the user's requests\n\
+            - Key decisions, technical concepts and code patterns\n\
+            - Specific details like: file names / full code snippets / function signatures / file edits\n\
+            - Errors that you ran into and how you fixed them\n\
+            - Pay special attention to specific user feedback that you received, especially if \
+         the user told you to do something differently.\n\
+         2. Double-check for technical accuracy and completeness, addressing each required \
+         element thoroughly.\n\n\
+         Your summary should include the following sections:\n\
+         1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail\n\
+         2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.\n\
+         3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. \
+         Pay special attention to the most recent messages and include full code snippets where applicable.\n\
+         4. Errors and fixes: List all errors that you ran into, and how you fixed them.\n\
+         5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.\n\
+         6. All user messages: List ALL user messages that are not tool results. These are critical \
+         for understanding the users' feedback and changing intent.\n\
+         7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.\n\
+         8. Current Work: Describe in detail precisely what was being worked on immediately before \
+         this summary request, paying special attention to the most recent messages from both user \
+         and assistant. Include file names and code snippets where applicable.\n\
+         9. Optional Next Step: List the next step that you will take that is related to the most \
+         recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the \
+         user's most recent explicit requests. If there is a next step, include direct quotes from \
+         the most recent conversation showing exactly what task you were working on and where you \
+         left off. This should be verbatim to prevent any drift in task interpretation.\n\n\
+         Example output structure:\n\
+         <analysis>\n\
+         [Chronological, section-by-section reasoning — this is a scratchpad and will be discarded.]\n\
+         </analysis>\n\n\
+         <summary>\n\
+         1. Primary Request and Intent:\n   ...\n\
+         2. Key Technical Concepts:\n   ...\n\
+         [...all 9 sections...]\n\
+         </summary>\n",
+    );
+
+    if let Some(previous) = previous_summary {
+        if !previous.is_empty() {
+            prompt.push_str(&format!(
+                "\n\nThis conversation contains a summary from a previous compaction. \
+                 Treat it as authoritative for the early history and carry its still-relevant \
+                 information forward into your new summary (progress, key decisions and WHY, \
+                 outcomes, direction). Never discard entries from previous compactions — each \
+                 compaction adds to a cumulative record.\n\n\
+                 <previous_summary>\n{previous}\n</previous_summary>\n"
+            ));
+        }
+    }
+
+    prompt.push_str(
+        "\n\n<conversation>\n{conversation}\n</conversation>\n\n\
+         IMPORTANT: Do NOT use any tools. You MUST respond with ONLY the <analysis> and \
+         <summary> blocks as your text output.",
+    );
+    prompt
+}
+
+/// Group messages into assistant-turn groups so compaction can cut only at
+/// complete-turn boundaries (tool_use/tool_result pairs are never split,
+/// mirroring Claude Code's `Cdr` grouping and pi's "never cut at toolResult").
+fn split_complete_turn_groups(messages: &[ChatMessage]) -> Vec<Vec<ChatMessage>> {
+    let mut groups: Vec<Vec<ChatMessage>> = Vec::new();
+    for message in messages {
+        if message.role == "assistant" && message.tool_calls.as_ref().is_some_and(|c| !c.is_empty()) {
+            // A tool-calling assistant message starts a new group; everything
+            // after it (tool results, follow-up text) joins until the next
+            // assistant message.
+            groups.push(vec![message.clone()]);
+        } else if message.role == "assistant" && !groups.is_empty() {
+            // Plain assistant text after a tool group: append to the current
+            // group only if the group has no plain text yet, else start a new one.
+            let last = groups.last_mut().expect("groups is not empty");
+            if last.iter().all(|m| m.role == "tool" || m.tool_calls.is_some()) {
+                last.push(message.clone());
+            } else {
+                groups.push(vec![message.clone()]);
+            }
+        } else if message.role == "assistant" {
+            groups.push(vec![message.clone()]);
+        } else if let Some(last) = groups.last_mut() {
+            last.push(message.clone());
+        } else {
+            // Leading non-assistant messages (e.g. the very first user message).
+            groups.push(vec![message.clone()]);
+        }
+    }
+    groups
+}
+
+/// Select which message groups to summarize and which to keep verbatim.
+///
+/// Keeps the most recent groups within `keep_tokens` (mirroring pi's
+/// `keepRecentTokens` default 20K); everything older is summarized. The cut is
+/// always at a complete-turn boundary, so tool pairs survive.
+pub(super) fn select_compaction_split(
+    messages: &[ChatMessage],
+    keep_tokens: usize,
+) -> (Vec<ChatMessage>, Vec<ChatMessage>) {
+    let groups = split_complete_turn_groups(messages);
+    let mut kept_start = groups.len();
+    let mut kept_tokens = 0usize;
+    for index in (0..groups.len()).rev() {
+        let group_tokens: usize = groups[index]
+            .iter()
+            .map(|m| {
+                let chars = m
+                    .content
+                    .as_deref()
+                    .map(str::len)
+                    .unwrap_or_default()
+                    + m
+                        .reasoning_content
+                        .as_deref()
+                        .map(str::len)
+                        .unwrap_or_default()
+                    + m
+                        .tool_calls
+                        .as_ref()
+                        .map(|calls| {
+                            calls
+                                .iter()
+                                .map(|call| call.function.name.len() + call.function.arguments.len())
+                                .sum::<usize>()
+                        })
+                        .unwrap_or_default();
+                (chars + 3) / 4
+            })
+            .sum();
+        if kept_start == groups.len() || kept_tokens.saturating_add(group_tokens) <= keep_tokens {
+            kept_start = index;
+            kept_tokens = kept_tokens.saturating_add(group_tokens);
+        } else {
+            break;
+        }
+    }
+
+    let (to_summarize, to_keep) = groups.split_at(kept_start);
+    (
+        to_summarize.iter().flatten().cloned().collect(),
+        to_keep.iter().flatten().cloned().collect(),
+    )
+}
+
 pub(super) async fn load_history(
     state: &Arc<AppState>,
     session_id: &str,
@@ -828,7 +1135,7 @@ pub(super) async fn load_history(
             .run_blocking(move |conn| {
                 let mut stmt = conn
                     .prepare(
-                        "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id
+                        "SELECT role, content, reasoning_content, tool_calls, tool_call_id, created_at, model_id, is_compaction_summary
                         FROM ai_messages 
                         WHERE session_id = ?1 
                         ORDER BY created_at ASC, rowid ASC",
@@ -844,6 +1151,10 @@ pub(super) async fn load_history(
                         let tool_call_id: Option<String> = row.get(4).ok();
                         let created_at: String = row.get(5)?;
                         let model_id: Option<String> = row.get(6).ok();
+                        let is_compaction_summary: bool = row
+                            .get::<_, i64>(7)
+                            .map(|value| value != 0)
+                            .unwrap_or(false);
 
                         let content = if content_raw.is_empty() {
                             None
@@ -857,28 +1168,54 @@ pub(super) async fn load_history(
                             None
                         };
 
-                        Ok(ChatMessage {
-                            role,
-                            content,
-                            reasoning_content: reasoning_raw,
-                            tool_calls,
-                            tool_call_id,
-                            created_at: Some(created_at),
-                            model_id,
-                        })
+                        Ok((
+                            ChatMessage {
+                                role,
+                                content,
+                                reasoning_content: reasoning_raw,
+                                tool_calls,
+                                tool_call_id,
+                                created_at: Some(created_at),
+                                model_id,
+                            },
+                            is_compaction_summary,
+                        ))
                     })
                     .map_err(|e| e.to_string())?;
 
-                let mut all_messages: Vec<ChatMessage> = Vec::new();
+                let mut all_messages: Vec<(ChatMessage, bool)> = Vec::new();
                 for row in rows {
-                    let msg: ChatMessage = row.map_err(|e| e.to_string())?;
+                    let msg = row.map_err(|e| e.to_string())?;
                     all_messages.push(msg);
                 }
 
-                let dialog_messages: Vec<ChatMessage> = all_messages
-                    .into_iter()
-                    .filter(|m| m.role != "system")
-                    .collect();
+                // The last compaction summary replaces everything before it.
+                // Messages before the summary stay in the DB (the UI renders
+                // the original conversation) but are not sent to the model
+                // again. The summary itself is kept as a user-role message.
+                let mut last_summary_index: Option<usize> = None;
+                for (index, (_, is_summary)) in all_messages.iter().enumerate() {
+                    if *is_summary {
+                        last_summary_index = Some(index);
+                    }
+                }
+
+                let dialog_messages: Vec<ChatMessage> = if let Some(summary_index) =
+                    last_summary_index
+                {
+                    all_messages
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(index, (msg, _))| *index >= summary_index && msg.role != "system")
+                        .map(|(_, (msg, _))| msg)
+                        .collect()
+                } else {
+                    all_messages
+                        .into_iter()
+                        .map(|(msg, _)| msg)
+                        .filter(|m| m.role != "system")
+                        .collect()
+                };
 
                 Ok(dialog_messages)
             })
@@ -1174,5 +1511,110 @@ mod context_tests {
         );
 
         assert_eq!(encoded.len(), 2);
+    }
+
+    #[test]
+    fn compaction_threshold_fires_at_85_percent_of_effective_window() {
+        // 64K window, 8K reserve → effective 56K; threshold ≈ 47.6K.
+        assert!(!should_compact_context(40_000, 64_000, 8_192));
+        assert!(!should_compact_context(47_000, 64_000, 8_192));
+        assert!(should_compact_context(48_000, 64_000, 8_192));
+        assert!(should_compact_context(60_000, 64_000, 8_192));
+        // A missing reserve still leaves a sane floor.
+        assert!(should_compact_context(60_000, 64_000, 0));
+        // Tiny windows still trigger before overflow.
+        assert!(should_compact_context(1_800, 2_048, 256));
+    }
+
+    #[test]
+    fn compaction_output_budget_is_bounded() {
+        assert_eq!(compaction_output_budget(8_192), 4_096); // 0.8×8192 > cap
+        assert_eq!(compaction_output_budget(2_048), 1_638); // 0.8×2048
+        assert_eq!(compaction_output_budget(256), 256); // floor
+        assert_eq!(compaction_output_budget(0), 256); // floor even at 0
+    }
+
+    #[test]
+    fn extract_compaction_summary_prefers_summary_block() {
+        let raw = "<analysis>\nsome scratchpad\n</analysis>\n<summary>\n1. Primary Request\n2. Key Concepts\n</summary>\n";
+        let summary = extract_compaction_summary(raw);
+        assert_eq!(summary, "1. Primary Request\n2. Key Concepts");
+    }
+
+    #[test]
+    fn extract_compaction_summary_falls_back_without_tags() {
+        let raw = "plain summary text without tags";
+        assert_eq!(extract_compaction_summary(raw), raw);
+        let with_analysis = "<analysis>scratch</analysis>\nkept text";
+        assert_eq!(extract_compaction_summary(with_analysis), "kept text");
+    }
+
+    #[test]
+    fn compaction_prompt_carries_previous_summary() {
+        let prompt = build_compaction_prompt(None);
+        assert!(prompt.contains("Primary Request and Intent"));
+        assert!(prompt.contains("CRITICAL: Respond with TEXT ONLY"));
+        assert!(prompt.contains("Do NOT call any tools"));
+        assert!(!prompt.contains("<previous_summary>"));
+
+        let with_previous = build_compaction_prompt(Some("OLD SUMMARY"));
+        assert!(with_previous.contains("<previous_summary>"));
+        assert!(with_previous.contains("OLD SUMMARY"));
+        assert!(with_previous.contains("Never discard entries from previous compactions"));
+    }
+
+    #[test]
+    fn serialize_messages_renders_roles_and_tool_pairs() {
+        let mut assistant = message("assistant", String::new());
+        assistant.tool_calls = Some(vec![tool_call("call_1", "{\"path\":\"/a\"}".to_string())]);
+        assistant.reasoning_content = Some("thinking...".to_string());
+        let mut result = message("tool", "observed output".to_string());
+        result.tool_call_id = Some("call_1".to_string());
+        let user = message("user", "please fix it".to_string());
+
+        let text = serialize_messages_for_compaction(&[user, assistant, result]);
+        assert!(text.contains("[User]: please fix it"));
+        assert!(text.contains("[Assistant reasoning]: thinking..."));
+        assert!(text.contains("[Assistant tool call]: write_file({\"path\":\"/a\"})"));
+        assert!(text.contains("[Tool result (call_1)]: observed output"));
+    }
+
+    #[test]
+    fn select_compaction_split_keeps_recent_turns_and_never_splits_tool_pairs() {
+        let mut tool_assistant = message("assistant", String::new());
+        tool_assistant.tool_calls =
+            Some(vec![tool_call("call_1", "{}".to_string())]);
+        let mut tool_result = message("tool", "result A".to_string());
+        tool_result.tool_call_id = Some("call_1".to_string());
+
+        let history = vec![
+            message("user", "old task".to_string()),
+            message("assistant", "did old work".to_string()),
+            message("user", "new task".to_string()),
+            tool_assistant,
+            tool_result,
+            message("assistant", "done".to_string()),
+        ];
+
+        // Tiny keep budget: only the final assistant message survives verbatim.
+        let (to_summarize, to_keep) = select_compaction_split(&history, 8);
+        assert!(!to_summarize.is_empty());
+        assert!(to_keep.iter().any(|m| m.content.as_deref() == Some("done")));
+        // Tool result must not appear in to_keep without its call (pairs stay whole).
+        let kept_tool_results: Vec<&str> = to_keep
+            .iter()
+            .filter(|m| m.role == "tool")
+            .filter_map(|m| m.content.as_deref())
+            .collect();
+        let kept_tool_calls = to_keep
+            .iter()
+            .filter(|m| m.role == "assistant" && m.tool_calls.is_some())
+            .count();
+        assert_eq!(kept_tool_results.len(), kept_tool_calls);
+
+        // Generous budget keeps everything verbatim → nothing to summarize.
+        let (to_summarize_all, to_keep_all) = select_compaction_split(&history, 1_000_000);
+        assert!(to_summarize_all.is_empty());
+        assert_eq!(to_keep_all.len(), history.len());
     }
 }

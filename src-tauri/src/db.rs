@@ -70,6 +70,34 @@ impl DatabaseManager {
         let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN run_id TEXT", []);
         let _ = conn.execute("ALTER TABLE ai_messages ADD COLUMN turn_index INTEGER", []);
 
+        // Context compaction state: the latest LLM-generated summary that replaces
+        // earlier messages when building a request, a flag that the next request
+        // must compact first, the consecutive failure count (circuit breaker), and
+        // the timestamp of the last successful compaction.
+        let _ = conn.execute(
+            "ALTER TABLE ai_sessions ADD COLUMN compaction_summary TEXT",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE ai_sessions ADD COLUMN compaction_needed INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE ai_sessions ADD COLUMN compaction_failures INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE ai_sessions ADD COLUMN compaction_at DATETIME",
+            [],
+        );
+        // Marks a message as an LLM-generated compaction summary. Such messages
+        // are sent to the model as history (replacing everything before them)
+        // but hidden from the UI message list.
+        let _ = conn.execute(
+            "ALTER TABLE ai_messages ADD COLUMN is_compaction_summary INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         conn.execute(
             "CREATE TABLE IF NOT EXISTS ai_runs (
                 id TEXT PRIMARY KEY,
