@@ -490,6 +490,9 @@ export const locales = {
       maxChatContext: "Max Chat Context",
       requestTimeout: "Request Timeout (seconds)",
       toolConfirmationCountdown: "Tool confirmation countdown (seconds)",
+      toolConfirmationCountdownYoloWarning:
+        "0 = YOLO mode: all tool calls (including dangerous tools) execute without confirmation. High-risk commands (rm, dd, mkfs, fdisk, reboot, shutdown, halt, poweroff, init) still require confirmation.",
+      yoloModeBadge: "YOLO mode active - no tool confirmations",
       channels: "AI Channels",
       models: "AI Models",
       addChannel: "Add Channel",
@@ -1169,6 +1172,9 @@ export const locales = {
       maxChatContext: "最大对话上下文",
       requestTimeout: "请求超时时间 (秒)",
       toolConfirmationCountdown: "工具确认倒计时 (秒)",
+      toolConfirmationCountdownYoloWarning:
+        "0 = YOLO 模式：所有工具调用（含危险工具）将直接执行，无需确认。高风险命令（rm、dd、mkfs、fdisk、reboot、shutdown、halt、poweroff、init）仍需确认。",
+      yoloModeBadge: "YOLO 模式已开启 - 不进行工具确认",
       channels: "AI 渠道",
       models: "AI 模型",
       addChannel: "添加渠道",

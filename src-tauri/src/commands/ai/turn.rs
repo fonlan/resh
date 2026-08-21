@@ -1326,10 +1326,16 @@ async fn prepare_tool_batch(
     is_agent_mode: bool,
 ) -> Result<PreparedToolBatch, String> {
     let grants = load_session_grants(state, session_id).await?;
+    // Yolo mode: tool confirmation countdown == 0. Read live so changing the
+    // setting mid-run takes effect on the next tool batch immediately.
+    let yolo = {
+        let config = state.config.lock().await;
+        config.general.ai_tool_confirmation_countdown == 0
+    };
     let mut batch = PreparedToolBatch::default();
     for call in calls {
         let has_session_grant = grants.contains(&call.function.name);
-        match ToolPolicyEngine::prepare(call, is_agent_mode, has_session_grant) {
+        match ToolPolicyEngine::prepare(call, is_agent_mode, has_session_grant, yolo) {
             ToolPreparation::Execute(call) => batch.execute.push(call),
             ToolPreparation::AwaitApproval(call) => batch.awaiting_approval.push(call),
             ToolPreparation::Immediate(outcome) => batch.immediate.push(outcome),

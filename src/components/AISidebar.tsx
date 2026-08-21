@@ -27,6 +27,7 @@ import {
   MessageSquare,
   Trash2,
   Square,
+  AlertTriangle,
 } from "lucide-react"
 import { listen } from "@tauri-apps/api/event"
 import { v4 as uuidv4 } from "uuid"
@@ -216,6 +217,7 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const autoConfirmDelaySeconds = clampAiToolConfirmationCountdown(
     config?.general.aiToolConfirmationCountdown ?? 5,
   )
+  const isYoloMode = autoConfirmDelaySeconds === 0
 
   const sidebarRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -1647,6 +1649,14 @@ export const AISidebar: React.FC<AISidebarProps> = ({
       <div className="flex items-center justify-between p-3 pl-4 border-b border-[var(--glass-border)] flex-shrink-0">
         <h3 className="text-[13px] font-semibold text-[var(--text-primary)] flex items-center gap-2 m-0 whitespace-nowrap">
           <Bot size={16} /> {t.ai.sidebarTitle}
+          {isYoloMode && (
+            <span
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-red-500/15 text-red-500 border border-red-500/30"
+              title={t.ai.yoloModeBadge}
+            >
+              <AlertTriangle size={10} /> YOLO
+            </span>
+          )}
         </h3>
         <div className="flex items-center gap-1">
           <button

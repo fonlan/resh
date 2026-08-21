@@ -10,6 +10,7 @@ import {
   Loader2,
   Eye,
   EyeOff,
+  AlertTriangle,
 } from "lucide-react"
 import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from "../../types"
 import { generateId } from "../../utils/idGenerator"
@@ -437,6 +438,12 @@ export const AITab: React.FC<AITabProps> = ({
               max={30}
               step={1}
             />
+            {(general.aiToolConfirmationCountdown ?? 5) === 0 && (
+              <div className="text-xs text-red-500 mt-1.5 flex items-start gap-1">
+                <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{t.ai.toolConfirmationCountdownYoloWarning}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>

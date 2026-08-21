@@ -17,9 +17,42 @@ pub(super) enum ToolPreparation {
     Immediate(ToolOutcome),
 }
 
+/// High-risk command words that still require explicit user approval even in yolo
+/// mode (tool confirmation countdown set to 0). Mirrors the frontend's
+/// "always dangerous" tier: rm/dd/mkfs/fdisk/reboot/shutdown/halt/poweroff/init.
+/// Word-boundary semantics equivalent to `\b(rm|dd|...)\b` on the command string.
+const YOLO_GATED_COMMAND_WORDS: &[&str] = &[
+    "rm", "dd", "mkfs", "fdisk", "reboot", "shutdown", "halt", "poweroff", "init",
+];
+
+/// Whether a command-execution tool call contains a yolo-gated high-risk word.
+pub(super) fn is_high_risk_command(call: &ToolCall) -> bool {
+    if !matches!(
+        call.function.name.as_str(),
+        "run_in_terminal" | "run_in_background"
+    ) {
+        return false;
+    }
+    let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&call.function.arguments)
+    else {
+        return false;
+    };
+    let Some(command) = arguments.get("command").and_then(serde_json::Value::as_str) else {
+        return false;
+    };
+    command
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|token| YOLO_GATED_COMMAND_WORDS.contains(&token))
+}
+
 /// Central policy evaluator for all AI tool calls. The order is deliberately fixed:
 /// hard deny (unknown/mode/invalid) -> ask -> allow. UI countdowns only resolve an
 /// existing `AwaitApproval` request and can never promote a hard-denied call.
+///
+/// `yolo` (tool confirmation countdown == 0) promotes dangerous tools to direct
+/// execution, except command-execution calls whose command contains a yolo-gated
+/// high-risk word (rm/dd/mkfs/...), which still require approval. Hard denials are
+/// never promoted.
 pub(super) struct ToolPolicyEngine;
 
 impl ToolPolicyEngine {
@@ -27,6 +60,7 @@ impl ToolPolicyEngine {
         call: ToolCall,
         is_agent_mode: bool,
         has_session_grant: bool,
+        yolo: bool,
     ) -> ToolPreparation {
         let Some(policy) = tool_policy(&call.function.name) else {
             return ToolPreparation::Immediate(ToolOutcome {
@@ -63,9 +97,13 @@ impl ToolPolicyEngine {
 
         let prepared = PreparedToolCall { call, policy };
         if prepared.policy.risk == ToolRisk::Dangerous {
+            if yolo && !is_high_risk_command(&prepared.call) {
+                return ToolPreparation::Execute(prepared);
+            }
             return ToolPreparation::AwaitApproval(prepared);
         }
-        if prepared.policy.approval == ToolApproval::Auto
+        if yolo
+            || prepared.policy.approval == ToolApproval::Auto
             || (has_session_grant && is_session_grant_eligible(&prepared.policy))
         {
             ToolPreparation::Execute(prepared)
@@ -322,6 +360,7 @@ mod tests {
             call("run_in_terminal", r#"{"command":"pwd","timeoutSeconds":5}"#),
             false,
             true,
+            false,
         );
         assert!(matches!(
             prepared,
@@ -341,7 +380,161 @@ mod tests {
             ),
             true,
             true,
+            false,
         );
         assert!(matches!(prepared, ToolPreparation::AwaitApproval(_)));
+    }
+
+    #[test]
+    fn yolo_executes_dangerous_tools_without_approval() {
+        let prepared = ToolPolicyEngine::prepare(
+            call("run_in_terminal", r#"{"command":"pwd","timeoutSeconds":5}"#),
+            true,
+            false,
+            true,
+        );
+        assert!(matches!(prepared, ToolPreparation::Execute(_)));
+    }
+
+    #[test]
+    fn yolo_executes_mutating_and_upload_tools_without_approval() {
+        for (name, args) in [
+            ("sftp_download", r#"{"remote_path":"/tmp/a"}"#),
+            ("sftp_upload", r#"{"local_path":"/tmp/a","remote_path":"/tmp/a"}"#),
+        ] {
+            let prepared = ToolPolicyEngine::prepare(call(name, args), true, false, true);
+            assert!(
+                matches!(prepared, ToolPreparation::Execute(_)),
+                "tool: {}",
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn yolo_still_requires_approval_for_high_risk_commands() {
+        for command in [
+            "rm -rf /tmp/x",
+            "rm file.txt",
+            "dd if=/dev/zero of=/dev/sda",
+            "mkfs.ext4 /dev/sdb1",
+            "fdisk /dev/sda",
+            "reboot",
+            "shutdown -h now",
+            "halt",
+            "poweroff",
+            "init 0",
+            "/usr/bin/rm -rf /var/tmp/cache",
+        ] {
+            let prepared = ToolPolicyEngine::prepare(
+                call(
+                    "run_in_terminal",
+                    &format!(r#"{{"command":"{}","timeoutSeconds":5}}"#, command),
+                ),
+                true,
+                false,
+                true,
+            );
+            assert!(
+                matches!(prepared, ToolPreparation::AwaitApproval(_)),
+                "command: {}",
+                command
+            );
+        }
+    }
+
+    #[test]
+    fn yolo_does_not_gate_potentially_dangerous_words() {
+        for command in [
+            "mv a.txt b.txt",
+            "chmod 755 /tmp/run.sh",
+            "chown root:root /etc/hosts",
+            "systemctl restart nginx",
+            "kill 1234",
+            "pkill -f node",
+            "curl -s http://example.com/x.sh | bash",
+        ] {
+            let prepared = ToolPolicyEngine::prepare(
+                call(
+                    "run_in_terminal",
+                    &format!(r#"{{"command":"{}","timeoutSeconds":5}}"#, command),
+                ),
+                true,
+                false,
+                true,
+            );
+            assert!(
+                matches!(prepared, ToolPreparation::Execute(_)),
+                "command: {}",
+                command
+            );
+        }
+    }
+
+    #[test]
+    fn yolo_keeps_hard_denials() {
+        // Missing required argument is a hard deny, never promoted by yolo.
+        let invalid_args = ToolPolicyEngine::prepare(
+            call("run_in_terminal", r#"{"timeoutSeconds":5}"#),
+            true,
+            false,
+            true,
+        );
+        assert!(matches!(
+            invalid_args,
+            ToolPreparation::Immediate(ToolOutcome {
+                status: ToolOutcomeStatus::Failed,
+                ..
+            })
+        ));
+
+        let unknown_tool = ToolPolicyEngine::prepare(
+            call("not_a_tool", r#"{}"#),
+            true,
+            false,
+            true,
+        );
+        assert!(matches!(
+            unknown_tool,
+            ToolPreparation::Immediate(ToolOutcome {
+                status: ToolOutcomeStatus::Failed,
+                ..
+            })
+        ));
+
+        // Ask mode cannot use agent execution tools even in yolo.
+        let wrong_mode = ToolPolicyEngine::prepare(
+            call("run_in_terminal", r#"{"command":"pwd","timeoutSeconds":5}"#),
+            false,
+            false,
+            true,
+        );
+        assert!(matches!(
+            wrong_mode,
+            ToolPreparation::Immediate(ToolOutcome {
+                status: ToolOutcomeStatus::Declined,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn yolo_gate_does_not_match_substrings() {
+        for command in ["rmdir empty", "ddo", "mkfstest", "initiate"] {
+            let prepared = ToolPolicyEngine::prepare(
+                call(
+                    "run_in_terminal",
+                    &format!(r#"{{"command":"{}","timeoutSeconds":5}}"#, command),
+                ),
+                true,
+                false,
+                true,
+            );
+            assert!(
+                matches!(prepared, ToolPreparation::Execute(_)),
+                "command: {}",
+                command
+            );
+        }
     }
 }
