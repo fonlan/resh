@@ -222,6 +222,13 @@ export const AISidebar: React.FC<AISidebarProps> = ({
   const sidebarRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  // IME composition tracking: Safari/WKWebView fires compositionend BEFORE the
+  // confirming Enter keydown, so that keydown reports isComposing=false
+  // (keyCode 229 on Safari 26, 13 in older reports). Treat any key event
+  // within 100ms of compositionend as part of the IME confirmation, otherwise
+  // pressing Enter to commit a pinyin/English word would send the message.
+  const isComposingRef = useRef(false)
+  const lastCompositionEndRef = useRef(0)
   const isAtBottomRef = useRef(true)
   // Stream chunk buffers are request-scoped so late/auto-exec races cannot
   // flush run-A text into a newly started run-B assistant message.
@@ -1588,7 +1595,28 @@ export const AISidebar: React.FC<AISidebarProps> = ({
     }
   }
 
+  const handleCompositionStart = () => {
+    isComposingRef.current = true
+  }
+
+  const handleCompositionEnd = () => {
+    isComposingRef.current = false
+    lastCompositionEndRef.current = performance.now()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    const native = e.nativeEvent
+    if (
+      native.isComposing ||
+      isComposingRef.current ||
+      native.keyCode === 229 ||
+      performance.now() - lastCompositionEndRef.current < 100
+    ) {
+      // IME composition in progress (or just committed): let the IME finish
+      // and the composed text 上屏 (commit into the textarea) instead of
+      // treating Enter as send.
+      return
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       if (!isLoading && !pendingToolCalls) {
@@ -1975,6 +2003,8 @@ export const AISidebar: React.FC<AISidebarProps> = ({
                 placeholder={t.ai.typeMessage}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 onKeyDown={handleKeyDown}
                 onDragOver={handleInputDragOver}
                 onDragLeave={handleInputDragLeave}
