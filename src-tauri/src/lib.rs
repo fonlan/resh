@@ -5,6 +5,7 @@ pub mod config;
 pub mod db;
 pub mod http;
 pub mod logger;
+pub mod model_catalog;
 pub mod sftp_manager;
 pub mod ssh_manager;
 pub mod updater;

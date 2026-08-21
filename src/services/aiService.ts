@@ -5,8 +5,26 @@ import {
   AiToolCallEventPayload,
   ToolCall,
 } from "../types/ai"
+import {
+  CatalogLookup,
+  CatalogStatus,
+} from "../types/ai-config"
 
 export const aiService = {
+  // ── models.dev catalog (auto-fill for the model form) ─────────────────────
+
+  /** Look up one model id in the cached models.dev catalog. */
+  modelCatalogLookup: (modelId: string) =>
+    invoke<CatalogLookup>("model_catalog_lookup", { modelId }),
+
+  /** Current catalog cache status (entries, fetchedAt, freshness). */
+  modelCatalogStatus: () =>
+    invoke<CatalogStatus>("model_catalog_status"),
+
+  /** Force a catalog fetch now and return the new status. */
+  modelCatalogRefresh: () =>
+    invoke<CatalogStatus>("model_catalog_refresh"),
+
   createSession: (serverId: string, modelId?: string, sshSessionId?: string) =>
     invoke<string>("create_ai_session", { serverId, modelId, sshSessionId }),
 

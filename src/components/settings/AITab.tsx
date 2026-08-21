@@ -11,14 +11,16 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react"
-import { AIChannel, AIModel, ProxyConfig, GeneralSettings } from "../../types"
+import { AIChannel, AIModel, ProxyConfig, GeneralSettings, CatalogLookup, CatalogStatus } from "../../types"
 import { generateId } from "../../utils/idGenerator"
 import { FormModal } from "../FormModal"
 import { ConfirmationModal } from "../ConfirmationModal"
 import { CustomSelect } from "../CustomSelect"
 import { useTranslation } from "../../i18n"
 import { invoke } from "@tauri-apps/api/core"
+import { aiService } from "../../services/aiService"
 
 interface AITabProps {
   aiChannels: AIChannel[]
@@ -85,6 +87,106 @@ export const AITab: React.FC<AITabProps> = ({
     width: number
   } | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // models.dev catalog state (auto-fill source for the model form)
+  const [catalogStatus, setCatalogStatus] = useState<CatalogStatus | null>(null)
+  const [catalogRefreshBusy, setCatalogRefreshBusy] = useState(false)
+  const [catalogRefreshResult, setCatalogRefreshResult] = useState<{
+    ok: boolean
+    message: string
+  } | null>(null)
+  const [catalogLookup, setCatalogLookup] = useState<CatalogLookup | null>(null)
+  const [catalogLookupBusy, setCatalogLookupBusy] = useState(false)
+  const [catalogLookupError, setCatalogLookupError] = useState<string | null>(null)
+  // Whether the user manually edited context/reserve; manual edits win over auto-fill.
+  const contextTouchedRef = useRef(false)
+  const reserveTouchedRef = useRef(false)
+
+  // Load catalog status once (cache freshness + counts).
+  useEffect(() => {
+    aiService
+      .modelCatalogStatus()
+      .then(setCatalogStatus)
+      .catch(() => {
+        /* catalog optional; form still works without it */
+      })
+  }, [])
+
+  // Debounced catalog lookup while the model id is typed: auto-fill
+  // contextWindow / responseReserve from models.dev when the user has not
+  // edited those fields manually.
+  useEffect(() => {
+    const name = (modelFormData.name || "").trim()
+    if (!name) {
+      setCatalogLookup(null)
+      setCatalogLookupError(null)
+      return
+    }
+    setCatalogLookupBusy(true)
+    const timer = setTimeout(() => {
+      aiService
+        .modelCatalogLookup(name)
+        .then((result) => {
+          setCatalogLookup(result)
+          setCatalogLookupError(null)
+          if (result.best) {
+            setModelFormData((prev) => {
+              const next = { ...prev }
+              if (
+                !contextTouchedRef.current &&
+                next.contextWindow === undefined &&
+                result.best?.context != null
+              ) {
+                next.contextWindow = result.best.context
+              }
+              if (
+                !reserveTouchedRef.current &&
+                next.responseReserve === undefined &&
+                result.best?.output != null
+              ) {
+                next.responseReserve = result.best.output
+              }
+              return next
+            })
+          }
+        })
+        .catch((e) => {
+          setCatalogLookupError(String(e))
+          setCatalogLookup(null)
+        })
+        .finally(() => setCatalogLookupBusy(false))
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [modelFormData.name])
+
+  const handleRefreshCatalog = async () => {
+    setCatalogRefreshBusy(true)
+    setCatalogRefreshResult(null)
+    try {
+      const status = await aiService.modelCatalogRefresh()
+      setCatalogStatus(status)
+      setCatalogRefreshResult({
+        ok: true,
+        message: `${t.ai.catalogRefreshOk} (${status.entries.toLocaleString()} ${t.ai.catalogModels} / ${status.providers.toLocaleString()} ${t.ai.catalogProviders})`,
+      })
+    } catch (e) {
+      const message = String(e)
+      setCatalogRefreshResult({ ok: false, message })
+      // Also surface it next to the model form lookup, where errors are shown.
+      setCatalogLookupError(message)
+    } finally {
+      setCatalogRefreshBusy(false)
+    }
+  }
+
+  const formatCatalogTime = (epochMs: number) => {
+    if (!epochMs) return ""
+    try {
+      return new Date(epochMs).toLocaleString()
+    } catch {
+      return String(epochMs)
+    }
+  }
 
   // Sort channels and models by name
   const sortedChannels = React.useMemo(() => {
@@ -320,6 +422,10 @@ export const AITab: React.FC<AITabProps> = ({
       return
     }
     setEditingModel(null)
+    contextTouchedRef.current = false
+    reserveTouchedRef.current = false
+    setCatalogLookup(null)
+    setCatalogLookupError(null)
     setModelFormData({
       name: "",
       channelId: aiChannels[0].id,
@@ -331,6 +437,10 @@ export const AITab: React.FC<AITabProps> = ({
 
   const handleEditModel = (model: AIModel) => {
     setEditingModel(model)
+    contextTouchedRef.current = false
+    reserveTouchedRef.current = false
+    setCatalogLookup(null)
+    setCatalogLookupError(null)
     setModelFormData({ ...model })
     setIsModelFormOpen(true)
   }
@@ -536,15 +646,90 @@ export const AITab: React.FC<AITabProps> = ({
       {/* AI Models Section */}
       <div className="flex justify-between items-center mb-4 mt-8">
         <h3 className="text-base font-semibold ">{t.ai.models}</h3>
-        <button
-          type="button"
-          onClick={handleAddModel}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans"
-        >
-          <Plus size={16} />
-          {t.ai.addModel}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void handleRefreshCatalog()}
+            disabled={catalogRefreshBusy}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-[var(--bg-primary)] text-[var(--text-secondary)] border border-zinc-700/50 cursor-pointer transition-all whitespace-nowrap hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] hover:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {catalogRefreshBusy ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <RefreshCw size={16} />
+            )}
+            {catalogRefreshBusy ? t.ai.catalogRefreshing : t.ai.catalogRefresh}
+          </button>
+          <button
+            type="button"
+            onClick={handleAddModel}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded bg-blue-500 text-white shadow-[0_0_20px_rgba(59,130,246,0.2)] border-none cursor-pointer transition-all whitespace-nowrap hover:brightness-110 hover:-translate-y-px active:translate-y-0 font-sans"
+          >
+            <Plus size={16} />
+            {t.ai.addModel}
+          </button>
+        </div>
       </div>
+
+      {/* models.dev catalog status (auto-fill source) */}
+      <div className="mb-3 text-xs text-[var(--text-muted)] flex flex-col gap-1">
+        <div className="flex items-center gap-2 whitespace-nowrap overflow-x-auto">
+          <span className="flex-shrink-0">{t.ai.modelCatalog}</span>
+          {catalogStatus ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-[var(--bg-primary)] text-[var(--text-secondary)] rounded border border-zinc-700/50">
+                {catalogStatus.entries.toLocaleString()} {t.ai.catalogModels}
+              </span>
+              <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-[var(--bg-primary)] text-[var(--text-secondary)] rounded border border-zinc-700/50">
+                {catalogStatus.providers.toLocaleString()} {t.ai.catalogProviders}
+              </span>
+              <span
+                className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded border whitespace-nowrap ${
+                  catalogStatus.fresh
+                    ? "bg-green-900/50 text-green-200 border-green-800"
+                    : "bg-yellow-900/50 text-yellow-200 border-yellow-800"
+                }`}
+              >
+                {catalogStatus.fresh ? t.ai.catalogFresh : t.ai.catalogStale}
+              </span>
+            </span>
+          ) : (
+            <span>{t.ai.catalogLoading}</span>
+          )}
+        </div>
+        {catalogStatus && catalogStatus.fetchedAt > 0 && (
+          <div className="whitespace-nowrap">
+            {t.ai.catalogFetched}: {formatCatalogTime(catalogStatus.fetchedAt)}
+          </div>
+        )}
+        {catalogStatus && catalogStatus.nextAutoRefreshAt > 0 && (
+          <div className="whitespace-nowrap">
+            {t.ai.catalogNextRefresh}: {formatCatalogTime(catalogStatus.nextAutoRefreshAt)}
+          </div>
+        )}
+      </div>
+
+      {/* refresh outcome (success / failure feedback) */}
+      {catalogRefreshResult && (
+        <div
+          className={`mb-3 text-xs flex items-center gap-1.5 ${
+            catalogRefreshResult.ok
+              ? "text-green-400"
+              : "text-red-400"
+          }`}
+        >
+          {catalogRefreshResult.ok ? (
+            <Check size={13} className="flex-shrink-0" />
+          ) : (
+            <AlertTriangle size={13} className="flex-shrink-0" />
+          )}
+          <span>
+            {catalogRefreshResult.ok
+              ? catalogRefreshResult.message
+              : `${t.ai.catalogRefreshFailed}: ${catalogRefreshResult.message}`}
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         {sortedModels.length === 0 ? (
@@ -1035,6 +1220,48 @@ export const AITab: React.FC<AITabProps> = ({
           {fetchModelsError && (
             <div className="mt-2 text-xs text-red-400">{fetchModelsError}</div>
           )}
+          {/* models.dev catalog auto-fill hint */}
+          {catalogLookupBusy && (
+            <div className="mt-2 text-xs text-zinc-400 flex items-center gap-1.5">
+              <Loader2 size={12} className="animate-spin" />
+              {t.ai.catalogLookupBusy}
+            </div>
+          )}
+          {!catalogLookupBusy && catalogLookupError && (
+            <div className="mt-2 text-xs text-red-400">{t.ai.catalogLookupError}: {catalogLookupError}</div>
+          )}
+          {!catalogLookupBusy && !catalogLookupError && catalogLookup?.best && (
+            <div className="mt-2 text-xs text-green-400 flex flex-col gap-0.5">
+              <span className="flex items-center gap-1.5">
+                <Check size={13} className="flex-shrink-0" />
+                {t.ai.catalogLookupMatch}
+                <code className="px-1 py-0.5 bg-[var(--bg-primary)] border border-zinc-700/50 rounded text-[var(--text-secondary)]">
+                  {catalogLookup.best.provider}/{catalogLookup.best.id}
+                </code>
+              </span>
+              <span className="pl-[22px] text-[var(--text-muted)]">
+                {t.ai.catalogLookupContext}: {catalogLookup.best.context?.toLocaleString() ?? "?"} ·{" "}
+                {t.ai.catalogLookupOutput}: {catalogLookup.best.output?.toLocaleString() ?? "?"}
+              </span>
+              {catalogLookup.candidates.length > 1 && (
+                <span className="pl-[22px] text-[var(--text-muted)]">
+                  {t.ai.catalogLookupDuplicates.replace(
+                    "{count}",
+                    String(catalogLookup.candidates.length),
+                  )}{" "}
+                  <code className="px-1 py-0.5 bg-[var(--bg-primary)] border border-zinc-700/50 rounded text-[var(--text-secondary)]">
+                    {catalogLookup.candidates.map((c) => c.provider).join(", ")}
+                  </code>
+                </span>
+              )}
+            </div>
+          )}
+          {!catalogLookupBusy && !catalogLookupError && !catalogLookup?.best && (modelFormData.name || "").trim() && (
+            <div className="mt-2 text-xs text-yellow-400/80 flex items-center gap-1.5">
+              <AlertTriangle size={13} className="flex-shrink-0" />
+              {t.ai.catalogLookupNone}
+            </div>
+          )}
         </div>
         <div className="flex flex-col gap-1.5 mb-4">
           <label
@@ -1070,6 +1297,7 @@ export const AITab: React.FC<AITabProps> = ({
               className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               value={modelFormData.contextWindow ?? ""}
               onChange={(e) => {
+                contextTouchedRef.current = true
                 const value = e.target.value
                 setModelFormData({
                   ...modelFormData,
@@ -1093,6 +1321,7 @@ export const AITab: React.FC<AITabProps> = ({
               className="w-full px-3 py-2 text-sm border border-zinc-700/50 rounded-md outline-none transition-all focus:border-blue-500 focus:shadow-[0_0_20px_rgba(59,130,246,0.2)] disabled:opacity-50 disabled:cursor-not-allowed bg-[var(--bg-primary)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
               value={modelFormData.responseReserve ?? ""}
               onChange={(e) => {
+                reserveTouchedRef.current = true
                 const value = e.target.value
                 setModelFormData({
                   ...modelFormData,

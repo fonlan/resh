@@ -167,12 +167,18 @@ async fn main() {
                 pending_sync_conflict_attempt: Mutex::new(None),
                 ai_cancellation_tokens: commands::AiRunRegistry::new(),
                 ai_manager: resh::ai::manager::AiManager::new(),
+                model_catalog: resh::model_catalog::ModelCatalog::new(&app_data_dir),
                 sftp_edit_manager: SftpEditManager::new(app.handle().clone()),
                 operation_coordinator: std::sync::Arc::new(
                     resh::updater::OperationCoordinator::new(),
                 ),
             });
             app.manage(state.clone());
+
+            // Scheduled models.dev catalog freshness check (定时更新): runs in
+            // the background for the app's lifetime, refreshing the local cache
+            // when it goes stale. Failures keep the last good cache.
+            commands::model_catalog::spawn_scheduled_refresh(state.model_catalog.clone());
 
             // Capture optional post-update restore token (validated later when loading snapshot).
             {
@@ -312,6 +318,9 @@ async fn main() {
             commands::ai::copilot::poll_copilot_auth,
             commands::ai::copilot::open_url,
             commands::ai::fetch_ai_models,
+            commands::model_catalog::model_catalog_lookup,
+            commands::model_catalog::model_catalog_status,
+            commands::model_catalog::model_catalog_refresh,
             commands::sftp::sftp_list_dir,
             commands::sftp::sftp_list_dir_sorted,
             commands::sftp::sftp_list_dirs_sorted,

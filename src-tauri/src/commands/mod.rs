@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod config;
 pub mod connection;
+pub mod model_catalog;
 pub mod sftp;
 pub mod sftp_edit;
 pub mod updater;

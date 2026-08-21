@@ -4,6 +4,7 @@ use crate::ai::manager::AiManager;
 use crate::app_paths::{resolve_app_data_dir_from_default, APP_DATA_DIR_NAME};
 use crate::config::{Config, ConfigManager, SyncManager};
 use crate::db::DatabaseManager;
+use crate::model_catalog::ModelCatalog;
 use crate::sftp_manager::edit::SftpEditManager;
 use serde::Serialize;
 use std::sync::{
@@ -149,6 +150,9 @@ pub struct AppState {
     /// session_id -> current AI run (request_id + token). At most one run per session.
     pub ai_cancellation_tokens: AiRunRegistry,
     pub ai_manager: AiManager,
+    /// models.dev model catalog (disk cache + scheduled refresh) for the AI
+    /// settings model form auto-fill.
+    pub model_catalog: ModelCatalog,
     pub sftp_edit_manager: SftpEditManager,
     /// Tracks config/sync/SFTP write work for safe update restart draining.
     pub operation_coordinator: std::sync::Arc<crate::updater::OperationCoordinator>,
