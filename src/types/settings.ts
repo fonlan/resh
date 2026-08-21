@@ -1,8 +1,12 @@
+export type TerminalRenderer = "canvas" | "webgl"
+
 export interface TerminalSettings {
   fontFamily: string
   fontSize: number
   cursorStyle: "block" | "underline" | "bar"
   scrollback: number
+  /** Terminal renderer: canvas (stable) or webgl (faster, may leave artifacts). */
+  renderer?: TerminalRenderer
 }
 
 export interface WebDAVSettings {

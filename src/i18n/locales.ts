@@ -76,6 +76,13 @@ export const locales = {
       selectionCopyPaste: "Select to Copy + Right-Click to Paste",
     },
     terminalCommandBlockBar: "Show command block color bars",
+    terminalRenderer: "Terminal Renderer",
+    terminalRenderers: {
+      canvas: "Canvas (Default, stable)",
+      webgl: "WebGL (Faster, may leave artifacts)",
+    },
+    terminalRendererHint:
+      "WebGL is faster but can leave stale artifacts on screen with full-screen TUI apps. Canvas is the default and most stable.",
     tabNewServerSort: "New tab server list sort",
     tabNewServerSorts: {
       default: "Default sort (grouped)",
@@ -795,6 +802,13 @@ export const locales = {
       selectionCopyPaste: "选中复制 + 右键粘贴",
     },
     terminalCommandBlockBar: "显示命令块彩色竖条",
+    terminalRenderer: "终端渲染器",
+    terminalRenderers: {
+      canvas: "Canvas（默认，稳定）",
+      webgl: "WebGL（更快，可能有残留）",
+    },
+    terminalRendererHint:
+      "WebGL 渲染更快，但在全屏 TUI 应用下可能出现画面残留。Canvas 为默认且最稳定。",
     tabNewServerSort: "标签栏加号服务器列表排序",
     tabNewServerSorts: {
       default: "默认排序 (按分组显示)",

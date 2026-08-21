@@ -82,6 +82,7 @@ export const TerminalTab = React.memo<TerminalTabProps>(
       terminalSettings?.fontFamily,
       terminalSettings?.cursorStyle,
       terminalSettings?.scrollback,
+      terminalSettings?.renderer,
     ])
 
     const [sessionId, setSessionId] = useState<string | null>(null)

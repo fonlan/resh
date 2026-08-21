@@ -3,7 +3,11 @@ import { Terminal, type IDisposable, type ITheme } from "xterm"
 import { FitAddon } from "xterm-addon-fit"
 import { WebglAddon } from "xterm-addon-webgl"
 import "xterm/css/xterm.css"
-import { TerminalSettings, TerminalRightClickMode } from "../types"
+import {
+  TerminalSettings,
+  TerminalRenderer,
+  TerminalRightClickMode,
+} from "../types"
 import { debounce } from "../utils/common"
 import { invoke } from "@tauri-apps/api/core"
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager"
@@ -76,6 +80,7 @@ export const useTerminal = (
   onResize?: (cols: number, rows: number) => void,
 ) => {
   const terminalRef = useRef<Terminal | null>(null)
+  const containerRef = useRef<HTMLElement | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
   const webglAddonRef = useRef<WebglAddon | null>(null)
   const webglContextLossDisposableRef = useRef<IDisposable | null>(null)
@@ -84,6 +89,81 @@ export const useTerminal = (
   const onDataRef = useRef(onData)
   const onResizeRef = useRef(onResize)
   const terminalRightClickModeRef = useRef(terminalRightClickMode)
+
+  // Renderer preference, kept in a ref so both the init effect and the
+  // settings effect can read/switch it. Defaults to canvas (stable); webgl is
+  // opt-in because of known shared-atlas stale-rendering artifacts.
+  const rendererRef = useRef<TerminalRenderer>(
+    settings?.renderer === "webgl" ? "webgl" : "canvas",
+  )
+  rendererRef.current = settings?.renderer === "webgl" ? "webgl" : "canvas"
+
+  const refreshTerminal = useCallback(() => {
+    const term = terminalRef.current
+    const container = containerRef.current
+    if (
+      !term?.element ||
+      !container ||
+      container.clientWidth <= 0 ||
+      container.clientHeight <= 0
+    ) {
+      return
+    }
+
+    try {
+      fitAddonRef.current?.fit()
+      if (term.rows > 0) {
+        term.refresh(0, term.rows - 1)
+      }
+      onResizeRef.current?.(term.cols, term.rows)
+    } catch (e) {
+      // Fit/refresh can fail while the terminal is hidden.
+    }
+  }, [])
+
+  const disposeWebglAddon = useCallback(
+    (refresh = true) => {
+      webglContextLossDisposableRef.current?.dispose()
+      webglContextLossDisposableRef.current = null
+
+      const webglAddon = webglAddonRef.current
+      if (!webglAddon) return
+
+      webglAddonRef.current = null
+      try {
+        webglAddon.dispose()
+      } catch (e) {
+        // WebGL renderer was already gone.
+      }
+
+      if (refresh) {
+        refreshTerminal()
+      }
+    },
+    [refreshTerminal],
+  )
+
+  const loadWebglAddon = useCallback(() => {
+    const term = terminalRef.current
+    if (!term || webglAddonRef.current) return
+
+    let webglAddon: WebglAddon | null = null
+    try {
+      webglAddon = new WebglAddon()
+      webglContextLossDisposableRef.current = webglAddon.onContextLoss(() => {
+        // Fall back to xterm's default renderer after GPU loss; rebuild WebGL
+        // only if the user explicitly re-enables it via settings.
+        disposeWebglAddon()
+      })
+      term.loadAddon(webglAddon)
+      webglAddonRef.current = webglAddon
+    } catch (e) {
+      webglContextLossDisposableRef.current?.dispose()
+      webglContextLossDisposableRef.current = null
+      webglAddon?.dispose()
+      // WebGL renderer could not be loaded.
+    }
+  }, [disposeWebglAddon])
 
   useEffect(() => {
     onDataRef.current = onData
@@ -245,65 +325,6 @@ export const useTerminal = (
       }
     })
 
-    const refreshTerminal = () => {
-      if (
-        !term.element ||
-        container.clientWidth <= 0 ||
-        container.clientHeight <= 0
-      ) {
-        return
-      }
-
-      try {
-        fitAddon.fit()
-        if (term.rows > 0) {
-          term.refresh(0, term.rows - 1)
-        }
-        onResizeRef.current?.(term.cols, term.rows)
-      } catch (e) {
-        // Fit/refresh can fail while the terminal is hidden.
-      }
-    }
-
-    const disposeWebglAddon = (refresh = true) => {
-      webglContextLossDisposableRef.current?.dispose()
-      webglContextLossDisposableRef.current = null
-
-      const webglAddon = webglAddonRef.current
-      if (!webglAddon) return
-
-      webglAddonRef.current = null
-      try {
-        webglAddon.dispose()
-      } catch (e) {
-        // WebGL renderer was already gone.
-      }
-
-      if (refresh) {
-        refreshTerminal()
-      }
-    }
-
-    const loadWebglAddon = () => {
-      if (webglAddonRef.current) return
-
-      let webglAddon: WebglAddon | null = null
-      try {
-        webglAddon = new WebglAddon()
-        webglContextLossDisposableRef.current = webglAddon.onContextLoss(() => {
-          // ponytail: fall back to xterm's default renderer after GPU loss; rebuild WebGL later only if perf proves it matters.
-          disposeWebglAddon()
-        })
-        term.loadAddon(webglAddon)
-        webglAddonRef.current = webglAddon
-      } catch (e) {
-        webglContextLossDisposableRef.current?.dispose()
-        webglContextLossDisposableRef.current = null
-        webglAddon?.dispose()
-        // WebGL renderer could not be loaded.
-      }
-    }
-
     const attachImeCompositionTracking = () => {
       if (imeCompositionCleanup || !term.element || !isMacOS()) return
       const textarea = term.element.querySelector(
@@ -334,12 +355,18 @@ export const useTerminal = (
         container.clientWidth > 0 &&
         container.clientHeight > 0
       ) {
+        containerRef.current = container
         term.open(container)
         refreshTerminal()
-        loadWebglAddon()
+        if (rendererRef.current === "webgl") {
+          loadWebglAddon()
+        }
         attachImeCompositionTracking()
       }
     }
+
+    terminalRef.current = term
+    fitAddonRef.current = fitAddon
 
     // Initial check
     initTerminal()
@@ -386,8 +413,6 @@ export const useTerminal = (
     window.addEventListener("focus", wakeRefreshHandler)
     window.addEventListener("pageshow", wakeRefreshHandler)
 
-    terminalRef.current = term
-    fitAddonRef.current = fitAddon
     setIsReady(true)
 
     return () => {
@@ -407,6 +432,7 @@ export const useTerminal = (
       disposeWebglAddon(false)
       term.dispose()
       terminalRef.current = null
+      containerRef.current = null
       webglAddonRef.current = null
       webglContextLossDisposableRef.current = null
       setIsReady(false)
@@ -429,6 +455,17 @@ export const useTerminal = (
       term.options.scrollback = settings.scrollback || 25000
     }
 
+    // Switch WebGL renderer on/off when the setting changes. canvas → webgl
+    // loads the addon; webgl → canvas disposes it and falls back to xterm's
+    // default renderer. Both paths force a full repaint afterwards.
+    const nextRenderer: TerminalRenderer =
+      settings?.renderer === "webgl" ? "webgl" : "canvas"
+    if (nextRenderer === "webgl" && !webglAddonRef.current) {
+      loadWebglAddon()
+    } else if (nextRenderer === "canvas" && webglAddonRef.current) {
+      disposeWebglAddon()
+    }
+
     term.options.theme = getTerminalPalette(resolveTerminalTheme(theme))
 
     // Re-fit after settings change (e.g. font size)
@@ -440,7 +477,7 @@ export const useTerminal = (
         onResizeRef.current(term.cols, term.rows)
       }
     }, 10)
-  }, [settings, theme])
+  }, [settings, theme, loadWebglAddon, disposeWebglAddon])
 
   useEffect(() => {
     if (theme !== "system") return

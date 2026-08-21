@@ -183,6 +183,13 @@ pub struct TerminalSettings {
     pub font_size: u32,
     pub cursor_style: String,
     pub scrollback: u32,
+    /// Terminal renderer: "canvas" (stable) or "webgl" (faster, may leave artifacts).
+    #[serde(default = "default_terminal_renderer")]
+    pub renderer: String,
+}
+
+fn default_terminal_renderer() -> String {
+    "canvas".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -618,6 +625,7 @@ impl Config {
                     font_size: 14,
                     cursor_style: "block".to_string(),
                     scrollback: 25000,
+                    renderer: default_terminal_renderer(),
                 },
                 webdav: WebDAVSettings {
                     url: String::new(),
