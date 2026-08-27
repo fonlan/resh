@@ -1,201 +1,184 @@
-# Resh SSH Client
+<p align="center">
+  <img src="logo.png" alt="Resh" width="120" />
+</p>
 
-A modern, secure multi-tab SSH client built with Tauri 2 + React, designed for developers who need seamless SSH connection management with cross-machine configuration portability.
+<h1 align="center">Resh</h1>
+
+<p align="center">A modern, fast and secure multi-tab SSH client for Windows &amp; macOS, built with Tauri&nbsp;2 and React&nbsp;19.</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/fonlan/resh/releases"><img src="https://img.shields.io/github/v/release/fonlan/resh?label=release" alt="Latest release" /></a>
+  <a href="https://github.com/fonlan/resh/releases"><img src="https://img.shields.io/github/downloads/fonlan/resh/total" alt="Downloads" /></a>
+  <a href="https://github.com/fonlan/resh/actions/workflows/macos-ci.yml"><img src="https://github.com/fonlan/resh/actions/workflows/macos-ci.yml/badge.svg" alt="macOS CI" /></a>
+  <img src="https://img.shields.io/badge/Windows-10%2B-0078d4?logo=windows&logoColor=white" alt="Windows 10+" />
+  <img src="https://img.shields.io/badge/macOS-10.15%2B-black?logo=apple&logoColor=white" alt="macOS 10.15+" />
+  <img src="https://img.shields.io/badge/Tauri-2-24c8db?logo=tauri&logoColor=white" alt="Tauri 2" />
+</p>
+
+<p align="center"><strong>English</strong> | <a href="README.zh-CN.md">简体中文</a></p>
+
+---
+
+Resh is a professional SSH client for developers: multi-tab sessions, split views, built-in SFTP, a remote file editor, an AI assistant that can operate on your servers, and WebDAV configuration sync — all in one lightweight desktop app. Configuration is fully portable, so you can sync it across machines.
+
+## Table of Contents
+
+- [Features](#features)
+- [Platform Support](#platform-support)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Building from Source](#building-from-source)
+- [Releases &amp; In-App Updates](#releases--in-app-updates)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Features
 
-### Core Features
-- **Multi-Tab Interface** - Manage multiple simultaneous SSH sessions in a clean tabbed interface with drag-to-reorder support
-- **Split View Workspace** - Switch between left-right, top-bottom, and four-pane layouts without interrupting active terminal connections
-- **Comprehensive Configuration** - Full server, authentication, and proxy management with WebDAV sync
-- **Proxy & Jumphost Support** - Connect through HTTP/SOCKS5 proxies or SSH jumphosts
-- **Port Forwarding** - Easy local-to-remote port forwarding configuration per connection
-- **Frameless UI** - Modern frameless window with embedded controls and custom drag regions
-- **Single-Instance Mode** - Re-launching the app focuses the existing main window instead of opening another process
-- **Cross-Machine Sync** - WebDAV-based configuration sync with conflict resolution
-
-### Advanced Features
-- **SSH Key Management** - Store SSH key content (not paths) for true portability
-- **Auto-Execute Commands** - Run commands automatically after connection
-- **Environment Variables** - Set custom environment variables per connection
-- **Connection Cloning** - Quickly duplicate existing SSH sessions
-- **Keep-Alive** - Configurable keep-alive intervals to maintain connections
-
-## Tech Stack
-
-**Frontend:**
-- React 19 with TypeScript
-- React Compiler enabled in Vite build (babel-plugin-react-compiler)
-- xterm.js for terminal emulation
-- Vite for build tooling
-- Tailwind CSS v4 for styling
-
-**Backend:**
-- Rust with Tauri 2 framework
-- russh for SSH protocol implementation
-
-**Storage:**
-- WebDAV protocol for sync
+- **Multi-tab sessions &amp; split view** — run many SSH sessions side by side; drag tabs to reorder, and switch between left-right, top-bottom, or four-pane layouts without interrupting live connections.
+- **Server &amp; authentication management** — password or SSH key auth (key *content* is stored, not paths, for true portability), server groups, connection cloning, and per-connection auto-execute commands, environment variables and keep-alive.
+- **Routing &amp; port forwarding** — connect through HTTP/SOCKS5 proxies or SSH jumphosts; configure local-to-remote port forwarding per connection.
+- **Built-in SFTP** — file browser with favorites, transfer queue and concurrency tuning, server-side copy, custom commands, and per-server editor associations. Edit remote files in the built-in Monaco editor or with your local editor, with conflict protection when the remote file changes.
+- **AI assistant** — chat with an agent that can execute commands, read files, transfer files over SFTP and drive your terminal. Supports Anthropic, OpenAI-compatible and GitHub Copilot channels, model lookup from the models.dev catalog, per-server prompts, tool confirmation (with YOLO mode) and context compaction.
+- **Code snippets** — save reusable command snippets and send them to any session.
+- **Terminal UX** — Canvas or WebGL renderer, customizable font / cursor / scrollback, select-to-copy right-click mode, terminal session recording (raw or plain text) and session export.
+- **WebDAV sync** — sync servers, authentications, proxies and snippets across machines with per-item conflict resolution.
+- **In-app updates** — automatic update checks (every ~6 h, plus manual), SHA-256 verified downloads, proxy-aware, and a safe restart that restores your tabs.
+- **Themes &amp; localization** — light / dark / system plus Sunset Orange and Sage Forest themes; English and 简体中文 UI.
+- **Desktop polish** — frameless window, single-instance mode, window-state and tab restore after updates, and a welcome screen with recent connections.
 
 ## Platform Support
 
-| Platform | Status | Distribution |
+| Platform | Architecture | Distribution |
 | --- | --- | --- |
-| Windows 10+ x64 | Supported | Portable `.exe` (unsigned) via GitHub Releases |
-| macOS 11+ Apple Silicon | Supported | Unsigned / unnotarized `.dmg` via GitHub Releases |
-| macOS 10.15+ Intel | Supported | Unsigned / unnotarized `.dmg` via GitHub Releases |
+| Windows 10+ | x64 | Portable `.exe` (unsigned, no installer) |
+| macOS 10.15+ | Intel | `.dmg` (unsigned / unnotarized) |
+| macOS 11+ | Apple Silicon | `.dmg` (unsigned / unnotarized) |
 
 ## Installation
 
-### Prerequisites
-- Node.js 22.12.x and npm 10.9.x
-- Rust 1.88+ (for building from source)
-- Platform build dependencies:
-  - Windows 10+ with Microsoft C++ Build Tools and WebView2
-  - macOS 10.15+ (Intel) / macOS 11+ (Apple Silicon) with Xcode Command Line Tools for source builds
+All builds are published as GitHub Releases: <https://github.com/fonlan/resh/releases>
 
-### Quick Start
+### Windows
 
-1. Clone the repository:
+1. Download `Resh-<version>-windows-x86_64.exe`.
+2. Run it from any writable folder — no installation required. Configuration is stored in `%AppData%\Resh\`.
+
+### macOS
+
+1. Download the `.dmg` matching your architecture (`-aarch64` for Apple Silicon, `-x86_64` for Intel).
+2. Open the DMG and drag **Resh.app** into `/Applications`.
+3. Releases are **unsigned / unnotarized**, so macOS Gatekeeper may block the first launch. Remove the quarantine attribute:
+
+   ```bash
+   xattr -d com.apple.quarantine /Applications/Resh.app
+   ```
+
+   Alternatively, right-click the app in Finder and choose **Open**.
+
+   > In-app updates only clear `com.apple.quarantine` on the newly installed, checksum-verified `Resh.app` — they do not change system Gatekeeper policy.
+
+### Verify Downloads
+
 ```bash
-git clone https://github.com/fonlan/resh.git
-cd resh
+sha256sum -c SHA256SUMS.txt
 ```
 
-2. Install dependencies:
-```bash
-npm install
-```
+## Usage
 
-3. Run in development mode:
-```bash
-npm run tauri-dev
-```
+### Connect
+
+- Click **+** in the tab bar and pick a configured server, or use **Quick Connect** with `ip`, `host`, or `user@host`.
+- Recent connections are shown on the welcome screen.
+
+### Manage Configuration
+
+Open **Settings** (gear icon) and configure:
+
+| Tab | What to configure |
+| --- | --- |
+| Servers | SSH servers, groups, routing, port forwarding, keep-alive, auto-execute commands, environment variables, SFTP favorite paths |
+| Authentication | Passwords and SSH keys |
+| Proxies | HTTP/SOCKS5 proxies (with optional auth and SSL override) |
+| Snippets | Reusable command snippets |
+| AI | AI channels and models, additional prompts, chat context, tool confirmations |
+| SFTP | Download path, transfer concurrency and profiles, editor associations, custom commands |
+| Sync | WebDAV URL, proxy, sync now |
+| General | Theme, language, terminal font/cursor/renderer, tab width, recording, confirmations, software update |
+| About | Version, repository, license, tech stack |
+
+### SFTP &amp; Editor
+
+Open a server's SFTP sidebar to browse files, drag entries into favorites, queue transfers, or open remote files in the built-in editor. Local editor associations and custom shell commands are configurable per server or globally.
+
+### AI Assistant
+
+1. In **AI Settings**, add a channel (Anthropic, OpenAI-compatible, or GitHub Copilot) and a model — use the models.dev catalog to auto-fill context size.
+2. Pick a server and start a chat. The agent can run commands, read files and transfer files; dangerous operations ask for confirmation.
+
+### WebDAV Sync
+
+1. Configure a WebDAV URL (and optional proxy) in Settings → Sync.
+2. Use **Sync Now** for a manual sync; the app also syncs automatically on startup.
+3. Conflicts are resolved item-by-item (keep local / use remote).
 
 ## Configuration
 
-### Configuration Files
-
-Resh stores configuration in a platform-specific application data directory:
+Resh stores its data in a platform-specific application data directory:
 
 ```
 Windows: %AppData%\Resh\
 macOS:   ~/Library/Application Support/Resh/
 
 Resh/
-├── local.json        # Local-only config and settings
-├── config.db         # Local application database
+├── local.json        # Local-only settings (theme, WebDAV, updates, confirmations, …)
+├── sync.json         # Servers / authentications / proxies / snippets (synced via WebDAV)
+├── config.db         # Local application database (AI sessions, recent connections, …)
 └── logs/             # Application and connection logs
 ```
 
-### Configuration Schema
+Sync strategy: items in `local.json` override matching UUIDs in `sync.json`; only `sync.json` is uploaded to and downloaded from WebDAV.
 
-Both `sync.json` and `local.json` support:
+## Building from Source
 
-- **Servers** - SSH server configurations with connection details
-- **Authentications** - SSH keys and password credentials
-- **Proxies** - HTTP/SOCKS5 proxy configurations
+### Prerequisites
 
-Only `local.json` support:
-- **General Settings** - Theme, language, terminal preferences, WebDAV settings
+- **Node.js** 22.12.x and **npm** 10.9.x (see `.nvmrc` / `package.json`)
+- **Rust** 1.88+ (see `rust-toolchain.toml`)
+- Platform build dependencies:
+  - Windows: Microsoft C++ Build Tools and WebView2
+  - macOS: Xcode Command Line Tools
 
-### Sync Strategy
-
-- **Synced Items** - Stored in `sync.json`, synced via WebDAV across machines
-- **Local-Only Items** - Stored in `local.json`, machine-specific overrides
-- **Merge Logic** - Items in `local.json` override matching UUIDs in `sync.json`
-
-## Development
-
-### Available Scripts
+### Quick Start
 
 ```bash
-# Frontend development
-npm run dev              # Run Vite dev server
-npm run build            # Build frontend (TypeScript + Vite)
-npm run build:macos      # Build macOS DMG bundle (prefer CI=true for unsigned CI-like builds)
-
-# Release checks
-npm run check:release-version -- vX.Y.Z  # Tag must match package/Cargo/tauri versions
-npm run check:updater-assets -- --tag vX.Y.Z --dir ./assets  # Updater asset names + SHA256SUMS
-npm run test:updater-helpers             # Isolated Windows/macOS helper contract tests
-npm run ci:pin-actions                   # Third-party Actions must be full-SHA pinned
-
-# Tauri commands
-npm run tauri-dev        # Run Tauri in development mode
-npm run tauri-build      # Build production Tauri app
-npm run tauri            # Direct access to Tauri CLI
-
-# SFTP performance harness (pass args after --)
-npm run sftp:baseline -- -ServerHost <host> -User <user>
-npm run sftp:fairness -- -ServerHost <host> -User <user>
-npm run sftp:perf-suite -- -ServerHost <host> -User <user>
-```
-
-SFTP harness outputs are written under `artifacts/` by default. Use script flags (for example `-PrivateKeyPath`, `-Port`, `-OutputDir`) to adapt runs for your environment. The current npm wrappers require Windows PowerShell and are not yet qualified on macOS.
-
-
-### Adding New Features
-
-**Frontend:**
-- Add components in `src/components/`
-- Use TypeScript for type safety
-- Follow React hooks pattern
-- Use Tailwind CSS v4 for styling (CSS-first configuration)
-
-**Backend:**
-- Add Tauri commands in `src-tauri/src/commands/`
-- Implement business logic in appropriate modules
-- Use `#[tauri::command]` macro for frontend-callable functions
-
-## Building for Production
-
-### Windows x64 Build
-
-```bash
-npm run tauri-build
-```
-
-Output: `src-tauri/target/release/Resh.exe` (portable executable)
-
-### Build Configuration
-
-- **Portable Mode** - Single `.exe` file, no installer required
-- **No Admin Rights** - Runs from any location
-- **AppData Storage** - All data in `%AppData%\Resh\`
-
-### Local macOS Build (unsigned DMG)
-
-Automatic GitHub Releases use unsigned / unnotarized DMGs (see [GitHub Releases](#github-releases-vx-tags) below). For a local unsigned DMG with the same cleanup rules as CI (`CI=true` skips Finder DMG layout AppleScript):
-
-```bash
+git clone https://github.com/fonlan/resh.git
+cd resh
 npm ci
-cargo test --manifest-path src-tauri/Cargo.toml --locked
-CI=true npm run build:macos -- --target aarch64-apple-darwin
-# or Intel:
-# CI=true npm run build:macos -- --target x86_64-apple-darwin
+npm run tauri-dev
 ```
 
-Typical output paths:
+### Useful Scripts
 
-```text
-src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/Resh_<version>_aarch64.dmg
-src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/Resh_<version>_x64.dmg
-```
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Run the Vite dev server only |
+| `npm run tauri-dev` | Run Resh in development mode |
+| `npm run build` | Type-check and build the frontend |
+| `npm run tauri-build` | Build the production app (`src-tauri/target/release/Resh.exe`) |
+| `npm run build:macos` | Build a macOS DMG (`CI=true` for CI-like unsigned builds) |
+| `npm run check:release-version -- vX.Y.Z` | Verify the tag matches all version sources |
+| `npm run check:updater-assets -- --tag vX.Y.Z --dir ./assets` | Validate updater asset names + checksums |
+| `npm run ci:pin-actions` | Verify third-party GitHub Actions are SHA-pinned |
+| `npm run test:updater-helpers` | Run isolated Windows/macOS updater helper tests |
+| `npm run sftp:baseline -- -ServerHost <host> -User <user>` | SFTP performance harness (Windows PowerShell) |
 
-`npm run build:macos` forces DMG-only bundling, deletes leftover `.app` bundles, and cleans temporary `rw.*.dmg` files. Direct `npm run tauri-build` on macOS does **not** apply those release cleanup rules.
+## Releases &amp; In-App Updates
 
-The Intel bundle retains the configured macOS 10.15 deployment target. Rust's Apple Silicon target has a minimum deployment target of macOS 11.0.
+Pushing a version tag (`v*`) is the **only** automatic GitHub Release entry point (`.github/workflows/release.yml`).
 
-Optional signed/notarized local builds still exist (`npm run macos:release` / `macos:verify` and a manual `macos-ci` workflow dispatch). They require `APPLE_*` secrets and are **not** used by the automatic tag release path.
-
-### GitHub Releases (`v*` tags)
-
-Pushing a version tag is the **only automatic** GitHub Release entry point (`.github/workflows/release.yml`). The macOS CI workflow does **not** run on tags and does **not** create Releases.
-
-#### Prerequisites before tagging
-
-Keep these three version sources identical (semver without a leading `v`):
+Before tagging, keep the three version sources identical (semver, no leading `v`):
 
 | File | Field |
 | --- | --- |
@@ -203,125 +186,30 @@ Keep these three version sources identical (semver without a leading `v`):
 | `src-tauri/Cargo.toml` | `package.version` |
 | `src-tauri/tauri.conf.json` | `version` |
 
-Local check (example for current project version):
-
 ```bash
-npm run check:release-version -- v1.1.0
+npm run check:release-version -- vX.Y.Z
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
-Tag format: `v` + semver (prerelease/build suffixes allowed, e.g. `v1.2.0-beta.1`). Mismatched or invalid tags fail the release workflow in `check-version`.
-
-#### Publish
-
-```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-No `APPLE_*` Repository Secrets are required for automatic releases. macOS jobs run `CI=true npm run build:macos` (unsigned DMG). Windows jobs run `npm run tauri-build` and ship the portable EXE only (no MSI/NSIS installer).
-
-#### Release assets (in-app updater API)
-
-Each successful tag release publishes exactly **four** files. These names and `SHA256SUMS.txt` are the **in-app updater API**—do not rename them or add updater-only signing secrets:
+Each release publishes exactly four assets — these names are the **in-app updater API**, do not rename them:
 
 | Asset | Description |
 | --- | --- |
-| `Resh-vX.Y.Z-windows-x86_64.exe` | Portable Windows x64 binary (**unsigned**, no installer) |
-| `Resh-vX.Y.Z-macos-aarch64.dmg` | Apple Silicon DMG (**unsigned / unnotarized**) |
-| `Resh-vX.Y.Z-macos-x86_64.dmg` | Intel DMG (**unsigned / unnotarized**) |
-| `SHA256SUMS.txt` | SHA-256 checksums (GNU `sha256sum` format, sorted filenames) |
+| `Resh-vX.Y.Z-windows-x86_64.exe` | Portable Windows x64 binary (unsigned) |
+| `Resh-vX.Y.Z-macos-aarch64.dmg` | Apple Silicon DMG (unsigned / unnotarized) |
+| `Resh-vX.Y.Z-macos-x86_64.dmg` | Intel DMG (unsigned / unnotarized) |
+| `SHA256SUMS.txt` | SHA-256 checksums (GNU `sha256sum` format) |
 
-Example for tag `v1.1.0`:
-
-```text
-Resh-v1.1.0-windows-x86_64.exe
-Resh-v1.1.0-macos-aarch64.dmg
-Resh-v1.1.0-macos-x86_64.dmg
-SHA256SUMS.txt
-```
-
-Verify downloads and updater compatibility:
-
-```bash
-sha256sum -c SHA256SUMS.txt
-npm run check:updater-assets -- --tag v1.1.0 --dir ./path-to-assets
-```
-
-Full contract (check schedule, proxies, Gatekeeper/quarantine, helpers): [scripts/checklists/updater-release-contract.md](scripts/checklists/updater-release-contract.md).
-
-#### In-app updates
-
-- **Auto-check** defaults to on (Settings → General → Software update); settings are local-only (`local.json`), not WebDAV-synced.
-- After config load, checks once after a short delay, then about every **6 hours**. About always supports **manual** check.
-- Update traffic can use an HTTP/SOCKS5 proxy from your existing proxy list; a bad proxy fails the check/download instead of falling back to direct.
-- Only **stable** Releases are considered (no channel picker, no prerelease subscribe, no silent background install in v1).
-- **Windows:** keep the portable EXE in a **writable** folder; the updater replaces it in place via a hidden PowerShell helper.
-- **macOS:** prefer Applications. DMGs remain unsigned/unnotarized. First manual open may need a Gatekeeper allow; **in-app update** clears **only** `com.apple.quarantine` on the new, checksum-and-bundle-validated `Resh.app` (not a global Gatekeeper off switch, not `spctl --master-disable`, and not a blanket `xattr -c`).
-
-#### macOS Gatekeeper note
-
-Automatic release DMGs are **not** Apple-signed or notarized. On **first** open of a manual download, users may need to bypass Gatekeeper (System Settings → Privacy & Security, or right-click the app → Open). After a successful **in-app** update, Resh’s helper removes quarantine from that trusted package so the new build can launch without the “damaged / unidentified developer” block—without changing system Gatekeeper policy.
-
-#### Failure and re-runs
-
-- Re-run the failed GitHub Actions workflow for the same tag; publish is idempotent and replaces assets with `--clobber`.
-- Re-runs do **not** rewrite existing release notes (first create uses download notes + auto-generated changelog).
-- Tags with a pre-release segment (e.g. `v1.2.0-beta.1`) are marked as GitHub prereleases.
-- Local static guards: `npm run check:release-version -- vX.Y.Z` and `npm run ci:pin-actions`.
-
-## Usage
-
-### Connecting to Servers
-
-1. Click the **+** button in the tab bar
-2. Select a configured server
-3. Or use Quick Connect for one-time connections
-
-### Managing Configurations
-
-1. Open Settings (gear icon or menu)
-2. Navigate through tabs:
-   - **Servers** - Add/edit SSH server configurations
-   - **Authentications** - Manage SSH keys and passwords
-   - **Proxies** - Configure HTTP/SOCKS5 proxies
-   - **General** - Theme, terminal, and WebDAV settings
-
-### WebDAV Sync
-
-1. Configure WebDAV in Settings > General
-2. Use "Sync Now" for manual sync
-3. Default auto-sync when application startup
-
-## Features Roadmap
-
-### Current (MVP)
-- [x] Multi-tab SSH terminal interface
-- [x] Server/authentication/proxy management
-- [x] WebDAV configuration sync
-- [x] Jumphost and proxy support
-- [x] Port forwarding
-- [x] Frameless window with custom controls
+Updater behavior: auto-check is on by default (Settings → General → Software update; checks shortly after startup, then every ~6 h), stable releases only, proxy-aware. Windows replaces the portable EXE in place (keep it in a writable folder); macOS swaps the validated `Resh.app` and clears quarantine on it. Full contract: [scripts/checklists/updater-release-contract.md](scripts/checklists/updater-release-contract.md).
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues and pull requests.
+Contributions are welcome! Please open an issue or submit a pull request.
 
 ### Reporting Security Issues
 
-Please report security vulnerabilities privately to the maintainers rather than using public issues.
-
-## Acknowledgments
-
-- Built with [Tauri](https://tauri.app/)
-- Terminal emulation by [xterm.js](https://term.js.org/)
-- SSH implementation via [russh](https://github.com/Eugeny/russh)
-- Styling by [Tailwind CSS](https://tailwindcss.com/)
-
-## Support
-
-For issues and questions:
-- GitHub Issues: [Report a bug or request a feature](https://github.com/fonlan/resh/issues)
+Please report security vulnerabilities **privately** to the maintainers instead of filing a public issue.
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE) © fonlan
