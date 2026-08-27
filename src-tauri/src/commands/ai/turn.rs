@@ -956,7 +956,10 @@ pub(super) fn apply_reasoning_fallback(
     }
 }
 
-pub const MAX_MODEL_TURNS: u32 = 12;
+/// Model turn budget is disabled: the agent loop keeps running until it produces a final
+/// answer, is cancelled by the user, or hits one of the remaining budgets
+/// (total tool calls / identical tool calls / wall-clock duration).
+pub const MAX_MODEL_TURNS: u32 = u32::MAX;
 pub const MAX_TOTAL_TOOL_CALLS: u32 = 128;
 pub const MAX_IDENTICAL_TOOL_CALLS: u32 = 3;
 pub const MAX_RUN_DURATION: Duration = Duration::from_secs(60 * 60);
@@ -3278,7 +3281,9 @@ mod await_or_cancel_tests {
     }
     #[test]
     fn agent_budget_constants_match_phase_one_contract() {
-        assert_eq!(MAX_MODEL_TURNS, 12);
+        // MAX_MODEL_TURNS is disabled (u32::MAX) since the turn-limit was lifted; the
+        // remaining budgets keep the loop bounded against runaway tool usage.
+        assert_eq!(MAX_MODEL_TURNS, u32::MAX);
         assert_eq!(MAX_TOTAL_TOOL_CALLS, 128);
         assert_eq!(MAX_IDENTICAL_TOOL_CALLS, 3);
         assert_eq!(MAX_RUN_DURATION, Duration::from_secs(60 * 60));
