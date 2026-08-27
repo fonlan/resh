@@ -37,7 +37,7 @@ pub struct SnapshotSplitLayout {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", tag = "kind")]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "kind")]
 pub enum SnapshotTab {
     #[serde(rename = "terminal")]
     Terminal {
@@ -553,6 +553,62 @@ mod tests {
             capture_restore_token_from_args(["resh", "--restore-update-session", "../evil"])
                 .is_none()
         );
+    }
+
+    /// The frontend sends tab fields in camelCase (e.g. `serverId`). `rename_all`
+    /// on the enum only renames variants, so `rename_all_fields` must also be set
+    /// or deserialization fails with "missing field `server_id`".
+    #[test]
+    fn snapshot_accepts_frontend_camel_case_tab_fields() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let json = serde_json::json!({
+            "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
+            "token": "tok-camel-1",
+            "sourceVersion": "1.0.0",
+            "targetVersion": "1.0.1",
+            "createdAt": now,
+            "expiresAt": now + SNAPSHOT_TTL_SECS,
+            "tabs": [
+                {
+                    "kind": "terminal",
+                    "id": "t1",
+                    "label": "box",
+                    "serverId": "s1",
+                    "temporaryServer": null
+                },
+                {
+                    "kind": "editor",
+                    "id": "e1",
+                    "label": "a.txt",
+                    "serverId": "s1",
+                    "remotePath": "/tmp/a.txt",
+                    "language": "plaintext",
+                    "terminalTabId": "t1"
+                }
+            ],
+            "activeTabId": "t1",
+            "splitView": { "layout": "horizontal", "tabIds": ["t1", "e1"] },
+            "rememberedSplitViews": {}
+        });
+        let snap: RestartSessionSnapshot = serde_json::from_value(json).unwrap();
+        assert_eq!(snap.tabs.len(), 2);
+        assert!(matches!(
+            &snap.tabs[0],
+            SnapshotTab::Terminal { server_id, .. } if server_id == "s1"
+        ));
+        assert!(matches!(
+            &snap.tabs[1],
+            SnapshotTab::Editor { server_id, terminal_tab_id, .. }
+                if server_id == "s1" && terminal_tab_id.as_deref() == Some("t1")
+        ));
+        // Round-trip must keep camelCase so a later restore (on the new version)
+        // can parse the same JSON written to disk.
+        let raw = serde_json::to_string(&snap).unwrap();
+        assert!(raw.contains("\"serverId\""));
+        assert!(!raw.contains("\"server_id\""));
     }
 
     #[test]
