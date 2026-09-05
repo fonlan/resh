@@ -14,6 +14,7 @@ import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager"
 import { isMacOS } from "../utils/platform"
 import {
   assertMacOsImeShiftSymbolSelfCheck,
+  isMacOsImeCharacterKeyCode,
   resolveMacOsImeDroppedShiftSymbol,
 } from "../utils/macOsImeShiftSymbol"
 
@@ -238,6 +239,42 @@ export const useTerminal = (
           onDataRef.current?.(dropped)
           return false
         }
+
+        // Scheme B: macOS IME keyCode 229 passthrough for printable character
+        // keys. xterm handles these via an async setTimeout(0) hidden-textarea
+        // diff (_handleAnyTextareaChanges), which drops or duplicates keys when
+        // typing fast (timer vs IME-insertion ordering race). Block xterm's
+        // diff for this key; the character is delivered synchronously by our
+        // textarea `beforeinput` listener instead (see attachImeComposition
+        // Tracking). Non-character 229 keys (Enter / Backspace / arrows /
+        // F-keys) intentionally stay on xterm's own paths.
+        if (
+          event.keyCode === 229 &&
+          !event.isComposing &&
+          !imeComposing &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey &&
+          isMacOsImeCharacterKeyCode(event.code)
+        ) {
+          return false
+        }
+
+        // Scheme C: 229-routed Backspace. The beforeinput takeover keeps the
+        // hidden textarea empty, so a diff-driven DEL would observe no
+        // shrinkage and silently lose the key. Deliver it directly instead.
+        if (
+          event.keyCode === 229 &&
+          event.code === "Backspace" &&
+          !event.isComposing &&
+          !imeComposing &&
+          !event.metaKey &&
+          !event.ctrlKey &&
+          !event.altKey
+        ) {
+          onDataRef.current?.("\x7f")
+          return false
+        }
       }
 
       // Only intercept macOS Cmd+C/V/A. Non-meta keys fall through (except inject above).
@@ -339,12 +376,37 @@ export const useTerminal = (
         imeComposing = false
       }
 
+      // Scheme B delivery: synchronous takeover of plain text insertions.
+      // When the IME inserts a passthrough character (keyCode-229 keydowns),
+      // xterm 5.3 would pick it up later via its racy setTimeout(0) textarea
+      // diff — dropping/duplicating keys at typing speed. Instead, deliver
+      // `event.data` synchronously here and cancel the insertion so the hidden
+      // textarea stays pristine: xterm's pending/future diffs then always see
+      // an unchanged value and can neither re-send (duplicate) nor absorb
+      // (drop) characters. Keyboard-driven chars that xterm already delivered
+      // from keydown/keypress are preventDefault'ed by xterm itself and never
+      // reach beforeinput, so there is no double-send on the normal path.
+      const onBeforeInput = (event: InputEvent) => {
+        if (imeComposing || event.isComposing) return
+        if (event.inputType !== "insertText" || !event.data) return
+        event.preventDefault()
+        // Scheme A may have just injected the same char directly because the
+        // IME also committed it; drop that duplicate and keep the textarea
+        // clean. markImeInjected guards against xterm re-sending the same
+        // char if preventDefault is ever ignored by the engine.
+        if (shouldDropDuplicateOnData(event.data)) return
+        markImeInjected(event.data)
+        onDataRef.current?.(event.data)
+      }
+
       textarea.addEventListener("compositionstart", onCompositionStart)
       textarea.addEventListener("compositionend", onCompositionEnd)
+      textarea.addEventListener("beforeinput", onBeforeInput)
 
       imeCompositionCleanup = () => {
         textarea.removeEventListener("compositionstart", onCompositionStart)
         textarea.removeEventListener("compositionend", onCompositionEnd)
+        textarea.removeEventListener("beforeinput", onBeforeInput)
         imeComposing = false
       }
     }

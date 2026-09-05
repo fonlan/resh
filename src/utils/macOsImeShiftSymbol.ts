@@ -79,6 +79,20 @@ export function resolveMacOsImeDroppedShiftSymbol(
   return null
 }
 
+/**
+ * Whether a physical key code can produce a printable character. Used to
+ * classify macOS IME keyCode-229 keydowns: character keys are taken over by
+ * the synchronous beforeinput delivery in useTerminal (xterm's async textarea
+ * diff races and drops keys when typing fast), while non-character keys
+ * (Enter / Backspace / arrows / F-keys / Tab / Esc) stay on xterm's own paths.
+ */
+export function isMacOsImeCharacterKeyCode(code: string): boolean {
+  if (!code) return false
+  if (/^Key[A-Z]$/.test(code) || /^Digit[0-9]$/.test(code)) return true
+  if (code === "Space") return true
+  return code in MAC_OS_IME_SHIFT_BY_CODE
+}
+
 /** Small self-check; fails loud if mapping/guards regress. */
 export function assertMacOsImeShiftSymbolSelfCheck(): void {
   const base = {
@@ -120,5 +134,34 @@ export function assertMacOsImeShiftSymbolSelfCheck(): void {
 
   if (resolveMacOsImeDroppedShiftSymbol(base, { imeComposing: true }) !== null) {
     throw new Error("macOsImeShiftSymbol: imeComposing must block inject")
+  }
+
+  const codeCases: Array<[string, boolean]> = [
+    ["KeyA", true],
+    ["KeyZ", true],
+    ["Digit0", true],
+    ["Digit9", true],
+    ["Space", true],
+    ["Minus", true],
+    ["Slash", true],
+    ["Backquote", true],
+    ["Quote", true],
+    ["Enter", false],
+    ["Backspace", false],
+    ["Escape", false],
+    ["Tab", false],
+    ["ArrowUp", false],
+    ["F5", false],
+    ["CapsLock", false],
+    ["ShiftLeft", false],
+    ["", false],
+  ]
+  for (const [code, expected] of codeCases) {
+    const got = isMacOsImeCharacterKeyCode(code)
+    if (got !== expected) {
+      throw new Error(
+        `macOsImeShiftSymbol: isMacOsImeCharacterKeyCode(${JSON.stringify(code)}) expected ${expected}, got ${got}`,
+      )
+    }
   }
 }
