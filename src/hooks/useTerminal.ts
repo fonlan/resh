@@ -17,9 +17,16 @@ import {
   isMacOsImeCharacterKeyCode,
   resolveMacOsImeDroppedShiftSymbol,
 } from "../utils/macOsImeShiftSymbol"
+import {
+  assertInputDeliveryTrackerSelfCheck,
+  createInputDeliveryTracker,
+  type InputDeliveryPath,
+} from "../utils/imeInputDelivery"
 
 // ponytail: tiny self-check at load; fails if Shift+IME mapping/guards regress.
 assertMacOsImeShiftSymbolSelfCheck()
+// ponytail: tiny self-check at load; fails if cross-path input dedupe regresses.
+assertInputDeliveryTrackerSelfCheck()
 
 type ResolvedTerminalTheme = "light" | "dark" | "orange" | "green"
 
@@ -197,31 +204,23 @@ export const useTerminal = (
     })
 
     // macOS Chinese IME: track real composition so we never inject during 组字.
-    // Also short-window dedupe if xterm later delivers the same char via textarea.
+    // Short-window dedupe across delivery *paths*: one physical keystroke can be
+    // delivered by two independent layers — our synchronous `beforeinput`
+    // takeover (Scheme B) and xterm's own keypress / input / textarea-diff
+    // paths. Each layer is right on its own, but with a Chinese IME active both
+    // fire for the same key: WKWebView reports Space as keyCode 229 on keydown
+    // (Scheme B blocks xterm's diff and our beforeinput delivers the character),
+    // while the space keypress still carries charCode 32, so xterm's `_keyPress`
+    // forwards it too — the space landed twice. See utils/imeInputDelivery.ts
+    // for the exact rules (same-path repeats are never suppressed).
     // See notes/macos/phase-2-ime-shift-symbol-fix.md (keyCode 229 + CompositionHelper drop).
     let imeComposing = false
-    let recentImeInject: { ch: string; at: number } | null = null
-    const IME_INJECT_DEDUPE_MS = 40
+    const deliveries = createInputDeliveryTracker()
     let imeCompositionCleanup: (() => void) | null = null
 
-    const markImeInjected = (ch: string) => {
-      recentImeInject = { ch, at: performance.now() }
-    }
-
-    // Dedupe only the next matching onData. Any non-match (or expiry) clears the
-    // marker so a later legitimate same char is never swallowed (review P2).
-    const shouldDropDuplicateOnData = (data: string): boolean => {
-      if (!recentImeInject) return false
-      if (performance.now() - recentImeInject.at > IME_INJECT_DEDUPE_MS) {
-        recentImeInject = null
-        return false
-      }
-      if (data !== recentImeInject.ch) {
-        recentImeInject = null
-        return false
-      }
-      recentImeInject = null
-      return true
+    const deliverInput = (data: string, path: InputDeliveryPath) => {
+      if (!deliveries.accept(data, path)) return
+      onDataRef.current?.(data)
     }
 
     term.attachCustomKeyEventHandler((event) => {
@@ -232,11 +231,11 @@ export const useTerminal = (
           imeComposing,
         })
         if (dropped) {
-          markImeInjected(dropped)
-          // Direct onData: avoid term.paste (would re-enter onData and self-dedupe).
-          // return false skips xterm 229 CompositionHelper; short-window dedupe
-          // still drops a later textarea/input path if the IME also commits the char.
-          onDataRef.current?.(dropped)
+          // Direct delivery: avoid term.paste (would re-enter onData and
+          // self-dedupe). A later beforeinput / textarea path carrying the same
+          // char is dropped by the cross-path dedupe.
+          // return false skips xterm 229 CompositionHelper.
+          deliverInput(dropped, "manual")
           return false
         }
 
@@ -272,7 +271,7 @@ export const useTerminal = (
           !event.ctrlKey &&
           !event.altKey
         ) {
-          onDataRef.current?.("\x7f")
+          deliverInput("\x7f", "manual")
           return false
         }
       }
@@ -307,11 +306,9 @@ export const useTerminal = (
 
     // Register onData inside the hook to ensure it's always attached to the current term
     const disposable = term.onData((data) => {
-      // Drop duplicate if xterm also emits the same char we just injected.
-      if (shouldDropDuplicateOnData(data)) {
-        return
-      }
-      onDataRef.current?.(data)
+      // xterm-originated delivery (keydown / keypress / textarea diff / paste).
+      // The dedupe drops it only if the same text just came from another path.
+      deliverInput(data, "terminal")
     })
 
     const selectionDisposable = term.onSelectionChange(
@@ -385,18 +382,16 @@ export const useTerminal = (
       // an unchanged value and can neither re-send (duplicate) nor absorb
       // (drop) characters. Keyboard-driven chars that xterm already delivered
       // from keydown/keypress are preventDefault'ed by xterm itself and never
-      // reach beforeinput, so there is no double-send on the normal path.
+      // reach beforeinput, so there is no double-send on the normal path;
+      // with a Chinese IME the engine can still insert the character despite
+      // that (WebKit drives IME insertions itself), and the cross-path dedupe
+      // in deliverInput drops whichever of the two copies arrives second.
       const onBeforeInput = (event: InputEvent) => {
         if (imeComposing || event.isComposing) return
         if (event.inputType !== "insertText" || !event.data) return
+        // Keep the textarea clean even when this delivery is the duplicate one.
         event.preventDefault()
-        // Scheme A may have just injected the same char directly because the
-        // IME also committed it; drop that duplicate and keep the textarea
-        // clean. markImeInjected guards against xterm re-sending the same
-        // char if preventDefault is ever ignored by the engine.
-        if (shouldDropDuplicateOnData(event.data)) return
-        markImeInjected(event.data)
-        onDataRef.current?.(event.data)
+        deliverInput(event.data, "beforeinput")
       }
 
       textarea.addEventListener("compositionstart", onCompositionStart)
