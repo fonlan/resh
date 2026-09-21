@@ -68,7 +68,11 @@ pub struct SftpEditConflictEvent {
 }
 
 #[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum SftpResolveEditConflictOutcome {
     Resolved {
         edit_id: String,
@@ -1510,6 +1514,31 @@ mod tests {
     use crate::updater::{OperationCategory, OperationCoordinator};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    /// `resolve_sftp_edit_conflict` returns this enum and MainWindow reads `editId`, `conflictId`,
+    /// `pendingLocalChanges`, `currentRevision` and `snapshotError` from it.
+    #[test]
+    fn resolve_edit_conflict_outcome_matches_the_frontend_camel_case_contract() {
+        let resolved = SftpResolveEditConflictOutcome::Resolved {
+            edit_id: "e1".to_string(),
+            conflict_id: "c1".to_string(),
+            session_id: "s1".to_string(),
+            remote_path: "/r".to_string(),
+            local_path: "/l".to_string(),
+            action: "overwriteRemote".to_string(),
+            revision: None,
+        };
+        let value = serde_json::to_value(&resolved).unwrap();
+        assert_eq!(value["status"], "resolved");
+        assert_eq!(value["editId"], "e1");
+        assert_eq!(value["conflictId"], "c1");
+        assert_eq!(value["remotePath"], "/r");
+        assert_eq!(value["localPath"], "/l");
+        assert!(
+            value.get("edit_id").is_none(),
+            "outcome must not expose snake_case fields: {value}"
+        );
+    }
 
     fn rev(size: u64, mtime: u64) -> RemoteFileRevision {
         RemoteFileRevision {

@@ -36,7 +36,11 @@ pub struct SftpOpenTextFileResult {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum SftpSaveTextFileOutcome {
     Saved {
         session_id: String,
@@ -59,7 +63,11 @@ pub enum SftpSaveTextFileOutcome {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "status")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "status"
+)]
 pub enum SftpCheckTextFileOutcome {
     Unchanged {
         revision: RemoteFileRevision,
@@ -857,6 +865,49 @@ pub async fn pick_file() -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `src/components/sftp/types.ts` declares camelCase (`currentRevision`, `remoteContent`,
+    /// `remoteEncoding`, `snapshotError`) and MainWindow reads exactly those names back, so the
+    /// enum needs `rename_all_fields` and not just `rename_all`.
+    #[test]
+    fn sftp_text_file_outcomes_match_the_frontend_camel_case_contract() {
+        let saved = SftpSaveTextFileOutcome::Saved {
+            session_id: "s1".to_string(),
+            remote_path: "/remote/a.txt".to_string(),
+            local_path: "/local/a.txt".to_string(),
+            bytes_written: 7,
+            encoding: "utf-8".to_string(),
+            revision: RemoteFileRevision::missing(),
+        };
+        let value = serde_json::to_value(&saved).unwrap();
+        assert_eq!(value["status"], "saved");
+        assert_eq!(value["sessionId"], "s1");
+        assert_eq!(value["remotePath"], "/remote/a.txt");
+        assert_eq!(value["localPath"], "/local/a.txt");
+        assert_eq!(value["bytesWritten"], 7);
+        assert!(
+            value.get("remote_path").is_none(),
+            "unexpected snake_case: {value}"
+        );
+
+        let changed = SftpCheckTextFileOutcome::Changed {
+            reason: "metadataChanged".to_string(),
+            current_revision: RemoteFileRevision::missing(),
+            remote_content: None,
+            remote_encoding: None,
+            snapshot_error: None,
+        };
+        let value = serde_json::to_value(&changed).unwrap();
+        assert_eq!(value["status"], "changed");
+        assert!(
+            value.get("currentRevision").is_some(),
+            "missing camelCase: {value}"
+        );
+        assert!(
+            value.get("current_revision").is_none(),
+            "unexpected snake_case: {value}"
+        );
+    }
 
     #[test]
     fn detects_language_hint_from_posix_remote_path() {
