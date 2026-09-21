@@ -213,8 +213,16 @@ impl fmt::Display for SyncError {
 impl std::error::Error for SyncError {}
 
 /// Backend-authoritative result of a sync attempt.
+///
+/// `rename_all` on an enum only renames its *variants*; the fields inside struct variants keep
+/// their Rust names. `rename_all_fields` is what makes `attempt_token` serialize as `attemptToken`,
+/// which is the name the frontend reads (and must echo back to `resolve_sync_conflicts`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum SyncOutcome {
     /// Local and remote applied; baseline updated.
     Applied {
@@ -727,6 +735,38 @@ pub fn rebuild_removed_ids(tombstones: &[DeletionTombstone]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The frontend reads `attemptToken` (`src/types/sync.ts`) and echoes it straight back to the
+    /// `resolve_sync_conflicts` command, which requires that exact key. `rename_all` on an enum
+    /// only renames its variants, so without `rename_all_fields` the token went out as
+    /// `attempt_token`, arrived as `undefined`, and every conflict resolution failed with
+    /// "missing required key `attemptToken`".
+    #[test]
+    fn sync_outcome_wire_format_matches_the_frontend_contract() {
+        let conflicts = SyncOutcome::Conflicts {
+            conflicts: Vec::new(),
+            attempt_token: "tok-1".to_string(),
+        };
+        let value = serde_json::to_value(&conflicts).unwrap();
+
+        assert_eq!(value["status"], "conflicts");
+        assert_eq!(value["attemptToken"], "tok-1");
+        assert!(
+            value.get("attempt_token").is_none(),
+            "conflicts must not expose a snake_case field: {value}"
+        );
+
+        let applied = SyncOutcome::Applied {
+            changed_entity_count: 3,
+        };
+        let applied_value = serde_json::to_value(&applied).unwrap();
+        assert_eq!(applied_value["status"], "applied");
+        assert_eq!(applied_value["changedEntityCount"], 3);
+
+        // Deserialization must accept the same camelCase keys.
+        let parsed: SyncOutcome = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, conflicts);
+    }
 
     #[test]
     fn updated_at_does_not_affect_server_hash() {
