@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Tauri merges this file into the generated Info.plist.
+
+      macOS requires this string to explain a Local Network access request. WebDAV sync can target
+      a server on the local network, and without the description the permission alert gives the user
+      no reason for the request.
+    -->
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>Resh syncs your configuration with your WebDAV server. That server can be a device on your local network, such as a NAS or a self-hosted service.</string>
+</dict>
+</plist>
