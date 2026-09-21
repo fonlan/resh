@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches:
-      - main
+      - master
   # Tag push release is owned solely by the cross-platform release workflow.
   # This workflow no longer runs on tags (avoids duplicate signed macOS jobs).
   workflow_dispatch:
