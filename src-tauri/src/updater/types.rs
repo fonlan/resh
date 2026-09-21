@@ -33,8 +33,15 @@ pub struct UpdateInfo {
 }
 
 /// Result of `check_for_update`. Discriminated by `status`.
+///
+/// The frontend reads `currentVersion` / `latestVersion` / `fromCache` / `retryAfterSecs`, so the
+/// struct-variant fields need `rename_all_fields` — `rename_all` alone only renames variants.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "camelCase")]
+#[serde(
+    tag = "status",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum CheckUpdateResult {
     #[serde(rename = "upToDate")]
     UpToDate {
@@ -105,4 +112,40 @@ pub struct GitHubAssetDto {
     /// GitHub may expose asset digests as `sha256:<hex>`.
     #[serde(default)]
     pub digest: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `src/types/update.ts` reads `currentVersion` / `latestVersion` / `tagName` / `fromCache` /
+    /// `retryAfterSecs`. `rename_all` on an enum only renames its variants, so `rename_all_fields`
+    /// is what keeps those reads from silently resolving to `undefined`.
+    #[test]
+    fn check_update_result_matches_the_frontend_camel_case_contract() {
+        let up_to_date = CheckUpdateResult::UpToDate {
+            current_version: "1.0.0".to_string(),
+            latest_version: "1.1.0".to_string(),
+            tag_name: "v1.1.0".to_string(),
+            from_cache: true,
+        };
+        let value = serde_json::to_value(&up_to_date).unwrap();
+        assert_eq!(value["status"], "upToDate");
+        assert_eq!(value["currentVersion"], "1.0.0");
+        assert_eq!(value["latestVersion"], "1.1.0");
+        assert_eq!(value["tagName"], "v1.1.0");
+        assert_eq!(value["fromCache"], serde_json::json!(true));
+        assert!(
+            value.get("current_version").is_none(),
+            "result must not expose snake_case fields: {value}"
+        );
+
+        let rate_limited = CheckUpdateResult::RateLimited {
+            message: "slow down".to_string(),
+            retry_after_secs: Some(30),
+        };
+        let value = serde_json::to_value(&rate_limited).unwrap();
+        assert_eq!(value["status"], "rateLimited");
+        assert_eq!(value["retryAfterSecs"], 30);
+    }
 }
