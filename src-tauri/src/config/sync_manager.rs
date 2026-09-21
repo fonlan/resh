@@ -459,6 +459,9 @@ impl SyncManager {
                 uploaded_etag,
                 merged_remote.revision.clone(),
             );
+            // Millisecond precision keeps the value parseable by every frontend `Date` parser.
+            account.last_synced_at =
+                Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
             if let Err(error) = store.save_account(&self.account_key, account) {
                 return Ok(SyncOutcome::Failed {
                     error: SyncError {
@@ -771,6 +774,15 @@ mod tests {
                 if message.contains("after 1 retry")
         ));
         assert_eq!(requests.len(), 4, "must not retry indefinitely");
+        // Only an applied sync may advance the displayed "last synced" time.
+        let baseline = SyncStateStore::new(state_dir.path())
+            .load_account(manager.account_key())
+            .unwrap();
+        assert_eq!(
+            baseline.and_then(|account| account.last_synced_at),
+            None,
+            "a non-applied sync must not record lastSyncedAt"
+        );
     }
 
     #[tokio::test]
@@ -820,6 +832,15 @@ mod tests {
         .unwrap();
         assert_eq!(uploaded.sync_schema, Some(SYNC_SCHEMA_VERSION));
         assert_eq!(baseline.sync_schema, SYNC_SCHEMA_VERSION);
+        // A successful sync records when it happened, in a format the settings UI can render.
+        let recorded = baseline
+            .last_synced_at
+            .as_deref()
+            .expect("an applied sync must record lastSyncedAt");
+        assert!(
+            chrono::DateTime::parse_from_rfc3339(recorded).is_ok(),
+            "lastSyncedAt must be RFC3339, got {recorded}"
+        );
     }
 
     #[tokio::test]

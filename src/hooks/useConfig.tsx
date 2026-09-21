@@ -14,6 +14,7 @@ import {
   SyncConflictAttempt,
   SyncOutcome,
   SyncResolution,
+  SyncStatus,
   TriggerSyncResult,
 } from "../types"
 import { logger } from "../utils/logger"
@@ -23,6 +24,8 @@ interface ConfigContextType {
   loading: boolean
   error: string | null
   syncConflictAttempt: SyncConflictAttempt | null
+  /** RFC3339 timestamp of the last successful sync; null when unknown or never synced. */
+  lastSyncedAt: string | null
   loadConfig: () => Promise<void>
   saveConfig: (config: Config) => Promise<void>
   recordServerConnection: (serverId: string) => Promise<void>
@@ -50,6 +53,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
   const [error, setError] = useState<string | null>(null)
   const [syncConflictAttempt, setSyncConflictAttempt] =
     useState<SyncConflictAttempt | null>(null)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
 
   // configRef 始终指向最新的 config，不受 React 渲染节奏影响
   const configRef = useRef<Config | null>(null)
@@ -58,6 +62,21 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
     setConfig(next)
   }, [])
   const getLatestConfig = useCallback(() => configRef.current, [])
+
+  /**
+   * Read the persisted "last successful sync" time for the currently configured WebDAV account.
+   * The value is owned by the backend (`sync-state.json`), so it survives restarts and stays
+   * correct for background syncs this window never explicitly triggered.
+   */
+  const refreshSyncStatus = useCallback(async () => {
+    try {
+      const status = await invoke<SyncStatus>("get_sync_status")
+      setLastSyncedAt(status.lastSyncedAt)
+    } catch (err) {
+      // A missing or unreadable sync baseline must never break the settings page.
+      logger.warn("[ConfigProvider] Failed to read sync status", err)
+    }
+  }, [])
 
   const applySyncResult = useCallback(
     (result: TriggerSyncResult) => {
@@ -74,11 +93,15 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
         // A rejected or failed resolution invalidates its previous token. The next manual sync
         // creates a fresh attempt rather than letting the UI submit stale choices again.
         setSyncConflictAttempt(null)
+      } else {
+        // An applied sync has just advanced the persisted last-synced time. Re-read it so an open
+        // settings page reflects the sync instead of its previous value.
+        void refreshSyncStatus()
       }
 
       return result
     },
-    [setConfigSafe],
+    [refreshSyncStatus, setConfigSafe],
   )
 
   const loadConfig = useCallback(async () => {
@@ -98,6 +121,10 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
     } finally {
       setLoading(false)
     }
+
+    // Seed the displayed last-synced time independently of whether a startup sync will run: it
+    // comes from the local baseline, which also covers syncs made by previous app runs.
+    void refreshSyncStatus()
 
     // Trigger background sync if enabled. A conflict is retained as discoverable context; it
     // never interrupts startup or replaces the in-memory configuration.
@@ -122,7 +149,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
           logger.warn("[ConfigProvider] Startup sync failed", err)
         })
     }
-  }, [applySyncResult, setConfigSafe])
+  }, [applySyncResult, refreshSyncStatus, setConfigSafe])
 
   const saveConfig = useCallback(
     async (newConfig: Config) => {
@@ -202,6 +229,9 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
       listen<Config>("config-updated", (event) => {
         logger.info("[ConfigProvider] Config updated from background sync")
         setConfigSafe(event.payload)
+        // Save-triggered background syncs are otherwise invisible here; re-read the persisted
+        // timestamp so the settings page's "last synced" line advances on its own.
+        void refreshSyncStatus()
       }),
       listen<SyncOutcome>("sync-conflicts", (event) => {
         if (event.payload.status !== "conflicts") return
@@ -225,7 +255,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
       unlistenConfigUpdated?.()
       unlistenSyncConflicts?.()
     }
-  }, [setConfigSafe])
+  }, [refreshSyncStatus, setConfigSafe])
 
   return (
     <ConfigContext.Provider
@@ -234,6 +264,7 @@ export const ConfigProvider: React.FC<{ children: ReactNode }> = ({
         loading,
         error,
         syncConflictAttempt,
+        lastSyncedAt,
         loadConfig,
         saveConfig,
         recordServerConnection,

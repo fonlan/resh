@@ -35,6 +35,8 @@ export const locales = {
     syncing: "Syncing...",
     syncSuccess: "Sync successful",
     syncFailed: "Sync failed",
+    syncLastSync: "Last sync: {time}",
+    syncNever: "Never synced",
     syncConflictsTitle: "Resolve sync conflicts",
     syncConflictsDescription:
       "Choose which complete version to keep for every conflicting item. Nothing is changed until you apply these choices.",
@@ -762,6 +764,8 @@ export const locales = {
     syncing: "同步中...",
     syncSuccess: "同步成功",
     syncFailed: "同步失败",
+    syncLastSync: "最近同步：{time}",
+    syncNever: "从未同步",
     syncConflictsTitle: "解决同步冲突",
     syncConflictsDescription:
       "请为每个冲突项选择保留完整的本地或远端版本。确认应用前不会修改任何内容。",

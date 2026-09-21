@@ -50,3 +50,9 @@ export interface TriggerSyncResult {
   config: Config | null
   outcome: SyncOutcome
 }
+
+/** Local-only status for the WebDAV account the saved config currently points at. */
+export interface SyncStatus {
+  /** RFC3339 UTC timestamp of the last successful sync; null when that account never synced. */
+  lastSyncedAt: string | null
+}

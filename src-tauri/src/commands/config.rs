@@ -235,6 +235,50 @@ pub struct TriggerSyncResult {
     pub outcome: crate::config::sync_protocol::SyncOutcome,
 }
 
+/// Local-only status for the WebDAV account the persisted config currently points at. The value
+/// lives in `sync-state.json`, so it survives restarts and is never uploaded to the remote.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatus {
+    /// RFC3339 UTC timestamp of the last successful sync; `null` when this account never synced.
+    pub last_synced_at: Option<String>,
+}
+
+/// The baseline is keyed by endpoint + username exactly like the sync manager's account key, so
+/// editing credentials reports the newly targeted account's history instead of the previous one.
+fn last_synced_at_for(
+    store: &crate::config::sync_state::SyncStateStore,
+    url: &str,
+    username: &str,
+) -> Result<Option<String>, String> {
+    if url.trim().is_empty() {
+        return Ok(None);
+    }
+    let account_key = crate::config::sync_protocol::sync_account_key(url, username);
+    Ok(store
+        .load_account(&account_key)?
+        .and_then(|baseline| baseline.last_synced_at))
+}
+
+#[tauri::command]
+pub async fn get_sync_status(state: State<'_, Arc<AppState>>) -> Result<SyncStatus, String> {
+    // Snapshot the credentials and drop the config lock before touching the disk: a save or an
+    // in-flight sync must never wait behind a read-only status query.
+    let (url, username) = {
+        let config = state.config.lock().await;
+        (
+            config.general.webdav.url.clone(),
+            config.general.webdav.username.clone(),
+        )
+    };
+    let store = crate::config::sync_state::SyncStateStore::new(
+        state.config_manager.app_data_dir().to_path_buf(),
+    );
+    Ok(SyncStatus {
+        last_synced_at: last_synced_at_for(&store, &url, &username)?,
+    })
+}
+
 #[tauri::command]
 pub async fn backend_smoke_check() -> Result<BackendSmokeCheck, String> {
     Ok(BackendSmokeCheck {
@@ -774,6 +818,57 @@ mod tests {
                 app_data_dir_name: "Resh",
             }
         );
+    }
+
+    #[test]
+    fn sync_status_is_scoped_to_the_configured_account() {
+        use crate::config::sync_protocol::sync_account_key;
+        use crate::config::sync_state::{AccountSyncBaseline, SyncStateStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = SyncStateStore::new(dir.path());
+        let mut baseline = AccountSyncBaseline::default();
+        baseline.last_synced_at = Some("2026-02-14T15:30:00.000Z".into());
+        store
+            .save_account(
+                &sync_account_key("https://dav.example/resh", "alice"),
+                baseline,
+            )
+            .unwrap();
+
+        assert_eq!(
+            last_synced_at_for(&store, "https://dav.example/resh", "alice")
+                .unwrap()
+                .as_deref(),
+            Some("2026-02-14T15:30:00.000Z")
+        );
+        // The sync manager hashes the trimmed, slash-less URL; the lookup must agree with it.
+        assert_eq!(
+            last_synced_at_for(&store, "https://dav.example/resh/", "alice")
+                .unwrap()
+                .as_deref(),
+            Some("2026-02-14T15:30:00.000Z")
+        );
+        // A different account — new URL or new user — has no history of its own.
+        assert_eq!(
+            last_synced_at_for(&store, "https://dav.example/other", "alice").unwrap(),
+            None
+        );
+        assert_eq!(
+            last_synced_at_for(&store, "https://dav.example/resh", "bob").unwrap(),
+            None
+        );
+        // Sync disabled / URL cleared must not report another account's time.
+        assert_eq!(last_synced_at_for(&store, "   ", "alice").unwrap(), None);
+    }
+
+    #[test]
+    fn sync_status_reports_a_corrupt_state_file_instead_of_a_stale_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::config::sync_state::SyncStateStore::new(dir.path());
+        std::fs::write(store.path(), b"{ not json").unwrap();
+
+        assert!(last_synced_at_for(&store, "https://dav.example/resh", "alice").is_err());
     }
     fn sample_server(id: &str) -> crate::config::types::Server {
         crate::config::types::Server {

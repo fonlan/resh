@@ -26,6 +26,10 @@ pub struct AccountSyncBaseline {
     /// Schema version of last written remote document.
     #[serde(default)]
     pub sync_schema: u32,
+    /// RFC3339 UTC timestamp of the last successful sync for this account. Local-only display
+    /// metadata: it is never uploaded, and it stays absent until a sync actually applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<String>,
     /// `entityType:id` → normalized content hash at last successful sync.
     #[serde(default)]
     pub entity_hashes: BTreeMap<String, String>,
@@ -230,11 +234,16 @@ mod tests {
         let mut base = AccountSyncBaseline::default();
         base.set_entity_hash(&EntityKey::new(SyncEntityType::Server, "s1"), "abc".into());
         base.remote_etag = Some("\"etag-1\"".into());
+        base.last_synced_at = Some("2026-02-14T15:30:00.000Z".into());
         store.save_account(&key_a, base.clone()).unwrap();
 
         assert!(store.load_account(&key_b).unwrap().is_none());
         let loaded = store.load_account(&key_a).unwrap().unwrap();
         assert_eq!(loaded.remote_etag.as_deref(), Some("\"etag-1\""));
+        assert_eq!(
+            loaded.last_synced_at.as_deref(),
+            Some("2026-02-14T15:30:00.000Z")
+        );
         assert_eq!(
             loaded.hash_for(&EntityKey::new(SyncEntityType::Server, "s1")),
             Some("abc")
@@ -244,5 +253,30 @@ mod tests {
         let raw = fs::read_to_string(store.path()).unwrap();
         assert!(!raw.contains("password"));
         assert!(!raw.contains("BEGIN OPENSSH"));
+    }
+
+    #[test]
+    fn legacy_baseline_without_last_synced_at_still_loads() {
+        // A sync-state.json written before this field existed must keep loading, and an
+        // account that never synced successfully must not claim a timestamp.
+        let dir = tempfile::tempdir().unwrap();
+        let store = SyncStateStore::new(dir.path());
+        let key = sync_account_key("https://a.example/dav", "u1");
+        fs::write(
+            store.path(),
+            format!(
+                r#"{{"version":1,"accounts":{{"{key}":{{"syncSchema":2,"entityHashes":{{}}}}}}}}"#
+            ),
+        )
+        .unwrap();
+
+        let loaded = store.load_account(&key).unwrap().unwrap();
+        assert_eq!(loaded.sync_schema, 2);
+        assert_eq!(loaded.last_synced_at, None);
+
+        // Absent timestamp must not be serialized as an explicit null.
+        store.save_account(&key, loaded).unwrap();
+        let raw = fs::read_to_string(store.path()).unwrap();
+        assert!(!raw.contains("lastSyncedAt"), "raw file: {raw}");
     }
 }

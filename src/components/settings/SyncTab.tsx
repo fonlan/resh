@@ -24,16 +24,33 @@ function syncOutcomeMessage(outcome: SyncOutcome): string {
   }
 }
 
+/**
+ * RFC3339 UTC → compact local time. The stored value is shown verbatim when a runtime rejects it,
+ * because a visible raw timestamp beats a silent "Invalid Date".
+ */
+function formatLastSyncedAt(value: string, language: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(language === "zh-CN" ? "zh-CN" : "en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
 export const SyncTab: React.FC<SyncTabProps> = ({
   general,
   onGeneralUpdate,
 }) => {
-  const { t } = useTranslation()
+  const { t, language } = useTranslation()
   const {
     triggerSync,
     resolveSyncConflicts,
     syncConflictAttempt,
     config,
+    lastSyncedAt,
   } = useConfig()
   const [syncStatus, setSyncStatus] = useState<
     "idle" | "syncing" | "success" | "error"
@@ -116,6 +133,16 @@ export const SyncTab: React.FC<SyncTabProps> = ({
                         : t.syncNow}
                 </span>
               </button>
+            )}
+            {general.webdav.enabled && (
+              <span className="text-xs text-zinc-500 whitespace-nowrap">
+                {t.syncLastSync.replace(
+                  "{time}",
+                  lastSyncedAt
+                    ? formatLastSyncedAt(lastSyncedAt, language)
+                    : t.syncNever,
+                )}
+              </span>
             )}
           </div>
           <label className="flex items-center gap-2 cursor-pointer">

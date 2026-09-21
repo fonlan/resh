@@ -285,6 +285,7 @@ async fn main() {
             commands::config::record_server_connection,
             commands::config::trigger_sync,
             commands::config::resolve_sync_conflicts,
+            commands::config::get_sync_status,
             commands::config::get_app_data_dir,
             commands::config::log_event,
             commands::connection::connect_to_server,
