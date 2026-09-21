@@ -777,6 +777,23 @@ pub fn merge_configs_with_token_secret(
     resolutions: &[SyncResolution],
     token_secret: &str,
 ) -> MergeProduct {
+    // Repair void references before anything else runs, so a dangling reference can never reach
+    // `validate_references` and dead-end the sync (see `repair_void_references`). Everything below
+    // — conflict detection, baseline hashes, the saved local config and the uploaded document —
+    // therefore works on the repaired values, which keeps the baseline consistent with what is
+    // actually written.
+    let mut repaired_local = local.clone();
+    let mut repaired_remote = remote.clone();
+    let repaired = repair_void_references(&mut repaired_local, &mut repaired_remote);
+    if repaired > 0 {
+        tracing::warn!(
+            repaired,
+            "Cleared references to entities that exist on neither side; synchronization can proceed"
+        );
+    }
+    let local = &repaired_local;
+    let remote = &repaired_remote;
+
     let canonical_remote = match canonicalize_remote_tombstones(local, remote, baseline) {
         Ok(remote) => remote,
         Err(error) => {
@@ -1377,6 +1394,133 @@ fn remote_entity_in_out(remote: &SyncConfig, key: &EntityKey) -> bool {
 }
 
 /// Validate server/auth/proxy/jumphost and AI model/channel references among **synced** entities.
+/// Ids that exist on either side, regardless of each entity's own `synced` flag.
+///
+/// The union is the right scope for deciding whether a reference is genuinely void: a server may
+/// legitimately point at a proxy that only exists on the other device, and the merge will bring
+/// that proxy in.
+fn reference_universe(local: &Config, remote: &SyncConfig) -> ReferenceUniverse {
+    let collect = |left: Vec<&str>, right: Vec<&str>| -> BTreeSet<String> {
+        left.into_iter().chain(right).map(str::to_string).collect()
+    };
+
+    ReferenceUniverse {
+        servers: collect(
+            local.servers.iter().map(|s| s.id.as_str()).collect(),
+            remote.servers.iter().map(|s| s.id.as_str()).collect(),
+        ),
+        authentications: collect(
+            local
+                .authentications
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect(),
+            remote
+                .authentications
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect(),
+        ),
+        proxies: collect(
+            local.proxies.iter().map(|p| p.id.as_str()).collect(),
+            remote.proxies.iter().map(|p| p.id.as_str()).collect(),
+        ),
+        ai_channels: collect(
+            local.ai_channels.iter().map(|c| c.id.as_str()).collect(),
+            remote.ai_channels.iter().map(|c| c.id.as_str()).collect(),
+        ),
+    }
+}
+
+struct ReferenceUniverse {
+    servers: BTreeSet<String>,
+    authentications: BTreeSet<String>,
+    proxies: BTreeSet<String>,
+    ai_channels: BTreeSet<String>,
+}
+
+fn clear_if_void(
+    holder: &str,
+    field: &str,
+    value: &mut Option<String>,
+    known: &BTreeSet<String>,
+) -> usize {
+    let Some(id) = value.as_deref() else {
+        return 0;
+    };
+    if id.is_empty() || known.contains(id) {
+        return 0;
+    }
+
+    tracing::warn!(
+        entity = holder,
+        reference = field,
+        missing_id = id,
+        "Cleared a reference to an entity that exists on neither side"
+    );
+    *value = None;
+    1
+}
+
+/// Clear references whose target exists on neither side.
+///
+/// [`validate_references`] rejects any merge result that references a missing proxy, authentication,
+/// jumphost or channel, and the merge reports that as a synthetic `_reference_integrity` conflict.
+/// No `keepLocal` / `useRemote` choice can clear such a conflict, so a single stale reference —
+/// typically a proxy that was deleted while servers kept pointing at it — blocks synchronization
+/// forever. Repairing the reference instead keeps the sync converging, and the repaired value is
+/// exactly what gets stored locally and uploaded.
+fn repair_void_references(local: &mut Config, remote: &mut SyncConfig) -> usize {
+    let universe = reference_universe(local, remote);
+    let mut cleared = 0;
+
+    for server in local.servers.iter_mut().chain(remote.servers.iter_mut()) {
+        let name = server.name.clone();
+        cleared += clear_if_void(
+            &name,
+            "authentication",
+            &mut server.auth_id,
+            &universe.authentications,
+        );
+        cleared += clear_if_void(&name, "proxy", &mut server.proxy_id, &universe.proxies);
+        cleared += clear_if_void(
+            &name,
+            "jumphost",
+            &mut server.jumphost_id,
+            &universe.servers,
+        );
+    }
+
+    for channel in local
+        .ai_channels
+        .iter_mut()
+        .chain(remote.ai_channels.iter_mut())
+    {
+        let name = channel.name.clone();
+        cleared += clear_if_void(&name, "proxy", &mut channel.proxy_id, &universe.proxies);
+    }
+
+    for model in local
+        .ai_models
+        .iter_mut()
+        .chain(remote.ai_models.iter_mut())
+    {
+        if model.channel_id.is_empty() || universe.ai_channels.contains(&model.channel_id) {
+            continue;
+        }
+        tracing::warn!(
+            entity = %model.name,
+            reference = "channel",
+            missing_id = %model.channel_id,
+            "Cleared a reference to an entity that exists on neither side"
+        );
+        model.channel_id = String::new();
+        cleared += 1;
+    }
+
+    cleared
+}
+
 pub fn validate_references(config: &Config) -> Result<(), SyncError> {
     let auth_ids: BTreeSet<_> = config
         .authentications
@@ -1485,6 +1629,34 @@ mod tests {
             additional_prompt: None,
             synced: true,
             created_at: None,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn sample_proxy(id: &str) -> Proxy {
+        Proxy {
+            id: id.into(),
+            name: id.into(),
+            proxy_type: "http".into(),
+            host: "proxy.example".into(),
+            port: 7890,
+            username: None,
+            password: None,
+            ignore_ssl_errors: false,
+            synced: true,
+            updated_at: "2020-01-01T00:00:00Z".into(),
+        }
+    }
+
+    fn sample_model(id: &str, name: &str) -> AiModel {
+        AiModel {
+            id: id.into(),
+            name: name.into(),
+            channel_id: "channel".into(),
+            context_window: None,
+            response_reserve: None,
+            enabled: true,
+            synced: true,
             updated_at: "2020-01-01T00:00:00Z".into(),
         }
     }
@@ -1951,18 +2123,115 @@ mod tests {
         );
     }
 
+    /// A reference to an entity that exists on neither side is repaired, not turned into a
+    /// `_reference_integrity` conflict. That synthetic conflict could never be cleared by any
+    /// keepLocal / useRemote choice, so it used to block synchronisation forever.
     #[test]
-    fn reference_integrity_fails_on_missing_auth() {
+    fn repairs_void_references_instead_of_dead_ending_the_sync() {
         let mut local = Config::empty();
-        let mut s = sample_server("s1", "Srv");
-        s.auth_id = Some("missing-auth".into());
-        local.servers.push(s);
+        let mut server = sample_server("s1", "Srv");
+        server.auth_id = Some("missing-auth".into());
+        server.proxy_id = Some("missing-proxy".into());
+        server.jumphost_id = Some("missing-jumphost".into());
+        local.servers.push(server);
+        let mut model = sample_model("m1", "Model");
+        model.channel_id = "missing-channel".into();
+        local.ai_models.push(model);
         let remote = empty_remote();
+
         let product = merge_configs(&local, &remote, None, &[]);
-        assert!(product
-            .conflicts
+
+        assert!(
+            !product
+                .conflicts
+                .iter()
+                .any(|c| c.kind == SyncConflictKind::ReferenceIntegrity),
+            "void references must be repaired, not reported: {:?}",
+            product.conflicts
+        );
+        assert!(
+            product.error.is_none(),
+            "merge must not error: {:?}",
+            product.error
+        );
+
+        let merged_local = product.merged_local.expect("merged local");
+        let server = merged_local
+            .servers
             .iter()
-            .any(|c| c.kind == SyncConflictKind::ReferenceIntegrity));
+            .find(|s| s.id == "s1")
+            .expect("server survives the repair");
+        assert_eq!(server.auth_id, None);
+        assert_eq!(server.proxy_id, None);
+        assert_eq!(server.jumphost_id, None);
+        let model = merged_local
+            .ai_models
+            .iter()
+            .find(|m| m.id == "m1")
+            .expect("model survives the repair");
+        assert!(model.channel_id.is_empty());
+
+        // The uploaded document is repaired too, so other devices stop inheriting the dead refs.
+        let merged_remote = product.merged_remote.expect("merged remote");
+        assert!(merged_remote
+            .servers
+            .iter()
+            .all(|s| s.proxy_id.is_none() && s.auth_id.is_none()));
+
+        // And the repaired result satisfies the reference rule it previously violated.
+        assert!(validate_references(&merged_local).is_ok());
+    }
+
+    /// A reference that only resolves after the merge (the target is remote-only) must survive:
+    /// the merge adopts that entity, so the reference is not void.
+    #[test]
+    fn keeps_a_reference_that_the_merge_makes_resolvable() {
+        let mut local = Config::empty();
+        let mut server = sample_server("s1", "Srv");
+        server.proxy_id = Some("remote-proxy".into());
+        local.servers.push(server);
+
+        let mut remote = empty_remote();
+        remote.proxies.push(sample_proxy("remote-proxy"));
+
+        let product = merge_configs(&local, &remote, None, &[]);
+
+        let merged_local = product.merged_local.expect("merged local");
+        let server = merged_local
+            .servers
+            .iter()
+            .find(|s| s.id == "s1")
+            .expect("server");
+        assert_eq!(
+            server.proxy_id.as_deref(),
+            Some("remote-proxy"),
+            "a reference to a remote-only entity must be preserved"
+        );
+        assert!(validate_references(&merged_local).is_ok());
+    }
+
+    /// The stricter rule is unchanged for a target that exists but is not itself synced: clearing
+    /// that reference would break the local configuration, so the merge still refuses.
+    #[test]
+    fn still_reports_a_reference_to_a_present_but_unsynced_target() {
+        let mut local = Config::empty();
+        let mut proxy = sample_proxy("local-only-proxy");
+        proxy.synced = false;
+        local.proxies.push(proxy);
+        let mut server = sample_server("s1", "Srv");
+        server.proxy_id = Some("local-only-proxy".into());
+        local.servers.push(server);
+        let remote = empty_remote();
+
+        let product = merge_configs(&local, &remote, None, &[]);
+
+        assert!(
+            product
+                .conflicts
+                .iter()
+                .any(|c| c.kind == SyncConflictKind::ReferenceIntegrity),
+            "an unsynced target must still be reported rather than silently cleared"
+        );
     }
 
     #[test]
