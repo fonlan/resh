@@ -2,6 +2,7 @@
 
 use crate::config::types::Proxy;
 use reqwest::{redirect::Policy, Client, Proxy as ReqwestProxy};
+use std::error::Error as _;
 use std::time::Duration;
 
 /// Options for building a reqwest client with optional proxy support.
@@ -97,6 +98,112 @@ pub fn build_reqwest_proxy(proxy: &Proxy) -> Result<ReqwestProxy, String> {
     }
 
     Ok(p)
+}
+
+/// Maximum characters kept from a single cause message, and how many causes are appended.
+///
+/// Transport errors arrive from third-party crates, so their text is bounded and treated as
+/// untrusted: it is sanitized before it ever reaches a log line or a user-facing message.
+const MAX_DETAIL_CHARS: usize = 240;
+const MAX_CAUSE_DEPTH: usize = 4;
+
+/// Short category for a transport-level reqwest failure.
+fn transport_failure_label(error: &reqwest::Error) -> &'static str {
+    // A connect timeout sets both flags; report the more specific "timed out" first.
+    if error.is_timeout() {
+        "timed out"
+    } else if error.is_connect() {
+        "connection failed"
+    } else if error.is_body() {
+        "response body interrupted"
+    } else if error.is_redirect() {
+        "too many redirects"
+    } else if error.is_decode() {
+        "invalid response"
+    } else if error.is_builder() {
+        "invalid request configuration"
+    } else {
+        "request failed"
+    }
+}
+
+/// Render a URL for diagnostics with credentials and query material removed.
+///
+/// Userinfo (`user:pass@`) is dropped entirely and the query/fragment is discarded, because
+/// WebDAV/CalDAV servers routinely embed access tokens there. Scheme, host, port and path are
+/// kept: they are the parts that make a failure diagnosable.
+pub fn redact_url(url: &reqwest::Url) -> String {
+    let mut redacted = String::from(url.scheme());
+    redacted.push_str("://");
+    if let Some(host) = url.host_str() {
+        redacted.push_str(host);
+    }
+    if let Some(port) = url.port() {
+        redacted.push_str(&format!(":{port}"));
+    }
+    redacted.push_str(url.path());
+    redacted
+}
+
+/// Remove `scheme://user:pass@` userinfo from any URL embedded in third-party error text.
+fn strip_url_userinfo(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(scheme_end) = rest.find("://") {
+        let authority_start = scheme_end + 3;
+        out.push_str(&rest[..authority_start]);
+
+        let tail = &rest[authority_start..];
+        // Userinfo can only live in the authority, which ends at the first '/'.
+        let authority_end = tail.find('/').unwrap_or(tail.len());
+        match tail[..authority_end].find('@') {
+            Some(at) => out.push_str(&tail[at + 1..authority_end]),
+            None => out.push_str(&tail[..authority_end]),
+        }
+        rest = &tail[authority_end..];
+    }
+
+    out.push_str(rest);
+    out
+}
+
+/// Collapse a third-party error message into a single bounded, credential-free line.
+fn sanitize_error_text(text: &str) -> String {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    strip_url_userinfo(&collapsed)
+        .chars()
+        .take(MAX_DETAIL_CHARS)
+        .collect()
+}
+
+/// Describe a transport-level reqwest failure for logs and diagnostic messages.
+///
+/// The result is safe to log and safe to surface in the UI: it never contains credentials, proxy
+/// passwords, or URL query material. It keeps the failure category, the redacted URL, and the
+/// cause chain (`dns error`, `certificate verify failed`, `Connection refused`, ...) — exactly the
+/// information a generic "request failed" message throws away.
+pub fn describe_transport_error(error: &reqwest::Error) -> String {
+    let mut parts = vec![transport_failure_label(error).to_string()];
+    if let Some(url) = error.url() {
+        parts.push(format!("url: {}", redact_url(url)));
+    }
+
+    let mut cause = error.source();
+    let mut depth = 0;
+    while let Some(current) = cause {
+        if depth >= MAX_CAUSE_DEPTH {
+            break;
+        }
+        let text = sanitize_error_text(&current.to_string());
+        if !text.is_empty() && !parts.iter().any(|part| part.contains(&text)) {
+            parts.push(text);
+        }
+        depth += 1;
+        cause = current.source();
+    }
+
+    parts.join("; ")
 }
 
 /// Resolve a proxy by id from the current proxy list.
@@ -202,5 +309,132 @@ mod tests {
         let proxies = vec![sample_proxy("http")];
         let err = resolve_proxy_by_id(&proxies, Some("missing")).unwrap_err();
         assert!(err.contains("missing"));
+    }
+
+    #[test]
+    fn redact_url_drops_userinfo_and_query_material() {
+        let url = reqwest::Url::parse(
+            "https://alice:s3cret@dav.example.com:8443/dav/files/bob/sync.json?access_token=abc#frag",
+        )
+        .unwrap();
+
+        let redacted = redact_url(&url);
+
+        assert_eq!(
+            redacted,
+            "https://dav.example.com:8443/dav/files/bob/sync.json"
+        );
+        assert!(!redacted.contains("s3cret"));
+        assert!(!redacted.contains("alice"));
+        assert!(!redacted.contains("access_token"));
+    }
+
+    #[test]
+    fn sanitizes_inline_userinfo_and_bounds_length() {
+        let text = format!(
+            "error sending request to https://alice:s3cret@dav.example.com/dav/sync.json: {}",
+            "x".repeat(1000)
+        );
+
+        let sanitized = sanitize_error_text(&text);
+
+        assert!(!sanitized.contains("s3cret"));
+        assert!(sanitized.contains("dav.example.com/dav/sync.json"));
+        assert!(sanitized.chars().count() <= MAX_DETAIL_CHARS);
+        assert!(!sanitized.contains('\n'));
+    }
+
+    /// A closed loopback port gives a deterministic transport failure without leaving the host.
+    fn closed_loopback_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind loopback");
+        let port = listener.local_addr().expect("loopback address").port();
+        drop(listener);
+        port
+    }
+
+    #[tokio::test]
+    async fn describes_connection_failure_without_leaking_credentials() {
+        let port = closed_loopback_port();
+        let client = Client::builder().build().expect("client");
+        let url = format!("http://alice:s3cret@127.0.0.1:{port}/dav/sync.json");
+
+        let error = client.get(&url).send().await.expect_err("port is closed");
+        let detail = describe_transport_error(&error);
+
+        assert!(
+            detail.contains("connection failed"),
+            "unexpected detail: {detail}"
+        );
+        assert!(
+            detail.contains(&format!("127.0.0.1:{port}")),
+            "detail must keep the redacted target: {detail}"
+        );
+        assert!(
+            !detail.contains("s3cret") && !detail.contains("alice:"),
+            "detail leaked credentials: {detail}"
+        );
+    }
+
+    #[tokio::test]
+    async fn describes_dns_failure_and_names_the_host() {
+        // `.invalid` is reserved by RFC 6761 and can never resolve, so this stays a resolution
+        // failure whether the resolver answers NXDOMAIN or DNS is unreachable entirely.
+        let client = Client::builder().build().expect("client");
+        let error = client
+            .get("https://nonexistent-host.invalid/dav/sync.json")
+            .send()
+            .await
+            .expect_err("reserved TLD must not resolve");
+
+        let detail = describe_transport_error(&error);
+
+        assert!(
+            detail.contains("connection failed"),
+            "unexpected detail: {detail}"
+        );
+        assert!(
+            detail.contains("nonexistent-host.invalid"),
+            "detail must name the host: {detail}"
+        );
+        assert!(
+            detail.len() > "connection failed".len(),
+            "detail must carry a cause beyond the category: {detail}"
+        );
+    }
+
+    #[tokio::test]
+    async fn timeout_failures_report_timeouts() {
+        // A listener that accepts but never replies forces the configured total timeout.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let held = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            drop(stream);
+        });
+
+        let client = build_http_client(
+            None,
+            &HttpClientOptions {
+                timeout: Duration::from_millis(200),
+                connect_timeout: Duration::from_millis(200),
+                ..HttpClientOptions::default()
+            },
+        )
+        .expect("client");
+
+        let error = client
+            .get(format!("http://127.0.0.1:{port}/dav/sync.json"))
+            .send()
+            .await
+            .expect_err("server never replies");
+        let detail = describe_transport_error(&error);
+
+        assert!(
+            detail.starts_with("timed out"),
+            "unexpected detail: {detail}"
+        );
+
+        held.abort();
     }
 }

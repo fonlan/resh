@@ -23,6 +23,18 @@ struct SyncSchemaSentinel {
     sync_schema: u32,
 }
 
+/// Render a WebDAV failure for logs and user-facing messages without dropping the transport cause.
+///
+/// `WebDavError`'s `Display` stays generic on purpose (it must never carry credentials), so the
+/// sanitized cause is appended here instead. Without this, every transport failure — DNS, TLS,
+/// dead proxy, timeout, truncated body — collapses into the same useless sentence.
+fn describe_webdav_failure(error: &WebDavError) -> String {
+    match error.detail() {
+        Some(detail) if !detail.is_empty() => format!("{error} ({detail})"),
+        _ => error.to_string(),
+    }
+}
+
 pub struct SyncManager {
     client: WebDAVClient,
     account_key: String,
@@ -30,18 +42,20 @@ pub struct SyncManager {
 }
 
 impl SyncManager {
+    /// Construct a sync manager, failing when the shared HTTP client cannot be built (for example
+    /// an unsupported or malformed proxy configuration).
     pub fn new(
         url: String,
         username: String,
         password: String,
         proxy: Option<crate::config::types::Proxy>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let account_key = sync_account_key(&url, &username);
-        Self {
-            client: WebDAVClient::new(url, username, password, proxy),
+        Ok(Self {
+            client: WebDAVClient::new(url, username, password, proxy)?,
             account_key,
             state_store: None,
-        }
+        })
     }
 
     /// Attach local baseline store (app data dir). Required for three-way sync correctness.
@@ -155,11 +169,17 @@ impl SyncManager {
                     (SyncConfig::empty(local_config.version.clone()), false, None)
                 }
                 Err(error) => {
-                    tracing::error!("Failed to download sync.json");
+                    tracing::error!(
+                        "Failed to download sync.json: {}",
+                        describe_webdav_failure(&error)
+                    );
                     return Ok(SyncOutcome::Failed {
                         error: SyncError {
                             kind: SyncErrorKind::Network,
-                            message: format!("Sync download failed: {}", error),
+                            message: format!(
+                                "Sync download failed: {}",
+                                describe_webdav_failure(&error)
+                            ),
                         },
                     });
                 }
@@ -205,7 +225,10 @@ impl SyncManager {
                     return Ok(SyncOutcome::Failed {
                         error: SyncError {
                             kind: SyncErrorKind::Network,
-                            message: format!("Could not read remote sync schema sentinel: {error}"),
+                            message: format!(
+                                "Could not read remote sync schema sentinel: {}",
+                                describe_webdav_failure(&error)
+                            ),
                         },
                     });
                 }
@@ -372,11 +395,17 @@ impl SyncManager {
                 });
             }
             Err(error) => {
-                tracing::error!("Failed to upload sync.json");
+                tracing::error!(
+                    "Failed to upload sync.json: {}",
+                    describe_webdav_failure(&error)
+                );
                 return Ok(SyncOutcome::Failed {
                     error: SyncError {
                         kind: SyncErrorKind::Network,
-                        message: format!("Failed to upload sync.json: {}", error),
+                        message: format!(
+                            "Failed to upload sync.json: {}",
+                            describe_webdav_failure(&error)
+                        ),
                     },
                 });
             }
@@ -405,7 +434,8 @@ impl SyncManager {
                         error: SyncError {
                             kind: SyncErrorKind::Network,
                             message: format!(
-                                "Could not persist remote sync schema sentinel: {error}"
+                                "Could not persist remote sync schema sentinel: {}",
+                                describe_webdav_failure(&error)
                             ),
                         },
                     });
@@ -526,6 +556,78 @@ mod tests {
         time::{timeout, Duration},
     };
 
+    #[tokio::test]
+    async fn sync_download_failure_reports_the_transport_cause() {
+        // A closed loopback port makes the GET fail before any HTTP status exists, which is the
+        // exact case that used to collapse into a bare "WebDAV request failed".
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            drop(listener);
+            port
+        };
+        let state = tempdir().unwrap();
+        let manager = SyncManager::new(
+            format!("http://127.0.0.1:{port}"),
+            "user".into(),
+            "password".into(),
+            None,
+        )
+        .unwrap()
+        .with_state_store(state.path().to_path_buf());
+
+        let mut config = config_with_server("Local");
+        let outcome = manager.sync(&mut config, vec![]).await.unwrap();
+
+        let SyncOutcome::Failed { error } = outcome else {
+            panic!("expected a failed sync, got {outcome:?}");
+        };
+        assert_eq!(error.kind, SyncErrorKind::Network);
+        assert!(
+            error.message.contains("connection failed"),
+            "message must keep the transport cause: {}",
+            error.message
+        );
+        assert!(
+            error.message.contains(&format!("127.0.0.1:{port}")),
+            "message must name the redacted target: {}",
+            error.message
+        );
+        // The WebDAV client authenticates with basic_auth; that password must never appear.
+        assert!(
+            !error.message.contains("password"),
+            "message leaked credentials: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn webdav_failure_description_keeps_the_transport_cause() {
+        let transport = WebDavError::Request(
+            "connection failed; url: http://127.0.0.1:9/sync.json".to_string(),
+        );
+        assert_eq!(
+            describe_webdav_failure(&transport),
+            "WebDAV request failed (connection failed; url: http://127.0.0.1:9/sync.json)"
+        );
+
+        // HTTP-status and precondition failures carry no cause; their text must be unchanged.
+        assert_eq!(
+            describe_webdav_failure(&WebDavError::Http(reqwest::StatusCode::UNAUTHORIZED)),
+            "WebDAV request failed: HTTP 401 Unauthorized"
+        );
+        assert_eq!(
+            describe_webdav_failure(&WebDavError::PreconditionFailed),
+            "WebDAV resource changed concurrently"
+        );
+
+        // An empty captured cause must not degrade into a dangling pair of parentheses.
+        assert_eq!(
+            describe_webdav_failure(&WebDavError::Request(String::new())),
+            "WebDAV request failed"
+        );
+    }
+
     #[test]
     fn test_deserialize_sync_config_robustness() {
         let json_no_date = r#"{
@@ -606,6 +708,7 @@ mod tests {
             "password".to_string(),
             None,
         )
+        .unwrap()
         .with_state_store(state_dir.path().to_path_buf());
         let mut local = Config::empty();
 
@@ -655,6 +758,7 @@ mod tests {
             "password".to_string(),
             None,
         )
+        .unwrap()
         .with_state_store(state_dir.path().to_path_buf());
         let mut local = Config::empty();
 
@@ -693,6 +797,7 @@ mod tests {
             "password".to_string(),
             None,
         )
+        .unwrap()
         .with_state_store(state_dir.path().to_path_buf());
         let mut local = Config::empty();
 
@@ -736,6 +841,7 @@ mod tests {
             "password".to_string(),
             None,
         )
+        .unwrap()
         .with_state_store(state_dir.path().to_path_buf());
         let mut baseline = AccountSyncBaseline::default();
         baseline.sync_schema = SYNC_SCHEMA_VERSION;
@@ -785,6 +891,7 @@ mod tests {
             "password".to_string(),
             None,
         )
+        .unwrap()
         .with_state_store(state_dir.path().to_path_buf());
 
         let outcome = manager.sync(&mut Config::empty(), vec![]).await.unwrap();
@@ -834,8 +941,10 @@ mod tests {
         let device_b_state = tempdir().unwrap();
         let base_url = format!("http://127.0.0.1:{port}");
         let manager_a = SyncManager::new(base_url.clone(), "user".into(), "password".into(), None)
+            .unwrap()
             .with_state_store(device_a_state.path().to_path_buf());
         let manager_b = SyncManager::new(base_url, "user".into(), "password".into(), None)
+            .unwrap()
             .with_state_store(device_b_state.path().to_path_buf());
         let baseline = server_baseline();
         SyncStateStore::new(device_a_state.path())

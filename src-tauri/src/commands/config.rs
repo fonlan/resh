@@ -322,7 +322,7 @@ pub async fn save_config(
             config.general.webdav.username.clone(),
             config.general.webdav.password.clone(),
             proxy,
-        )
+        )?
         .with_state_store(state.config_manager.app_data_dir().to_path_buf());
 
         let app_state = state.inner().clone();
@@ -518,7 +518,7 @@ pub async fn trigger_sync(
                 config.general.webdav.username.clone(),
                 config.general.webdav.password.clone(),
                 proxy,
-            )
+            )?
             .with_state_store(state.config_manager.app_data_dir().to_path_buf());
             let snapshot = serde_json::to_vec(&*config)
                 .map_err(|error| format!("Failed to snapshot config for sync: {error}"))?;
@@ -642,7 +642,7 @@ pub async fn resolve_sync_conflicts(
                 config.general.webdav.username.clone(),
                 config.general.webdav.password.clone(),
                 proxy,
-            )
+            )?
             .with_state_store(state.config_manager.app_data_dir().to_path_buf());
             let snapshot = serde_json::to_vec(&*config)
                 .map_err(|error| format!("Failed to snapshot config for sync resolution: {error}"))?;
